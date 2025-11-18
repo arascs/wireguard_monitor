@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WireGuard VPN Manager</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .peer-item {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        .peer-item.disabled {
+            opacity: 0.6;
+            background-color: #f0f0f0;
+        }
+        .peer-header {
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .peer-buttons {
+            margin-top: 10px;
+        }
+        .peer-buttons button {
+            margin: 5px;
+            padding: 8px 15px;
+            cursor: pointer;
+        }
+        .peer-info {
+            display: none;
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #fff;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+        .peer-edit-form {
+            display: none;
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #fff;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+        .peer-edit-form input {
+            width: 100%;
+            margin: 5px 0;
+            padding: 5px;
+        }
+        .config-form {
+            display: none;
+            margin-top: 10px;
+        }
+        .config-form.active {
+            display: block;
+        }
+        .interface-info {
+            padding: 10px;
+            margin: 10px 0;
+            background-color: #e8f5e9;
+            border: 1px solid #4caf50;
+            border-radius: 5px;
+        }
+        .interface-info h4 {
+            margin-top: 0;
+        }
+        label {
+            display: block;
+            margin-top: 10px;
+        }
+        input[type="text"], input[type="number"] {
+            width: 300px;
+            padding: 5px;
+        }
+        hr {
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>WireGuard VPN Manager</h1>
+    
+    <div id="interface-section">
+        <h2>1. Choose Interface</h2>
+        <input type="text" id="interface-input" value="wg0">
+        <button onclick="chooseInterface()">Set Interface</button>
+        <p>Current interface: <span id="current-interface">wg0</span></p>
+    </div>
+
+    <hr>
+
+    <div id="keys-section">
+        <h2>2. Generate Keys</h2>
+        <button onclick="generateKeys()">Generate Keys</button>
+        <div id="keys-output"></div>
+    </div>
+
+    <hr>
+
+    <div id="configure-section">
+        <h2>3. Configure Interface</h2>
+        <div id="interface-info-display"></div>
+        <button onclick="toggleConfigInterfaceForm()" id="config-interface-btn">Configure Interface</button>
+        <div id="configure-form" class="config-form">
+            <label>Address (e.g. 10.0.0.2/24):</label><br>
+            <input type="text" id="address"><br>
+            
+            <label>Listen Port:</label><br>
+            <input type="text" id="listenPort" value="51820"><br>
+            
+            <label>DNS server:</label><br>
+            <input type="text" id="dns"><br>
+            
+            <label>Table:</label><br>
+            <input type="text" id="table"><br>
+            
+            <label>PreUp command:</label><br>
+            <input type="text" id="preUp"><br>
+            
+            <label>PostUp command:</label><br>
+            <input type="text" id="postUp"><br>
+            
+            <label>PreDown command:</label><br>
+            <input type="text" id="preDown"><br>
+            
+            <label>PostDown command:</label><br>
+            <input type="text" id="postDown"><br><br>
+            
+            <button onclick="configureInterface()">Save Configuration</button>
+            <button onclick="toggleConfigInterfaceForm()">Cancel</button>
+            <div id="configure-output"></div>
+        </div>
+    </div>
+
+    <hr>
+
+    <div id="peer-section">
+        <h2>4. Config Peers</h2>
+        
+        <button onclick="toggleAddPeerForm()" id="add-peer-btn">Add New Peer</button>
+        <div id="add-peer-form" class="config-form">
+            <h3>Add New Peer</h3>
+            <label>Peer Public Key:</label><br>
+            <input type="text" id="peer-publicKey"><br>
+            
+            <label>Endpoint (IP:Port):</label><br>
+            <input type="text" id="peer-endpoint"><br>
+            
+            <label>Allowed IPs:</label><br>
+            <input type="text" id="peer-allowedIPs" value="0.0.0.0/0"><br>
+            
+            <label>Persistent Keepalive (seconds):</label><br>
+            <input type="text" id="peer-keepalive" value="25"><br>
+            
+            <label><input type="checkbox" id="peer-generatePsk"> Generate Preshared Key</label><br><br>
+            
+            <button onclick="addPeer()">Add Peer</button>
+            <button onclick="toggleAddPeerForm()">Cancel</button>
+            <div id="peer-output"></div>
+        </div>
+
+        <h3>Current Peers</h3>
+        <div id="peers-list"></div>
+        
+        <h3>Configuration Preview</h3>
+        <button onclick="viewConfig()">Refresh View</button>
+        <button onclick="saveConfig()">Save Configuration</button>
+        <button onclick="reloadConfig()">Reload from File</button>
+        <pre id="config-output"></pre>
+    </div>
+
+    <hr>
+
+    <div id="vpn-section">
+        <h2>5. VPN Control</h2>
+        <button onclick="connectVPN()">Connect VPN</button>
+        <button onclick="disconnectVPN()">Disconnect VPN</button>
+        <div id="vpn-output"></div>
+    </div>
+
+    <script>
+        async function chooseInterface() {
+            const interface_name = document.getElementById('interface-input').value;
+            try {
+                const response = await fetch('/api/interface', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ interface: interface_name })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('current-interface').textContent = data.interface;
+                    // Update config with loaded data
+                    if (data.config) {
+                        updateInterfaceDisplay(data.config.interface);
+                        loadPeersFromConfig(data.config);
+                        viewConfigFromData(data.config);
+                    }
+                    alert('Interface set to: ' + data.interface);
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        async function generateKeys() {
+            try {
+                const response = await fetch('/api/generate-keys', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('keys-output').innerHTML = 
+                        '<p><strong>Success!</strong></p>' +
+                        '<p>Private Key: ' + data.privateKey + '</p>' +
+                        '<p>Public Key: ' + data.publicKey + '</p>';
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        function toggleConfigInterfaceForm() {
+            const form = document.getElementById('configure-form');
+            const btn = document.getElementById('config-interface-btn');
+            if (form.classList.contains('active')) {
+                form.classList.remove('active');
+                btn.textContent = 'Configure Interface';
+            } else {
+                form.classList.add('active');
+                btn.textContent = 'Hide Form';
+            }
+        }
+
+        function updateInterfaceDisplay(interfaceConfig) {
+            const infoDiv = document.getElementById('interface-info-display');
+            if (interfaceConfig && (interfaceConfig.address || interfaceConfig.privateKey)) {
+                infoDiv.innerHTML = `
+                    <div class="interface-info">
+                        <h4>Current Interface Configuration</h4>
+                        ${interfaceConfig.privateKey ? '<p><strong>Private Key:</strong> ' + interfaceConfig.privateKey.substring(0, 30) + '...' + '</p>' : ''}
+                        ${interfaceConfig.publicKey ? '<p><strong>Public Key:</strong> ' + interfaceConfig.publicKey.substring(0, 30) + '...' + '</p>' : ''}
+                        <p><strong>Address:</strong> ${interfaceConfig.address || 'Not set'}</p>
+                        ${interfaceConfig.listenPort ? '<p><strong>Listen Port:</strong> ' + interfaceConfig.listenPort + '</p>' : ''}
+                        ${interfaceConfig.dns ? '<p><strong>DNS:</strong> ' + interfaceConfig.dns + '</p>' : ''}
+                        ${interfaceConfig.mtu ? '<p><strong>MTU:</strong> ' + interfaceConfig.mtu + '</p>' : ''}
+                        ${interfaceConfig.preUp ? '<p><strong>PreUp:</strong> ' + interfaceConfig.preUp + '</p>' : ''}
+                        ${interfaceConfig.postUp ? '<p><strong>PostUp:</strong> ' + interfaceConfig.postUp + '</p>' : ''}
+                        ${interfaceConfig.preDown ? '<p><strong>PreDown:</strong> ' + interfaceConfig.preDown + '</p>' : ''}
+                        ${interfaceConfig.postDown ? '<p><strong>PostDown:</strong> ' + interfaceConfig.postDown + '</p>' : ''}
+                    </div>
+                `;
+            } else {
+                infoDiv.innerHTML = '<p>No interface configuration found.</p>';
+            }
+        }
+
+        async function configureInterface() {
+            const interfaceConfig = {
+                address: document.getElementById('address').value,
+                listenPort: document.getElementById('listenPort').value,
+                dns: document.getElementById('dns').value,
+                table: document.getElementById('table').value,
+                preUp: document.getElementById('preUp').value,
+                postUp: document.getElementById('postUp').value,
+                preDown: document.getElementById('preDown').value,
+                postDown: document.getElementById('postDown').value
+            };
+            
+            try {
+                const response = await fetch('/api/configure-interface', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(interfaceConfig)
+                });
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('configure-output').innerHTML = '<p><strong>Interface configured!</strong></p>';
+                    updateInterfaceDisplay(data.config.interface);
+                    // Hide form after successful config
+                    setTimeout(() => {
+                        toggleConfigInterfaceForm();
+                        viewConfig();
+                    }, 1000);
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        function toggleAddPeerForm() {
+            const form = document.getElementById('add-peer-form');
+            const btn = document.getElementById('add-peer-btn');
+            if (form.classList.contains('active')) {
+                form.classList.remove('active');
+                btn.textContent = 'Add New Peer';
+            } else {
+                form.classList.add('active');
+                btn.textContent = 'Hide Form';
+            }
+        }
+
+        async function addPeer() {
+            const peer = {
+                publicKey: document.getElementById('peer-publicKey').value,
+                endpoint: document.getElementById('peer-endpoint').value,
+                allowedIPs: document.getElementById('peer-allowedIPs').value,
+                persistentKeepalive: document.getElementById('peer-keepalive').value,
+                generatePsk: document.getElementById('peer-generatePsk').checked
+            };
+            
+            try {
+                const response = await fetch('/api/add-peer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(peer)
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('peer-output').innerHTML = '<p><strong>Peer added!</strong></p>';
+                    // Clear form
+                    document.getElementById('peer-publicKey').value = '';
+                    document.getElementById('peer-endpoint').value = '';
+                    document.getElementById('peer-allowedIPs').value = '0.0.0.0/0';
+                    document.getElementById('peer-keepalive').value = '25';
+                    document.getElementById('peer-generatePsk').checked = false;
+                    // Hide form after successful add
+                    setTimeout(() => {
+                        toggleAddPeerForm();
+                        loadPeers();
+                        viewConfig();
+                    }, 1000);
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        function loadPeersFromConfig(configData) {
+            const peersList = document.getElementById('peers-list');
+            peersList.innerHTML = '';
+            
+            if (!configData.peers || configData.peers.length === 0) {
+                peersList.innerHTML = '<p>No peers added yet.</p>';
+                return;
+            }
+            
+            configData.peers.forEach((peer, idx) => {
+                        const peerDiv = document.createElement('div');
+                        peerDiv.className = 'peer-item' + (peer.enabled === false ? ' disabled' : '');
+                        peerDiv.id = `peer-${idx}`;
+                        
+                        const statusText = peer.enabled === false ? ' (Disabled)' : ' (Enabled)';
+                        peerDiv.innerHTML = `
+                            <div class="peer-header">Peer ${idx}${statusText}</div>
+                            <div class="peer-buttons">
+                                <button onclick="viewPeerInfo(${idx})">View Info</button>
+                                <button onclick="editPeer(${idx})">Edit</button>
+                                <button onclick="deletePeer(${idx})">Delete</button>
+                                <button onclick="enablePeer(${idx})" ${peer.enabled !== false ? 'disabled' : ''}>Enable</button>
+                                <button onclick="disablePeer(${idx})" ${peer.enabled === false ? 'disabled' : ''}>Disable</button>
+                            </div>
+                            <div class="peer-info" id="peer-info-${idx}">
+                                <strong>Public Key:</strong> ${peer.publicKey || 'NOT SET'}<br>
+                                <strong>Endpoint:</strong> ${peer.endpoint || 'NOT SET'}<br>
+                                <strong>Allowed IPs:</strong> ${peer.allowedIPs || 'NOT SET'}<br>
+                                <strong>Persistent Keepalive:</strong> ${peer.persistentKeepalive || 'NOT SET'}<br>
+                                ${peer.presharedKey ? '<strong>Preshared Key:</strong> ***' + peer.presharedKey.slice(-8) + '<br>' : ''}
+                            </div>
+                            <div class="peer-edit-form" id="peer-edit-${idx}">
+                                <label>Public Key:</label>
+                                <input type="text" id="edit-publicKey-${idx}" value="${peer.publicKey || ''}">
+                                <label>Endpoint:</label>
+                                <input type="text" id="edit-endpoint-${idx}" value="${peer.endpoint || ''}">
+                                <label>Allowed IPs:</label>
+                                <input type="text" id="edit-allowedIPs-${idx}" value="${peer.allowedIPs || ''}">
+                                <label>Persistent Keepalive:</label>
+                                <input type="text" id="edit-keepalive-${idx}" value="${peer.persistentKeepalive || ''}">
+                                <button onclick="savePeerEdit(${idx})">Save</button>
+                                <button onclick="cancelPeerEdit(${idx})">Cancel</button>
+                            </div>
+                        `;
+                        peersList.appendChild(peerDiv);
+            });
+        }
+
+        async function loadPeers() {
+            try {
+                const response = await fetch('/api/config');
+                const data = await response.json();
+                if (data.success) {
+                    loadPeersFromConfig(data.config);
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        function viewPeerInfo(index) {
+            const infoDiv = document.getElementById(`peer-info-${index}`);
+            const editDiv = document.getElementById(`peer-edit-${index}`);
+            if (infoDiv.style.display === 'block') {
+                infoDiv.style.display = 'none';
+            } else {
+                infoDiv.style.display = 'block';
+                editDiv.style.display = 'none';
+            }
+        }
+
+        function editPeer(index) {
+            const infoDiv = document.getElementById(`peer-info-${index}`);
+            const editDiv = document.getElementById(`peer-edit-${index}`);
+            if (editDiv.style.display === 'block') {
+                editDiv.style.display = 'none';
+            } else {
+                editDiv.style.display = 'block';
+                infoDiv.style.display = 'none';
+            }
+        }
+
+        function cancelPeerEdit(index) {
+            document.getElementById(`peer-edit-${index}`).style.display = 'none';
+            loadPeers();
+        }
+
+        async function savePeerEdit(index) {
+            const peer = {
+                publicKey: document.getElementById(`edit-publicKey-${index}`).value,
+                endpoint: document.getElementById(`edit-endpoint-${index}`).value,
+                allowedIPs: document.getElementById(`edit-allowedIPs-${index}`).value,
+                persistentKeepalive: document.getElementById(`edit-keepalive-${index}`).value
+            };
+            
+            try {
+                const response = await fetch(`/api/edit-peer/${index}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(peer)
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    loadPeers();
+                    viewConfig();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        async function deletePeer(index) {
+            if (!confirm('Are you sure you want to delete this peer?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/delete-peer/${index}`, {
+                    method: 'DELETE'
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    loadPeers();
+                    viewConfig();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        async function enablePeer(index) {
+            try {
+                const response = await fetch(`/api/enable-peer/${index}`, {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    loadPeers();
+                    viewConfig();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        async function disablePeer(index) {
+            try {
+                const response = await fetch(`/api/disable-peer/${index}`, {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    loadPeers();
+                    viewConfig();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        function viewConfigFromData(configData) {
+            let output = '[Interface]\n';
+            output += 'PrivateKey = ' + (configData.interface.privateKey || '') + '\n';
+            output += 'Address = ' + (configData.interface.address || '') + '\n';
+            if (configData.interface.dns) output += 'DNS = ' + configData.interface.dns + '\n';
+            if (configData.interface.listenPort) output += 'ListenPort = ' + configData.interface.listenPort + '\n';
+            if (configData.interface.mtu) output += 'MTU = ' + configData.interface.mtu + '\n';
+            if (configData.interface.preUp) output += 'PreUp = ' + configData.interface.preUp + '\n';
+            if (configData.interface.postUp) output += 'PostUp = ' + configData.interface.postUp + '\n';
+            if (configData.interface.preDown) output += 'PreDown = ' + configData.interface.preDown + '\n';
+            if (configData.interface.postDown) output += 'PostDown = ' + configData.interface.postDown + '\n';
+            
+            if (configData.peers) {
+                configData.peers.forEach((peer, idx) => {
+                    const isDisabled = peer.enabled === false;
+                    output += '\n';
+                    if (isDisabled) {
+                        output += '# [Peer]\n';
+                    } else {
+                        output += '[Peer]\n';
+                    }
+                    
+                    const prefix = isDisabled ? '# ' : '';
+                    output += prefix + 'PublicKey = ' + (peer.publicKey || 'NOT SET') + '\n';
+                    if (peer.presharedKey) {
+                        output += prefix + 'PresharedKey = ***' + peer.presharedKey.slice(-8) + '\n';
+                    }
+                    output += prefix + 'Endpoint = ' + (peer.endpoint || 'NOT SET') + '\n';
+                    output += prefix + 'AllowedIPs = ' + (peer.allowedIPs || 'NOT SET') + '\n';
+                    if (peer.persistentKeepalive) {
+                        output += prefix + 'PersistentKeepalive = ' + peer.persistentKeepalive + '\n';
+                    }
+                });
+            }
+            
+            document.getElementById('config-output').textContent = output;
+        }
+
+        async function viewConfig() {
+            try {
+                const response = await fetch('/api/config');
+                const data = await response.json();
+                if (data.success) {
+                    viewConfigFromData(data.config);
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        async function reloadConfig() {
+            try {
+                const response = await fetch('/api/reload-config', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    if (data.loaded) {
+                        updateInterfaceDisplay(data.config.interface);
+                        loadPeersFromConfig(data.config);
+                        viewConfigFromData(data.config);
+                        // Populate form fields if interface is configured
+                        if (data.config.interface.address) {
+                            document.getElementById('address').value = data.config.interface.address || '';
+                            document.getElementById('listenPort').value = data.config.interface.listenPort || '51820';
+                            document.getElementById('dns').value = data.config.interface.dns || '';
+                            document.getElementById('table').value = data.config.interface.table || '';
+                            document.getElementById('preUp').value = data.config.interface.preUp || '';
+                            document.getElementById('postUp').value = data.config.interface.postUp || '';
+                            document.getElementById('preDown').value = data.config.interface.preDown || '';
+                            document.getElementById('postDown').value = data.config.interface.postDown || '';
+                        }
+                        alert('Configuration reloaded from file!');
+                    } else {
+                        alert('No configuration file found.');
+                    }
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        async function saveConfig() {
+            try {
+                const response = await fetch('/api/save-config', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    alert('Configuration saved successfully!');
+                    viewConfig();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        async function connectVPN() {
+            try {
+                const response = await fetch('/api/connect', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('vpn-output').innerHTML = '<p><strong>VPN connected!</strong></p>';
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        async function disconnectVPN() {
+            try {
+                const response = await fetch('/api/disconnect', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('vpn-output').innerHTML = '<p><strong>VPN disconnected!</strong></p>';
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        // Load peers and config on page load
+        window.onload = async function() {
+            try {
+                // Get current interface first
+                const interfaceResponse = await fetch('/api/interface');
+                const interfaceData = await interfaceResponse.json();
+                if (interfaceData.interface) {
+                    document.getElementById('current-interface').textContent = interfaceData.interface;
+                    document.getElementById('interface-input').value = interfaceData.interface;
+                }
+                
+                // Reload config from file first (to sync with external changes)
+                const reloadResponse = await fetch('/api/reload-config', { method: 'POST' });
+                const reloadData = await reloadResponse.json();
+                
+                if (reloadData.success && reloadData.loaded) {
+                    // Use reloaded config
+                    updateInterfaceDisplay(reloadData.config.interface);
+                    // Populate form fields if interface is configured
+                    if (reloadData.config.interface.address) {
+                        document.getElementById('address').value = reloadData.config.interface.address || '';
+                        document.getElementById('listenPort').value = reloadData.config.interface.listenPort || '51820';
+                        document.getElementById('dns').value = reloadData.config.interface.dns || '';
+                        document.getElementById('table').value = reloadData.config.interface.table || '';
+                        document.getElementById('preUp').value = reloadData.config.interface.preUp || '';
+                        document.getElementById('postUp').value = reloadData.config.interface.postUp || '';
+                        document.getElementById('preDown').value = reloadData.config.interface.preDown || '';
+                        document.getElementById('postDown').value = reloadData.config.interface.postDown || '';
+                    }
+                    loadPeersFromConfig(reloadData.config);
+                    viewConfigFromData(reloadData.config);
+                } else {
+                    // Fallback: Load from memory if file doesn't exist
+                    const response = await fetch('/api/config');
+                    const data = await response.json();
+                    if (data.success) {
+                        updateInterfaceDisplay(data.config.interface);
+                        // Populate form fields if interface is configured
+                        if (data.config.interface.address) {
+                            document.getElementById('address').value = data.config.interface.address || '';
+                            document.getElementById('listenPort').value = data.config.interface.listenPort || '51820';
+                            document.getElementById('dns').value = data.config.interface.dns || '';
+                            document.getElementById('table').value = data.config.interface.table || '';
+                            document.getElementById('preUp').value = data.config.interface.preUp || '';
+                            document.getElementById('postUp').value = data.config.interface.postUp || '';
+                            document.getElementById('preDown').value = data.config.interface.preDown || '';
+                            document.getElementById('postDown').value = data.config.interface.postDown || '';
+                        }
+                        loadPeersFromConfig(data.config);
+                        viewConfigFromData(data.config);
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading initial config:', error);
+            }
+        };
+    </script>
+</body>
+</html>
+
