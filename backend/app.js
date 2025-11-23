@@ -69,6 +69,7 @@ function loadConfigFromFile() {
     let section = null;
     let currentPeer = null;
     let peerEnabled = true;
+    let peerName = '';
     
     // Reset config
     config = {
@@ -109,9 +110,11 @@ function loadConfigFromFile() {
       if (cleanLine === '[Interface]') {
         section = 'interface';
         peerEnabled = true;
+        peerName = '';
       } else if (cleanLine === '[Peer]') {
         section = 'peer';
         currentPeer = {
+          name: '',
           publicKey: '',
           presharedKey: '',
           endpoint: '',
@@ -120,6 +123,7 @@ function loadConfigFromFile() {
           enabled: !isCommented
         };
         peerEnabled = !isCommented;
+        peerName = '';
         config.peers.push(currentPeer);
       } else if (cleanLine.includes('=')) {
         const equalIndex = cleanLine.indexOf('=');
@@ -132,6 +136,12 @@ function loadConfigFromFile() {
         }
         
         const lowerKey = key.toLowerCase();
+        
+        // Check for Name metadata (always in comments)
+        if (isCommented && lowerKey === 'name' && section === 'peer' && currentPeer) {
+          currentPeer.name = value;
+          continue;
+        }
         
         if (section === 'interface') {
           // Map lowercase keys to camelCase property names
@@ -214,11 +224,23 @@ app.get('/api/interface', (req, res) => {
 // Generate keys
 app.post('/api/generate-keys', (req, res) => {
   try {
+    // Check if private key already exists and is valid
+    const hasExistingKey = config.interface.privateKey && config.interface.privateKey.length > 0;
+    const forceGenerate = req.body.force === true;
+    
+    if (hasExistingKey && !forceGenerate) {
+      return res.json({ 
+        success: false, 
+        needConfirmation: true,
+        message: 'Private key đã được cấu hình, bạn có chắc bạn muốn đổi key?'
+      });
+    }
+  
     const privateKey = run('wg genkey').trim();
-    run(`echo ${privateKey} >> ${CONFIG_DIR}/${INTERFACE}.key`);
+    //run(`echo ${privateKey} >> ${CONFIG_DIR}/${INTERFACE}.key`);
     
     const publicKey = run(`echo "${privateKey}" | wg pubkey`).trim();
-    run(`echo ${publicKey} >> ${CONFIG_DIR}/${INTERFACE}.pub`);
+    //run(`echo ${publicKey} >> ${CONFIG_DIR}/${INTERFACE}.pub`);
     
     config.interface.privateKey = privateKey;
     config.interface.publicKey = publicKey;
@@ -251,16 +273,6 @@ app.post('/api/configure-interface', (req, res) => {
   }
 });
 
-// Reload configuration from file
-app.post('/api/reload-config', (req, res) => {
-  try {
-    const loaded = loadConfigFromFile();
-    res.json({ success: true, loaded, config });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
 // Add peer
 app.post('/api/add-peer', (req, res) => {
   try {
@@ -273,6 +285,7 @@ app.post('/api/add-peer', (req, res) => {
     }
     
     const peer = {
+      name: req.body.name || '',
       publicKey: req.body.publicKey || '',
       presharedKey: req.body.presharedKey || '',
       endpoint: req.body.endpoint || '',
@@ -298,6 +311,7 @@ app.put('/api/edit-peer/:index', (req, res) => {
     const idx = parseInt(req.params.index);
     if (idx >= 0 && idx < config.peers.length) {
       const peer = config.peers[idx];
+      peer.name = req.body.name !== undefined ? req.body.name : peer.name;
       peer.publicKey = req.body.publicKey !== undefined ? req.body.publicKey : peer.publicKey;
       peer.endpoint = req.body.endpoint !== undefined ? req.body.endpoint : peer.endpoint;
       peer.allowedIPs = req.body.allowedIPs !== undefined ? req.body.allowedIPs : peer.allowedIPs;
@@ -396,6 +410,12 @@ app.post('/api/save-config', (req, res) => {
     config.peers.forEach(peer => {
       const isDisabled = peer.enabled === false;
       content += '\n';
+      
+      // Add name as comment if exists
+      if (peer.name) {
+        content += `# Name = ${peer.name}\n`;
+      }
+      
       if (isDisabled) {
         content += '# [Peer]\n';
       } else {
@@ -471,4 +491,3 @@ app.listen(PORT, () => {
   loadConfigFromFile();
   console.log(`WireGuard VPN Manager running on http://localhost:${PORT}`);
 });
-
