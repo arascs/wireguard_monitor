@@ -9,6 +9,33 @@
             margin: 0 auto;
             padding: 20px;
         }
+        .key-status-banner {
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+            font-weight: bold;
+            text-align: center;
+        }
+        .key-status-banner.valid {
+            background-color: #e8f5e9;
+            border: 2px solid #4caf50;
+            color: #2e7d32;
+        }
+        .key-status-banner.warning {
+            background-color: #fff3e0;
+            border: 2px solid #ff9800;
+            color: #e65100;
+        }
+        .key-status-banner.expired {
+            background-color: #ffebee;
+            border: 2px solid #f44336;
+            color: #c62828;
+        }
+        .key-status-banner.no-key {
+            background-color: #e3f2fd;
+            border: 2px solid #2196f3;
+            color: #1565c0;
+        }
         .search-box {
             margin: 15px 0;
             padding: 10px;
@@ -104,6 +131,7 @@
 </head>
 <body>
     <h1>WireGuard VPN Manager</h1>
+    <div id="key-status-banner" class="key-status-banner"></div>
     
     <hr>
     
@@ -209,6 +237,104 @@
     </div>
 
     <script>
+        let keyExpired = false;
+        let checkKeyStatusInterval = null;
+
+        // Check key status from server
+        async function checkKeyStatus() {
+            try {
+                const response = await fetch('/api/key-status');
+                const data = await response.json();
+                
+                if (data.success) {
+                    keyExpired = data.expired;
+                    updateKeyStatusBanner(data);
+                    
+                    if (keyExpired) {
+                        disableAllFunctions();
+                    } else {
+                        enableAllFunctions();
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking key status:', error);
+            }
+        }
+
+        // Update key status banner
+        function updateKeyStatusBanner(statusData) {
+            const banner = document.getElementById('key-status-banner');
+            
+            if (!statusData.keyCreationDate) {
+                banner.className = 'key-status-banner no-key';
+                banner.innerHTML = '⚠️ Chưa có key. Vui lòng tạo key mới để sử dụng.';
+                return;
+            }
+            
+            if (statusData.expired) {
+                banner.className = 'key-status-banner expired';
+                banner.innerHTML = '🔴 KEY ĐÃ HẾT HẠN! VPN đã bị ngắt kết nối. Vui lòng tạo key mới.';
+            } else if (statusData.remainingDays !== null) {
+                if (statusData.remainingDays <= 7) {
+                    banner.className = 'key-status-banner warning';
+                    banner.innerHTML = `⚠️ Cảnh báo: Key sẽ hết hạn sau ${statusData.remainingDays} ngày. Vui lòng chuẩn bị tạo key mới.`;
+                } else {
+                    banner.className = 'key-status-banner valid';
+                    banner.innerHTML = `✅ Key hợp lệ. Còn ${statusData.remainingDays} ngày (Hết hạn: ${statusData.keyExpiryDays} ngày kể từ ngày tạo)`;
+                }
+            }
+        }
+
+        // Disable all functions except interface selection and key generation
+        function disableAllFunctions() {
+            // Disable VPN control buttons
+            document.querySelectorAll('#vpn-section button').forEach(btn => {
+                btn.disabled = true;
+            });
+            
+            // Leave configure interface button/form enabled so users can update settings
+            const configBtn = document.getElementById('config-interface-btn');
+            if (configBtn) {
+                configBtn.disabled = false;
+            }
+            const configForm = document.getElementById('configure-form');
+            if (configForm) {
+                configForm.querySelectorAll('input, button').forEach(el => {
+                    el.disabled = false;
+                });
+            }
+            
+            // Disable peer section
+            document.querySelectorAll('#peer-section button').forEach(btn => {
+                btn.disabled = true;
+            });
+            document.querySelectorAll('.peer-buttons button').forEach(btn => {
+                btn.disabled = true;
+            });
+        }
+
+        // Enable all functions
+        function enableAllFunctions() {
+            // Enable VPN control buttons
+            document.querySelectorAll('#vpn-section button').forEach(btn => {
+                btn.disabled = false;
+            });
+            
+            // Enable configure interface button
+            const configBtn = document.getElementById('config-interface-btn');
+            if (configBtn) {
+                configBtn.disabled = false;
+            }
+            
+            // Enable all inputs
+            document.querySelectorAll('input, button').forEach(el => {
+                el.disabled = false;
+            });
+            
+            // Reload peers to restore proper enable/disable state
+            loadPeers();
+        }
+
         async function chooseInterface() {
             const interface_name = document.getElementById('interface-input').value;
             try {
@@ -224,6 +350,8 @@
                     if (data.config) {
                         updateInterfaceDisplay(data.config.interface);
                         loadPeersFromConfig(data.config);
+                        // Check key status after loading interface
+                        await checkKeyStatus();
                     }
                     alert('Interface set to: ' + data.interface);
                 } else {
@@ -248,6 +376,8 @@
                     if (confirm(data.message)) {
                         // User confirmed, regenerate with force flag
                         generateKeys(true);
+                        // Refresh key status after generating new keys
+                        await checkKeyStatus();
                     }
                     return;
                 }
@@ -308,7 +438,8 @@
                 preUp: document.getElementById('preUp').value,
                 postUp: document.getElementById('postUp').value,
                 preDown: document.getElementById('preDown').value,
-                postDown: document.getElementById('postDown').value
+                postDown: document.getElementById('postDown').value,
+                saveToFile: true
             };
             
             try {
@@ -325,6 +456,8 @@
                     setTimeout(() => {
                         toggleConfigInterfaceForm();
                     }, 1000);
+                    // Refresh key status
+                    await checkKeyStatus();
                 } else {
                     alert('Error: ' + data.error);
                 }
@@ -635,26 +768,38 @@
                     document.getElementById('interface-input').value = interfaceData.interface;
                 }
                 
-                // Load from memory
-                const response = await fetch('/api/config');
-                const data = await response.json();
-                if (data.success) {
-                    updateInterfaceDisplay(data.config.interface);
-                    // Populate form fields if interface is configured
-                    if (data.config.interface.address) {
-                        document.getElementById('address').value = data.config.interface.address || '';
-                        document.getElementById('listenPort').value = data.config.interface.listenPort || '51820';
-                        document.getElementById('dns').value = data.config.interface.dns || '';
-                        document.getElementById('table').value = data.config.interface.table || '';
-                        document.getElementById('preUp').value = data.config.interface.preUp || '';
-                        document.getElementById('postUp').value = data.config.interface.postUp || '';
-                        document.getElementById('preDown').value = data.config.interface.preDown || '';
-                        document.getElementById('postDown').value = data.config.interface.postDown || '';
+                // Reload config from file once on page load
+                const reloadResponse = await fetch('/api/reload-config');
+                const reloadData = await reloadResponse.json();
+                if (reloadData.success && reloadData.config) {
+                    const interfaceConfig = reloadData.config.interface || {};
+                    updateInterfaceDisplay(interfaceConfig);
+                    if (interfaceConfig.address) {
+                        document.getElementById('address').value = interfaceConfig.address || '';
+                        document.getElementById('listenPort').value = interfaceConfig.listenPort || '51820';
+                        document.getElementById('dns').value = interfaceConfig.dns || '';
+                        document.getElementById('table').value = interfaceConfig.table || '';
+                        document.getElementById('preUp').value = interfaceConfig.preUp || '';
+                        document.getElementById('postUp').value = interfaceConfig.postUp || '';
+                        document.getElementById('preDown').value = interfaceConfig.preDown || '';
+                        document.getElementById('postDown').value = interfaceConfig.postDown || '';
                     }
-                    loadPeersFromConfig(data.config);
+                    loadPeersFromConfig(reloadData.config);
                 }
             } catch (error) {
                 console.error('Error loading initial config:', error);
+            }
+            // Start checking key status
+            await checkKeyStatus();
+
+            // Check key status every 5 minutes
+            checkKeyStatusInterval = setInterval(checkKeyStatus, 5 * 60 * 1000);
+        };
+
+        // Cleanup interval on page unload
+        window.onbeforeunload = function() {
+            if (checkKeyStatusInterval) {
+                clearInterval(checkKeyStatusInterval);
             }
         };
     </script>

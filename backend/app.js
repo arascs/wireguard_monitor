@@ -24,7 +24,9 @@ let config = {
     preUp: '',
     postUp: '',
     preDown: '',
-    postDown: ''
+    postDown: '',
+    keyCreationDate: null,
+    keyExpiryDays: 90
   },
   peers: []
 };
@@ -37,6 +39,51 @@ function run(cmd) {
     return execSync(cmd, { encoding: 'utf8' });
   } catch (error) {
     throw new Error(error.stderr || error.message);
+  }
+}
+
+// Check if key is expired
+function isKeyExpired() {
+  if (!config.interface.keyCreationDate) {
+    return false; // No key created yet
+  }
+  
+  const creationDate = new Date(config.interface.keyCreationDate);
+  const expiryDate = new Date(creationDate);
+  expiryDate.setDate(expiryDate.getDate() + config.interface.keyExpiryDays);
+  
+  return new Date() > expiryDate;
+}
+
+// Get remaining days
+function getRemainingDays() {
+  if (!config.interface.keyCreationDate) {
+    return null;
+  }
+  
+  const creationDate = new Date(config.interface.keyCreationDate);
+  const expiryDate = new Date(creationDate);
+  expiryDate.setDate(expiryDate.getDate() + config.interface.keyExpiryDays);
+  
+  const now = new Date();
+  const diffTime = expiryDate - now;
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  
+  return diffDays;
+}
+
+// Auto disconnect VPN if key expired
+async function checkAndDisconnectIfExpired() {
+  if (isKeyExpired()) {
+    try {
+      const status = run('wg show interfaces');
+      if (status.includes(INTERFACE)) {
+        run(`wg-quick down ${INTERFACE}`);
+        console.log(`[INFO] VPN ${INTERFACE} automatically disconnected due to expired key`);
+      }
+    } catch (e) {
+      console.error('Error disconnecting VPN:', e.message);
+    }
   }
 }
 
@@ -57,7 +104,9 @@ function loadConfigFromFile() {
           preUp: '',
           postUp: '',
           preDown: '',
-          postDown: ''
+          postDown: '',
+          keyCreationDate: null,
+          keyExpiryDays: 90
         },
         peers: []
       };
@@ -84,7 +133,9 @@ function loadConfigFromFile() {
         preUp: '',
         postUp: '',
         preDown: '',
-        postDown: ''
+        postDown: '',
+        keyCreationDate: null,
+        keyExpiryDays: 90
       },
       peers: []
     };
@@ -106,6 +157,17 @@ function loadConfigFromFile() {
       if (!cleanLine) {
         continue;
       }
+
+      // --- LOGIC SỬA ĐỔI: Bắt Name ngay khi thấy comment, trước khi vào section ---
+      if (isCommented && cleanLine.toLowerCase().startsWith('name =')) {
+        const parts = cleanLine.split('=');
+        if (parts.length > 1) {
+             // Lấy phần sau dấu bằng
+             peerName = parts.slice(1).join('=').trim(); 
+        }
+        continue; 
+      }
+      // --------------------------------------------------------------------------
       
       if (cleanLine === '[Interface]') {
         section = 'interface';
@@ -113,8 +175,9 @@ function loadConfigFromFile() {
         peerName = '';
       } else if (cleanLine === '[Peer]') {
         section = 'peer';
+        const pendingPeerName = peerName;
         currentPeer = {
-          name: '',
+          name: pendingPeerName || '',
           publicKey: '',
           presharedKey: '',
           endpoint: '',
@@ -137,10 +200,16 @@ function loadConfigFromFile() {
         
         const lowerKey = key.toLowerCase();
         
-        // Check for Name metadata (always in comments)
-        if (isCommented && lowerKey === 'name' && section === 'peer' && currentPeer) {
-          currentPeer.name = value;
-          continue;
+        // Check for metadata (always in comments)
+        if (isCommented) {
+          if (lowerKey === 'key creation' && section === 'interface') {
+            config.interface.keyCreationDate = value;
+            continue;
+          }
+          if (lowerKey === 'key expiry days' && section === 'interface') {
+            config.interface.keyExpiryDays = parseInt(value) || 90;
+            continue;
+          }
         }
         
         if (section === 'interface') {
@@ -196,11 +265,81 @@ function loadConfigFromFile() {
       }
     }
     
+    // Check and disconnect if expired
+    checkAndDisconnectIfExpired();
+    
     return true;
   } catch (error) {
     console.error('Error loading config from file:', error.message);
     return false;
   }
+}
+
+function buildConfigFileContent() {
+  let content = '[Interface]\n';
+  
+  if (config.interface.keyCreationDate) {
+    content += `# Key Creation = ${config.interface.keyCreationDate}\n`;
+  }
+  if (config.interface.keyExpiryDays) {
+    content += `# Key Expiry Days = ${config.interface.keyExpiryDays}\n`;
+  }
+  
+  content += `PrivateKey = ${config.interface.privateKey}\n`;
+  content += `Address = ${config.interface.address}\n`;
+  if (config.interface.dns) content += `DNS = ${config.interface.dns}\n`;
+  if (config.interface.listenPort) content += `ListenPort = ${config.interface.listenPort}\n`;
+  if (config.interface.mtu) content += `MTU = ${config.interface.mtu}\n`;
+  if (config.interface.preUp) content += `PreUp = ${config.interface.preUp}\n`;
+  if (config.interface.postUp) content += `PostUp = ${config.interface.postUp}\n`;
+  if (config.interface.preDown) content += `PreDown = ${config.interface.preDown}\n`;
+  if (config.interface.postDown) content += `PostDown = ${config.interface.postDown}\n`;
+  
+  config.peers.forEach(peer => {
+    const isDisabled = peer.enabled === false;
+    content += '\n';
+    
+    if (peer.name) {
+      content += `# Name = ${peer.name}\n`;
+    }
+    
+    content += isDisabled ? '# [Peer]\n' : '[Peer]\n';
+    const prefix = isDisabled ? '# ' : '';
+    content += `${prefix}PublicKey = ${peer.publicKey}\n`;
+    if (peer.presharedKey) content += `${prefix}PresharedKey = ${peer.presharedKey}\n`;
+    content += `${prefix}Endpoint = ${peer.endpoint}\n`;
+    content += `${prefix}AllowedIPs = ${peer.allowedIPs}\n`;
+    if (peer.persistentKeepalive) content += `${prefix}PersistentKeepalive = ${peer.persistentKeepalive}\n`;
+  });
+  
+  return content;
+}
+
+function saveConfigToFile() {
+  if (isKeyExpired()) {
+    const err = new Error('Key has expired. Cannot save configuration.');
+    err.statusCode = 403;
+    throw err;
+  }
+  if (!config.interface.privateKey || !config.interface.address) {
+    const err = new Error('Missing required fields (private key, address)');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (config.peers.length === 0) {
+    const err = new Error('No peers configured');
+    err.statusCode = 400;
+    throw err;
+  }
+  
+  const content = buildConfigFileContent();
+  
+  if (!fs.existsSync(CONFIG_DIR)) {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  }
+  
+  fs.writeFileSync(CONFIG_FILE, content, { mode: 0o600 });
+  return content;
 }
 
 // Choose interface
@@ -221,6 +360,20 @@ app.get('/api/interface', (req, res) => {
   res.json({ interface: INTERFACE });
 });
 
+// Get key status
+app.get('/api/key-status', (req, res) => {
+  const expired = isKeyExpired();
+  const remainingDays = getRemainingDays();
+  
+  res.json({
+    success: true,
+    expired,
+    remainingDays,
+    keyCreationDate: config.interface.keyCreationDate,
+    keyExpiryDays: config.interface.keyExpiryDays
+  });
+});
+
 // Generate keys
 app.post('/api/generate-keys', (req, res) => {
   try {
@@ -237,18 +390,17 @@ app.post('/api/generate-keys', (req, res) => {
     }
   
     const privateKey = run('wg genkey').trim();
-    //run(`echo ${privateKey} >> ${CONFIG_DIR}/${INTERFACE}.key`);
-    
     const publicKey = run(`echo "${privateKey}" | wg pubkey`).trim();
-    //run(`echo ${publicKey} >> ${CONFIG_DIR}/${INTERFACE}.pub`);
     
     config.interface.privateKey = privateKey;
     config.interface.publicKey = publicKey;
+    config.interface.keyCreationDate = new Date().toISOString();
     
     res.json({ 
       success: true, 
       privateKey, 
-      publicKey 
+      publicKey,
+      keyCreationDate: config.interface.keyCreationDate
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -258,6 +410,7 @@ app.post('/api/generate-keys', (req, res) => {
 // Configure interface
 app.post('/api/configure-interface', (req, res) => {
   try {
+    
     config.interface.address = req.body.address || '';
     config.interface.listenPort = req.body.listenPort || '51820';
     config.interface.dns = req.body.dns || '';
@@ -267,7 +420,21 @@ app.post('/api/configure-interface', (req, res) => {
     config.interface.preDown = req.body.preDown || '';
     config.interface.postDown = req.body.postDown || '';
     
-    res.json({ success: true, config });
+    if (req.body.keyExpiryDays) {
+      config.interface.keyExpiryDays = parseInt(req.body.keyExpiryDays) || 90;
+    }
+    
+    let savedContent = null;
+    if (req.body.saveToFile) {
+      try {
+        savedContent = saveConfigToFile();
+      } catch (error) {
+        const status = error.statusCode || 500;
+        return res.status(status).json({ success: false, error: error.message });
+      }
+    }
+    
+    res.json({ success: true, config, content: savedContent });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -276,6 +443,14 @@ app.post('/api/configure-interface', (req, res) => {
 // Add peer
 app.post('/api/add-peer', (req, res) => {
   try {
+    // Check if key is expired
+    if (isKeyExpired()) {
+      return res.status(403).json({ 
+        success: false, 
+        error: 'Key has expired. Please generate new keys and reconfigure interface first.' 
+      });
+    }
+    
     // Check if interface is configured
     if (!config.interface.privateKey || !config.interface.address) {
       return res.status(400).json({ 
@@ -308,6 +483,14 @@ app.post('/api/add-peer', (req, res) => {
 // Edit peer
 app.put('/api/edit-peer/:index', (req, res) => {
   try {
+    // Check if key is expired
+    if (isKeyExpired()) {
+      return res.status(403).json({ 
+        success: false, 
+        error: 'Key has expired. Please generate new keys first.' 
+      });
+    }
+    
     const idx = parseInt(req.params.index);
     if (idx >= 0 && idx < config.peers.length) {
       const peer = config.peers[idx];
@@ -332,6 +515,14 @@ app.put('/api/edit-peer/:index', (req, res) => {
 // Delete peer
 app.delete('/api/delete-peer/:index', (req, res) => {
   try {
+    // Check if key is expired
+    if (isKeyExpired()) {
+      return res.status(403).json({ 
+        success: false, 
+        error: 'Key has expired. Please generate new keys first.' 
+      });
+    }
+    
     const idx = parseInt(req.params.index);
     if (idx >= 0 && idx < config.peers.length) {
       config.peers.splice(idx, 1);
@@ -347,6 +538,14 @@ app.delete('/api/delete-peer/:index', (req, res) => {
 // Enable peer
 app.post('/api/enable-peer/:index', (req, res) => {
   try {
+    // Check if key is expired
+    if (isKeyExpired()) {
+      return res.status(403).json({ 
+        success: false, 
+        error: 'Key has expired. Please generate new keys first.' 
+      });
+    }
+    
     const idx = parseInt(req.params.index);
     if (idx >= 0 && idx < config.peers.length) {
       config.peers[idx].enabled = true;
@@ -362,6 +561,14 @@ app.post('/api/enable-peer/:index', (req, res) => {
 // Disable peer
 app.post('/api/disable-peer/:index', (req, res) => {
   try {
+    // Check if key is expired
+    if (isKeyExpired()) {
+      return res.status(403).json({ 
+        success: false, 
+        error: 'Key has expired. Please generate new keys first.' 
+      });
+    }
+    
     const idx = parseInt(req.params.index);
     if (idx >= 0 && idx < config.peers.length) {
       config.peers[idx].enabled = false;
@@ -374,71 +581,29 @@ app.post('/api/disable-peer/:index', (req, res) => {
   }
 });
 
-// View configuration
+// View configuration (in-memory state)
 app.get('/api/config', (req, res) => {
   res.json({ success: true, config });
+});
+
+// Reload configuration from file on demand
+app.get('/api/reload-config', (req, res) => {
+  try {
+    const loaded = loadConfigFromFile();
+    res.json({ success: true, config, loaded });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // Save configuration
 app.post('/api/save-config', (req, res) => {
   try {
-    if (!config.interface.privateKey || !config.interface.address) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Missing required fields (private key, address)' 
-      });
-    }
-    
-    if (config.peers.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'No peers configured' 
-      });
-    }
-    
-    let content = '[Interface]\n';
-    content += `PrivateKey = ${config.interface.privateKey}\n`;
-    content += `Address = ${config.interface.address}\n`;
-    if (config.interface.dns) content += `DNS = ${config.interface.dns}\n`;
-    if (config.interface.listenPort) content += `ListenPort = ${config.interface.listenPort}\n`;
-    if (config.interface.mtu) content += `MTU = ${config.interface.mtu}\n`;
-    if (config.interface.preUp) content += `PreUp = ${config.interface.preUp}\n`;
-    if (config.interface.postUp) content += `PostUp = ${config.interface.postUp}\n`;
-    if (config.interface.preDown) content += `PreDown = ${config.interface.preDown}\n`;
-    if (config.interface.postDown) content += `PostDown = ${config.interface.postDown}\n`;
-    
-    config.peers.forEach(peer => {
-      const isDisabled = peer.enabled === false;
-      content += '\n';
-      
-      // Add name as comment if exists
-      if (peer.name) {
-        content += `# Name = ${peer.name}\n`;
-      }
-      
-      if (isDisabled) {
-        content += '# [Peer]\n';
-      } else {
-        content += '[Peer]\n';
-      }
-      
-      const prefix = isDisabled ? '# ' : '';
-      content += `${prefix}PublicKey = ${peer.publicKey}\n`;
-      if (peer.presharedKey) content += `${prefix}PresharedKey = ${peer.presharedKey}\n`;
-      content += `${prefix}Endpoint = ${peer.endpoint}\n`;
-      content += `${prefix}AllowedIPs = ${peer.allowedIPs}\n`;
-      if (peer.persistentKeepalive) content += `${prefix}PersistentKeepalive = ${peer.persistentKeepalive}\n`;
-    });
-    
-    if (!fs.existsSync(CONFIG_DIR)) {
-      fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    }
-    
-    fs.writeFileSync(CONFIG_FILE, content, { mode: 0o600 });
-    
+    const content = saveConfigToFile();
     res.json({ success: true, content });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    const status = error.statusCode || 500;
+    res.status(status).json({ success: false, error: error.message });
   }
 });
 
@@ -446,6 +611,14 @@ app.post('/api/save-config', (req, res) => {
 // Connect VPN
 app.post('/api/connect', (req, res) => {
   try {
+    // Check if key is expired
+    if (isKeyExpired()) {
+      return res.status(403).json({ 
+        success: false, 
+        error: 'Key has expired. Cannot connect VPN. Please generate new keys first.' 
+      });
+    }
+    
     try {
       const status = run('wg show interfaces');
       if (status.includes(INTERFACE)) {
@@ -485,6 +658,11 @@ if (process.getuid && process.getuid() !== 0) {
   console.error('[ERROR] This program requires root privileges');
   process.exit(1);
 }
+
+// Periodic check for expired keys (every hour)
+setInterval(() => {
+  checkAndDisconnectIfExpired();
+}, 60 * 60 * 1000);
 
 app.listen(PORT, () => {
   // Load config from file on startup
