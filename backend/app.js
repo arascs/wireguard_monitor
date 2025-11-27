@@ -4,6 +4,7 @@ const express = require('express');
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const dashboardRoutes = require('./routes/dashboard');
 
 const app = express();
 const PORT = 3000;
@@ -652,6 +653,32 @@ app.post('/api/disconnect', (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// Get VPN status
+app.get('/api/vpn-status', (req, res) => {
+  try {
+    const status = run('wg show interfaces');
+    const isConnected = status.includes(INTERFACE);
+    res.json({ success: true, connected: isConnected });
+  } catch (error) {
+    // If command fails, VPN is likely not connected
+    res.json({ success: true, connected: false });
+  }
+});
+
+// Main app UI
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public/index.html'));
+});
+
+// Dashboard route - serve dashboard.html
+app.get('/dashboard', (req, res) => {
+  const dashboardPath = path.join(__dirname, '../frontend/dashboard.html');
+  res.sendFile(dashboardPath);
+});
+
+// Dashboard API
+app.use('/api/dashboard', dashboardRoutes);
 
 // Check root
 if (process.getuid && process.getuid() !== 0) {
