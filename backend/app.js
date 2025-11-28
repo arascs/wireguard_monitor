@@ -88,6 +88,13 @@ async function checkAndDisconnectIfExpired() {
   }
 }
 
+// Share config with routes
+function updateSharedConfig() {
+  if (app) {
+    app.set('config', config);
+  }
+}
+
 // Load configuration from file
 function loadConfigFromFile() {
   try {
@@ -111,6 +118,7 @@ function loadConfigFromFile() {
         },
         peers: []
       };
+      updateSharedConfig();
       return false;
     }
     
@@ -269,6 +277,9 @@ function loadConfigFromFile() {
     // Check and disconnect if expired
     checkAndDisconnectIfExpired();
     
+    // Update shared config
+    updateSharedConfig();
+    
     return true;
   } catch (error) {
     console.error('Error loading config from file:', error.message);
@@ -396,6 +407,7 @@ app.post('/api/generate-keys', (req, res) => {
     config.interface.privateKey = privateKey;
     config.interface.publicKey = publicKey;
     config.interface.keyCreationDate = new Date().toISOString();
+    updateSharedConfig();
     
     res.json({ 
       success: true, 
@@ -435,6 +447,7 @@ app.post('/api/configure-interface', (req, res) => {
       }
     }
     
+    updateSharedConfig();
     res.json({ success: true, config, content: savedContent });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -475,6 +488,7 @@ app.post('/api/add-peer', (req, res) => {
     }
     
     config.peers.push(peer);
+    updateSharedConfig();
     res.json({ success: true, peer, index: config.peers.length - 1 });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -504,6 +518,7 @@ app.put('/api/edit-peer/:index', (req, res) => {
         peer.presharedKey = req.body.presharedKey;
       }
       
+      updateSharedConfig();
       res.json({ success: true, peer });
     } else {
       res.status(404).json({ success: false, error: 'Peer not found' });
@@ -527,6 +542,7 @@ app.delete('/api/delete-peer/:index', (req, res) => {
     const idx = parseInt(req.params.index);
     if (idx >= 0 && idx < config.peers.length) {
       config.peers.splice(idx, 1);
+      updateSharedConfig();
       res.json({ success: true });
     } else {
       res.status(404).json({ success: false, error: 'Peer not found' });
@@ -550,6 +566,7 @@ app.post('/api/enable-peer/:index', (req, res) => {
     const idx = parseInt(req.params.index);
     if (idx >= 0 && idx < config.peers.length) {
       config.peers[idx].enabled = true;
+      updateSharedConfig();
       res.json({ success: true, peer: config.peers[idx] });
     } else {
       res.status(404).json({ success: false, error: 'Peer not found' });
@@ -573,6 +590,7 @@ app.post('/api/disable-peer/:index', (req, res) => {
     const idx = parseInt(req.params.index);
     if (idx >= 0 && idx < config.peers.length) {
       config.peers[idx].enabled = false;
+      updateSharedConfig();
       res.json({ success: true, peer: config.peers[idx] });
     } else {
       res.status(404).json({ success: false, error: 'Peer not found' });
@@ -677,6 +695,12 @@ app.get('/dashboard', (req, res) => {
   res.sendFile(dashboardPath);
 });
 
+// Dashboard peer detail route - serve peer_detail.html
+app.get('/dashboard/peer/:id', (req, res) => {
+  const peerDetailPath = path.join(__dirname, '../frontend/peer_detail.html');
+  res.sendFile(peerDetailPath);
+});
+
 // Dashboard API
 app.use('/api/dashboard', dashboardRoutes);
 
@@ -694,5 +718,7 @@ setInterval(() => {
 app.listen(PORT, () => {
   // Load config from file on startup
   loadConfigFromFile();
+  // Initialize shared config
+  updateSharedConfig();
   console.log(`WireGuard VPN Manager running on http://localhost:${PORT}`);
 });
