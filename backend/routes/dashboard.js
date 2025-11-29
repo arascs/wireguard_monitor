@@ -453,4 +453,78 @@ router.get('/peer/:id', async (req, res) => {
     });
 });
 
+const fs = require('fs');
+const path = require('path');
+
+function readInt(filePath) {
+    try {
+        return parseInt(fs.readFileSync(filePath, 'utf8').trim(), 10);
+    } catch (err) {
+        console.error("Error reading", filePath, err);
+        return 0;
+    }
+}
+
+// API: GET /api/dashboard/:iface/stats
+// API to fetch interface data to draw graphs
+router.get('/:id/stats', (req, res) => {
+    const iface = req.params.id;
+    const logDir = `/etc/wireguard/logs/${iface}`;
+    
+    // Các loại metric cần đọc
+    const metrics = ['rx_bytes', 'tx_bytes', 'rx_dropped', 'tx_dropped'];
+    
+    // Map để gộp dữ liệu: key là timestamp, value là object chứa các metric
+    const dataMap = new Map();
+
+    try {
+        metrics.forEach(metric => {
+            const filePath = path.join(logDir, `${metric}.json`);
+            
+            if (fs.existsSync(filePath)) {
+                const fileContent = fs.readFileSync(filePath, 'utf-8');
+                const lines = fileContent.trim().split('\n');
+
+                lines.forEach(line => {
+                    if (!line.trim()) return;
+                    try {
+                        const entry = JSON.parse(line);
+                        // Convert timestamp từ giây (Unix epoch) sang mili-giây (JS Date)
+                        const tsMs = entry.timestamp * 1000; 
+
+                        if (!dataMap.has(tsMs)) {
+                            dataMap.set(tsMs, { timestamp: tsMs });
+                        }
+                        
+                        // Gán giá trị metric vào object tại timestamp đó
+                        dataMap.get(tsMs)[metric] = entry.value;
+                    } catch (e) {
+                        console.error(`Error parsing line in ${metric}:`, line);
+                    }
+                });
+            }
+        });
+
+        // Chuyển Map thành Array và sắp xếp theo thời gian
+        const result = Array.from(dataMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+
+        // Đảm bảo các trường thiếu được điền số 0 (nếu cần thiết để vẽ biểu đồ mượt hơn)
+        const finalResult = result.map(item => ({
+            timestamp: item.timestamp,
+            rx_bytes: item.rx_bytes || 0,
+            tx_bytes: item.tx_bytes || 0,
+            rx_dropped: item.rx_dropped || 0,
+            tx_dropped: item.tx_dropped || 0,
+            iface // Giữ lại field này nếu frontend cần
+        }));
+
+        res.json(finalResult);
+
+    } catch (error) {
+        console.error("Error reading logs:", error);
+        res.status(500).json({ error: "Failed to read logs" });
+    }
+});
+
+
 module.exports = router;

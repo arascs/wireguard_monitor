@@ -182,6 +182,74 @@ window.onload = async function() {
     await loadInterfaceInfo();
     await loadPeers();
     
-    // Refresh peers every 30 seconds
-    setInterval(loadPeers, 30000);
+// Refresh peers every 30 seconds (Giữ nguyên logic cũ của bạn)
+setInterval(loadPeers, 30000);
+
+// Graphs for interface 
+const iface = window.location.pathname.split("/").pop();
+document.getElementById("title").innerText = `Dashboard: ${iface}`;
+
+const bytesChart = echarts.init(document.getElementById('bytesChart'));
+const dropChart = echarts.init(document.getElementById('dropChart'));
+
+let statsHistory = []; 
+
+// Hàm fetchStats mới: Lấy toàn bộ log và vẽ lại
+async function fetchStats() {
+    try {
+        const res = await fetch(`/api/dashboard/${iface}/stats`);
+        if (!res.ok) throw new Error("API Error");
+        
+        const data = await res.json();
+        
+        // API trả về mảng, ta gán trực tiếp thay vì push từng cái
+        if (Array.isArray(data)) {
+            statsHistory = data; 
+        } else {
+            // Fallback nếu API lỗi trả về object đơn lẻ (trường hợp cũ)
+            statsHistory = [data];
+        }
+        
+        updateCharts();
+    } catch (e) {
+        console.error("Failed to fetch stats:", e);
+    }
+}
+
+function updateCharts() {
+    // Format thời gian hiển thị
+    const times = statsHistory.map(p => new Date(p.timestamp).toLocaleTimeString());
+    const rxBytes = statsHistory.map(p => p.rx_bytes);
+    const txBytes = statsHistory.map(p => p.tx_bytes);
+    const rxDrop = statsHistory.map(p => p.rx_dropped);
+    const txDrop = statsHistory.map(p => p.tx_dropped);
+
+    bytesChart.setOption({
+        title: { text: "Bandwidth (bytes)" },
+        tooltip: { trigger: 'axis' },
+        xAxis: { type: 'category', data: times },
+        yAxis: { type: 'value' },
+        series: [
+            { name: "rx_bytes", type: 'line', data: rxBytes, showSymbol: false }, // showSymbol: false giúp biểu đồ mượt hơn khi nhiều điểm
+            { name: "tx_bytes", type: 'line', data: txBytes, showSymbol: false }
+        ]
+    });
+
+    dropChart.setOption({
+        title: { text: "Dropped Packets" },
+        tooltip: { trigger: 'axis' },
+        xAxis: { type: 'category', data: times },
+        yAxis: { type: 'value' },
+        series: [
+            { name: "rx_dropped", type: 'line', data: rxDrop, showSymbol: false },
+            { name: "tx_dropped", type: 'line', data: txDrop, showSymbol: false }
+        ]
+    });
+}
+
+// Gọi lần đầu
+fetchStats();
+
+// Refresh mỗi 1 phút (Để cập nhật log mới ghi thêm)
+setInterval(fetchStats, 60 * 1000);
 };

@@ -2,6 +2,7 @@
 <html>
 <head>
     <title>WireGuard Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -133,6 +134,11 @@
         <h2>Peers</h2>
         <div id="peers-container" class="loading">Loading peers...</div>
     </div>
+
+    <h2 id="title"></h2>
+
+    <div id="bytesChart" style="height:350px;"></div>
+    <div id="dropChart" style="height:350px;"></div>
 
     <script src="/js/dashboard_page.js"></script>
 </body>
