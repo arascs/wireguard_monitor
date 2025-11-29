@@ -54,9 +54,147 @@ router.get('/wg', (req, res) => {
 });
 
 // API: /api/dashboard/peers - Get peers with config and throughput
-router.get('/peers', (req, res) => {
-    // Get config from app.js (need to access it)
+router.get('/peers', async (req, res) => {
     const app = req.app;
+    
+    // Get interface ID from query parameter
+    const interfaceId = req.query.interface;
+    
+    // If interface ID is provided, set it first
+    if (interfaceId) {
+        try {
+            const { execSync } = require('child_process');
+            const path = require('path');
+            const fs = require('fs');
+            const CONFIG_DIR = '/etc/wireguard/';
+            const INTERFACE = decodeURIComponent(interfaceId);
+            const CONFIG_FILE = path.join(CONFIG_DIR, `${INTERFACE}.conf`);
+            
+            // Load config from file for this interface
+            if (fs.existsSync(CONFIG_FILE)) {
+                const content = fs.readFileSync(CONFIG_FILE, 'utf8');
+                const lines = content.split('\n');
+                let section = null;
+                let currentPeer = null;
+                let peerEnabled = true;
+                let peerName = '';
+                
+                const config = {
+                    interface: {
+                        privateKey: '',
+                        publicKey: '',
+                        address: '',
+                        dns: '',
+                        listenPort: '',
+                        table: '',
+                        mtu: '1420',
+                        preUp: '',
+                        postUp: '',
+                        preDown: '',
+                        postDown: '',
+                        keyCreationDate: null,
+                        keyExpiryDays: 90
+                    },
+                    peers: []
+                };
+                
+                for (let i = 0; i < lines.length; i++) {
+                    let line = lines[i];
+                    const trimmed = line.trim();
+                    if (!trimmed) continue;
+                    
+                    const isCommented = trimmed.startsWith('#');
+                    const cleanLine = isCommented ? trimmed.substring(1).trim() : trimmed;
+                    if (!cleanLine) continue;
+                    
+                    if (isCommented && cleanLine.toLowerCase().startsWith('name =')) {
+                        const parts = cleanLine.split('=');
+                        if (parts.length > 1) {
+                            peerName = parts.slice(1).join('=').trim();
+                        }
+                        continue;
+                    }
+                    
+                    if (cleanLine === '[Interface]') {
+                        section = 'interface';
+                        peerEnabled = true;
+                        peerName = '';
+                    } else if (cleanLine === '[Peer]') {
+                        section = 'peer';
+                        const pendingPeerName = peerName;
+                        currentPeer = {
+                            name: pendingPeerName || '',
+                            publicKey: '',
+                            presharedKey: '',
+                            endpoint: '',
+                            allowedIPs: '',
+                            persistentKeepalive: '',
+                            enabled: !isCommented
+                        };
+                        peerEnabled = !isCommented;
+                        peerName = '';
+                        config.peers.push(currentPeer);
+                    } else if (cleanLine.includes('=')) {
+                        const equalIndex = cleanLine.indexOf('=');
+                        const key = cleanLine.substring(0, equalIndex).trim();
+                        const value = cleanLine.substring(equalIndex + 1).trim();
+                        if (!key) continue;
+                        
+                        const lowerKey = key.toLowerCase();
+                        
+                        if (isCommented) {
+                            if (lowerKey === 'key creation' && section === 'interface') {
+                                config.interface.keyCreationDate = value;
+                                continue;
+                            }
+                            if (lowerKey === 'key expiry days' && section === 'interface') {
+                                config.interface.keyExpiryDays = parseInt(value) || 90;
+                                continue;
+                            }
+                        }
+                        
+                        if (section === 'interface') {
+                            let propertyName = lowerKey;
+                            if (lowerKey === 'listenport') propertyName = 'listenPort';
+                            else if (lowerKey === 'preup') propertyName = 'preUp';
+                            else if (lowerKey === 'postup') propertyName = 'postUp';
+                            else if (lowerKey === 'predown') propertyName = 'preDown';
+                            else if (lowerKey === 'postdown') propertyName = 'postDown';
+                            else if (lowerKey === 'privatekey') propertyName = 'privateKey';
+                            else if (lowerKey === 'publickey') propertyName = 'publicKey';
+                            
+                            config.interface[propertyName] = value;
+                            if (lowerKey === 'privatekey') {
+                                try {
+                                    const pubKey = execSync(`echo "${value}" | wg pubkey`, { encoding: 'utf8' }).trim();
+                                    config.interface.publicKey = pubKey;
+                                } catch (e) {
+                                    console.error('Error generating public key:', e.message);
+                                }
+                            }
+                        } else if (section === 'peer' && currentPeer) {
+                            if (lowerKey === 'publickey') currentPeer.publicKey = value;
+                            else if (lowerKey === 'presharedkey') currentPeer.presharedKey = value;
+                            else if (lowerKey === 'endpoint') currentPeer.endpoint = value;
+                            else if (lowerKey === 'allowedips') currentPeer.allowedIPs = value;
+                            else if (lowerKey === 'persistentkeepalive') currentPeer.persistentKeepalive = value;
+                            else currentPeer[lowerKey] = value;
+                            if (peerEnabled === false) {
+                                currentPeer.enabled = false;
+                            }
+                        }
+                    }
+                }
+                
+                // Update shared config
+                app.set('config', config);
+            }
+        } catch (error) {
+            console.error('Error loading interface config:', error);
+        }
+    }
+    
+    // Get config from app.js (need to access it)
     const config = app.get('config');
     
     if (!config) {
@@ -117,8 +255,146 @@ router.get('/peers', (req, res) => {
 });
 
 // API: /api/dashboard/peer/:id - Get single peer details
-router.get('/peer/:id', (req, res) => {
+router.get('/peer/:id', async (req, res) => {
     const app = req.app;
+    
+    // Get interface ID from query parameter
+    const interfaceId = req.query.interface;
+    
+    // If interface ID is provided, set it first (same logic as /peers)
+    if (interfaceId) {
+        try {
+            const { execSync } = require('child_process');
+            const path = require('path');
+            const fs = require('fs');
+            const CONFIG_DIR = '/etc/wireguard/';
+            const INTERFACE = decodeURIComponent(interfaceId);
+            const CONFIG_FILE = path.join(CONFIG_DIR, `${INTERFACE}.conf`);
+            
+            // Load config from file for this interface (same parsing logic as /peers)
+            if (fs.existsSync(CONFIG_FILE)) {
+                const content = fs.readFileSync(CONFIG_FILE, 'utf8');
+                const lines = content.split('\n');
+                let section = null;
+                let currentPeer = null;
+                let peerEnabled = true;
+                let peerName = '';
+                
+                const config = {
+                    interface: {
+                        privateKey: '',
+                        publicKey: '',
+                        address: '',
+                        dns: '',
+                        listenPort: '',
+                        table: '',
+                        mtu: '1420',
+                        preUp: '',
+                        postUp: '',
+                        preDown: '',
+                        postDown: '',
+                        keyCreationDate: null,
+                        keyExpiryDays: 90
+                    },
+                    peers: []
+                };
+                
+                for (let i = 0; i < lines.length; i++) {
+                    let line = lines[i];
+                    const trimmed = line.trim();
+                    if (!trimmed) continue;
+                    
+                    const isCommented = trimmed.startsWith('#');
+                    const cleanLine = isCommented ? trimmed.substring(1).trim() : trimmed;
+                    if (!cleanLine) continue;
+                    
+                    if (isCommented && cleanLine.toLowerCase().startsWith('name =')) {
+                        const parts = cleanLine.split('=');
+                        if (parts.length > 1) {
+                            peerName = parts.slice(1).join('=').trim();
+                        }
+                        continue;
+                    }
+                    
+                    if (cleanLine === '[Interface]') {
+                        section = 'interface';
+                        peerEnabled = true;
+                        peerName = '';
+                    } else if (cleanLine === '[Peer]') {
+                        section = 'peer';
+                        const pendingPeerName = peerName;
+                        currentPeer = {
+                            name: pendingPeerName || '',
+                            publicKey: '',
+                            presharedKey: '',
+                            endpoint: '',
+                            allowedIPs: '',
+                            persistentKeepalive: '',
+                            enabled: !isCommented
+                        };
+                        peerEnabled = !isCommented;
+                        peerName = '';
+                        config.peers.push(currentPeer);
+                    } else if (cleanLine.includes('=')) {
+                        const equalIndex = cleanLine.indexOf('=');
+                        const key = cleanLine.substring(0, equalIndex).trim();
+                        const value = cleanLine.substring(equalIndex + 1).trim();
+                        if (!key) continue;
+                        
+                        const lowerKey = key.toLowerCase();
+                        
+                        if (isCommented) {
+                            if (lowerKey === 'key creation' && section === 'interface') {
+                                config.interface.keyCreationDate = value;
+                                continue;
+                            }
+                            if (lowerKey === 'key expiry days' && section === 'interface') {
+                                config.interface.keyExpiryDays = parseInt(value) || 90;
+                                continue;
+                            }
+                        }
+                        
+                        if (section === 'interface') {
+                            let propertyName = lowerKey;
+                            if (lowerKey === 'listenport') propertyName = 'listenPort';
+                            else if (lowerKey === 'preup') propertyName = 'preUp';
+                            else if (lowerKey === 'postup') propertyName = 'postUp';
+                            else if (lowerKey === 'predown') propertyName = 'preDown';
+                            else if (lowerKey === 'postdown') propertyName = 'postDown';
+                            else if (lowerKey === 'privatekey') propertyName = 'privateKey';
+                            else if (lowerKey === 'publickey') propertyName = 'publicKey';
+                            
+                            config.interface[propertyName] = value;
+                            if (lowerKey === 'privatekey') {
+                                try {
+                                    const pubKey = execSync(`echo "${value}" | wg pubkey`, { encoding: 'utf8' }).trim();
+                                    config.interface.publicKey = pubKey;
+                                } catch (e) {
+                                    console.error('Error generating public key:', e.message);
+                                }
+                            }
+                        } else if (section === 'peer' && currentPeer) {
+                            if (lowerKey === 'publickey') currentPeer.publicKey = value;
+                            else if (lowerKey === 'presharedkey') currentPeer.presharedKey = value;
+                            else if (lowerKey === 'endpoint') currentPeer.endpoint = value;
+                            else if (lowerKey === 'allowedips') currentPeer.allowedIPs = value;
+                            else if (lowerKey === 'persistentkeepalive') currentPeer.persistentKeepalive = value;
+                            else currentPeer[lowerKey] = value;
+                            if (peerEnabled === false) {
+                                currentPeer.enabled = false;
+                            }
+                        }
+                    }
+                }
+                
+                // Update shared config
+                app.set('config', config);
+            }
+        } catch (error) {
+            console.error('Error loading interface config:', error);
+        }
+    }
+    
     const config = app.get('config');
     
     if (!config) {

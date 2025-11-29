@@ -7,17 +7,42 @@ function formatBytes(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// Get peer ID from URL
-function getPeerIdFromUrl() {
+// Get interface ID and peer ID from URL
+function getIdsFromUrl() {
     const path = window.location.pathname;
+    // Try pattern /dashboard/:id/peer/:peer_id first
+    const matchWithInterface = path.match(/\/dashboard\/([^\/]+)\/peer\/(\d+)/);
+    if (matchWithInterface) {
+        return {
+            interfaceId: decodeURIComponent(matchWithInterface[1]),
+            peerId: parseInt(matchWithInterface[2])
+        };
+    }
+    // Fallback to pattern /dashboard/peer/:id
     const match = path.match(/\/dashboard\/peer\/(\d+)/);
-    return match ? parseInt(match[1]) : null;
+    return match ? { interfaceId: null, peerId: parseInt(match[1]) } : { interfaceId: null, peerId: null };
+}
+
+// Set interface before loading peer details
+async function setInterface(interfaceName) {
+    try {
+        const response = await fetch('/api/interface', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ interface: interfaceName })
+        });
+        const data = await response.json();
+        return data.success;
+    } catch (error) {
+        console.error('Error setting interface:', error);
+        return false;
+    }
 }
 
 // Load peer details
 async function loadPeerDetails() {
-    const peerId = getPeerIdFromUrl();
-    console.log('Loading peer details for ID:', peerId);
+    const { interfaceId, peerId } = getIdsFromUrl();
+    console.log('Loading peer details for interface:', interfaceId, 'peer ID:', peerId);
     
     if (peerId === null) {
         document.getElementById('peer-detail-content').innerHTML = 
@@ -25,9 +50,22 @@ async function loadPeerDetails() {
         return;
     }
     
+    // Set interface if interfaceId is provided
+    if (interfaceId) {
+        const success = await setInterface(interfaceId);
+        if (!success) {
+            document.getElementById('peer-detail-content').innerHTML = 
+                '<div class="error">Error setting interface: ' + interfaceId + '</div>';
+            return;
+        }
+    }
+    
     try {
-        console.log('Fetching from:', `/api/dashboard/peer/${peerId}`);
-        const response = await fetch(`/api/dashboard/peer/${peerId}`);
+        const url = interfaceId 
+            ? `/api/dashboard/peer/${peerId}?interface=${encodeURIComponent(interfaceId)}`
+            : `/api/dashboard/peer/${peerId}`;
+        console.log('Fetching from:', url);
+        const response = await fetch(url);
         
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({ error: 'Failed to load peer details' }));

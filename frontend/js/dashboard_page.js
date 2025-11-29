@@ -7,6 +7,29 @@ function formatBytes(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+// Get interface ID from URL
+function getInterfaceIdFromUrl() {
+    const path = window.location.pathname;
+    const match = path.match(/\/dashboard\/([^\/]+)/);
+    return match ? decodeURIComponent(match[1]) : null;
+}
+
+// Set interface before loading data
+async function setInterface(interfaceName) {
+    try {
+        const response = await fetch('/api/interface', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ interface: interfaceName })
+        });
+        const data = await response.json();
+        return data.success;
+    } catch (error) {
+        console.error('Error setting interface:', error);
+        return false;
+    }
+}
+
 // Load interface information
 async function loadInterfaceInfo() {
     try {
@@ -79,7 +102,9 @@ async function loadInterfaceInfo() {
 // Load peers list
 async function loadPeers() {
     try {
-        const response = await fetch('/api/dashboard/peers');
+        const interfaceId = getInterfaceIdFromUrl();
+        const url = interfaceId ? `/api/dashboard/peers?interface=${encodeURIComponent(interfaceId)}` : '/api/dashboard/peers';
+        const response = await fetch(url);
         const data = await response.json();
         
         const peersContainer = document.getElementById('peers-container');
@@ -101,7 +126,12 @@ async function loadPeers() {
             const peerCard = document.createElement('div');
             peerCard.className = `peer-card ${peer.status}`;
             peerCard.onclick = () => {
-                window.location.href = `/dashboard/peer/${peer.id}`;
+                const interfaceId = getInterfaceIdFromUrl();
+                if (interfaceId) {
+                    window.location.href = `/dashboard/${encodeURIComponent(interfaceId)}/peer/${peer.id}`;
+                } else {
+                    window.location.href = `/dashboard/peer/${peer.id}`;
+                }
             };
             
             const receivedFormatted = formatBytes(peer.receivedBytes);
@@ -139,6 +169,16 @@ async function loadPeers() {
 
 // Load all data on page load
 window.onload = async function() {
+    const interfaceId = getInterfaceIdFromUrl();
+    if (interfaceId) {
+        const success = await setInterface(interfaceId);
+        if (!success) {
+            document.getElementById('interface-info').innerHTML = 
+                '<div class="error">Error setting interface: ' + interfaceId + '</div>';
+            return;
+        }
+    }
+    
     await loadInterfaceInfo();
     await loadPeers();
     

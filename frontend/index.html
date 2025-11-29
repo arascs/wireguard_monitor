@@ -5,7 +5,7 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 1200px;
+            max-width: 1100px;
             margin: 0 auto;
             padding: 20px;
         }
@@ -29,123 +29,48 @@
             padding: 8px 15px;
             border-radius: 3px;
         }
-        .key-status-banner {
-            padding: 15px;
-            margin: 20px 0;
-            border-radius: 5px;
-            font-weight: bold;
-            text-align: center;
+        .actions {
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
-        .key-status-banner.valid {
-            background-color: #e8f5e9;
-            border: 2px solid #4caf50;
-            color: #2e7d32;
+        .interfaces-wrapper {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 15px;
         }
-        .key-status-banner.warning {
-            background-color: #fff3e0;
-            border: 2px solid #ff9800;
-            color: #e65100;
-        }
-        .key-status-banner.expired {
-            background-color: #ffebee;
-            border: 2px solid #f44336;
-            color: #c62828;
-        }
-        .key-status-banner.no-key {
-            background-color: #e3f2fd;
-            border: 2px solid #2196f3;
-            color: #1565c0;
-        }
-        .search-box {
-            margin: 15px 0;
-            padding: 10px;
-            background-color: #f0f0f0;
-            border-radius: 5px;
-        }
-        .search-box input {
-            width: 300px;
-            padding: 8px;
-            border: 1px solid #ccc;
-            border-radius: 3px;
-        }
-        .peer-item {
+        .interface-card {
             border: 1px solid #ddd;
+            border-radius: 6px;
             padding: 15px;
-            margin: 10px 0;
-            border-radius: 5px;
-            background-color: #f9f9f9;
+            background-color: #fafafa;
         }
-        .peer-item.disabled {
-            opacity: 0.6;
-            background-color: #f0f0f0;
-        }
-        .peer-item.hidden {
-            display: none;
-        }
-        .peer-header {
-            font-weight: bold;
+        .interface-card h3 {
+            margin-top: 0;
             margin-bottom: 10px;
         }
-        .peer-name {
-            color: #2196F3;
-            font-size: 1.1em;
+        .interface-card p {
+            margin: 6px 0;
+            font-size: 0.95em;
         }
-        .peer-buttons {
-            margin-top: 10px;
+        .interface-status {
+            font-weight: bold;
         }
-        .peer-buttons button {
-            margin: 5px;
-            padding: 8px 15px;
+        .interface-status.connected {
+            color: #2e7d32;
+        }
+        .interface-status.disconnected {
+            color: #c62828;
+        }
+        button {
             cursor: pointer;
+            padding: 8px 14px;
+            border-radius: 4px;
         }
-        .peer-info {
-            display: none;
-            margin-top: 10px;
-            padding: 10px;
-            background-color: #fff;
-            border: 1px solid #ccc;
-            border-radius: 3px;
-        }
-        .peer-edit-form {
-            display: none;
-            margin-top: 10px;
-            padding: 10px;
-            background-color: #fff;
-            border: 1px solid #ccc;
-            border-radius: 3px;
-        }
-        .peer-edit-form input {
-            width: 100%;
-            margin: 5px 0;
-            padding: 5px;
-        }
-        .config-form {
-            display: none;
-            margin-top: 10px;
-        }
-        .config-form.active {
-            display: block;
-        }
-        .interface-info {
-            padding: 10px;
-            margin: 10px 0;
-            background-color: #e8f5e9;
-            border: 1px solid #4caf50;
-            border-radius: 5px;
-        }
-        .interface-info h4 {
-            margin-top: 0;
-        }
-        label {
-            display: block;
-            margin-top: 10px;
-        }
-        input[type="text"], input[type="number"] {
-            width: 300px;
-            padding: 5px;
-        }
-        hr {
-            margin: 20px 0;
+        #interfaces-empty {
+            margin-top: 30px;
+            text-align: center;
         }
     </style>
 </head>
@@ -154,117 +79,22 @@
         <h1>WireGuard VPN Manager</h1>
         <div class="nav-buttons">
             <a href="/" class="nav-btn active">Home</a>
-            <a href="/dashboard" class="nav-btn">Monitor</a>
-        </div>
-    </div>
-    <div id="key-status-banner" class="key-status-banner"></div>
-    
-    <hr>
-    
-    <div id="vpn-section">
-        <h2>VPN Control</h2>
-        <div id="vpn-status" style="margin: 10px 0; padding: 10px; border-radius: 5px; font-weight: bold;">
-            <span>Status: </span><span id="vpn-status-text">Đang kiểm tra...</span>
-        </div>
-        <button onclick="connectVPN()">Connect VPN</button>
-        <button onclick="disconnectVPN()">Disconnect VPN</button>
-        <div id="vpn-output"></div>
-    </div>
-    
-    <hr>
-    
-    <div id="interface-section">
-        <h2>Choose Interface</h2>
-        <input type="text" id="interface-input" value="wg0">
-        <button onclick="chooseInterface()">Set Interface</button>
-        <p>Current interface: <span id="current-interface">wg0</span></p>
-    </div>
-    
-    <hr>
-
-    <div id="configure-section">
-        <h2>Configure Interface</h2>
-        <div id="interface-info-display"></div>
-        <button onclick="toggleConfigInterfaceForm()" id="config-interface-btn">Configure Interface</button>
-        <div id="configure-form" class="config-form">
-            <h3>Keys</h3>
-            <button type="button" onclick="generateKeys()">Generate New Keys</button>
-            <div id="keys-output" style="margin: 10px 0; padding: 10px; background-color: #f0f0f0; border-radius: 3px;"></div>
-    
-            <h3>Network Configuration</h3>
-            <label>Address (e.g. 10.0.0.2/24):</label><br>
-            <input type="text" id="address"><br>
-            
-            <label>Listen Port:</label><br>
-            <input type="text" id="listenPort" value="51820"><br>
-            
-            <label>DNS server:</label><br>
-            <input type="text" id="dns"><br>
-            
-            <label>Table:</label><br>
-            <input type="text" id="table"><br>
-            
-            <label>PreUp command:</label><br>
-            <input type="text" id="preUp"><br>
-            
-            <label>PostUp command:</label><br>
-            <input type="text" id="postUp"><br>
-            
-            <label>PreDown command:</label><br>
-            <input type="text" id="preDown"><br>
-            
-            <label>PostDown command:</label><br>
-            <input type="text" id="postDown"><br><br>
-            
-            <button onclick="configureInterface()">Save Configuration</button>
-            <button onclick="toggleConfigInterfaceForm()">Cancel</button>
-            <div id="configure-output"></div>
         </div>
     </div>
 
-    <hr>
-
-    <div id="peer-section">
-        <h2>Config Peers</h2>
-        
-        <button onclick="toggleAddPeerForm()" id="add-peer-btn">Add New Peer</button>
-        <button onclick="saveConfig()">Save Configuration</button>
-        <div id="add-peer-form" class="config-form">
-            <h3>Add New Peer</h3>
-            
-            <label>Peer Name (optional):</label><br>
-            <input type="text" id="peer-name" placeholder="e.g. Home Server, Mobile Device"><br>
-            
-            <label>Peer Public Key:</label><br>
-            <input type="text" id="peer-publicKey"><br>
-            
-            <label>Endpoint (IP:Port):</label><br>
-            <input type="text" id="peer-endpoint"><br>
-            
-            <label>Allowed IPs:</label><br>
-            <input type="text" id="peer-allowedIPs" value="0.0.0.0/0"><br>
-            
-            <label>Persistent Keepalive (seconds):</label><br>
-            <input type="text" id="peer-keepalive" value="25"><br>
-            
-            <label><input type="checkbox" id="peer-generatePsk"> Generate Preshared Key</label><br><br>
-            
-            <button onclick="addPeer()">Add Peer</button>
-            <button onclick="toggleAddPeerForm()">Cancel</button>
-            <div id="peer-output"></div>
+    <div class="actions">
+        <div>
+            <h2>Interfaces</h2>
         </div>
-
-        <h3>Current Peers</h3>
-        
-        <div class="search-box">
-            <label>Search Peer:</label>
-            <input type="text" id="peer-search" placeholder="Enter peer name..." oninput="searchPeers()">
-            <button onclick="clearSearch()">Clear</button>
-        </div>
-        
-        <div id="peers-list"></div>
+        <button id="add-interface-btn">Add Interface</button>
     </div>
 
-    <script src="js/config_page.js"></script>
+    <div id="interfaces-empty" style="display: none;">
+        <p>Chưa có interface nào trong /etc/wireguard.</p>
+    </div>
+
+    <div id="interfaces-container" class="interfaces-wrapper"></div>
+
+    <script src="js/interfaces_home.js"></script>
 </body>
 </html>

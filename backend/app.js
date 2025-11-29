@@ -12,6 +12,7 @@ const PORT = 3000;
 const CONFIG_DIR = '/etc/wireguard/';
 let INTERFACE = 'wgA';
 let CONFIG_FILE = path.join(CONFIG_DIR, `${INTERFACE}.conf`);
+const FRONTEND_DIR = path.join(__dirname, '../frontend');
 
 let config = {
   interface: {
@@ -33,7 +34,7 @@ let config = {
 };
 
 app.use(express.json());
-app.use(express.static('../frontend'));
+app.use(express.static(FRONTEND_DIR));
 
 function run(cmd) {
   try {
@@ -287,6 +288,85 @@ function loadConfigFromFile() {
   }
 }
 
+function getActiveInterfaces() {
+  try {
+    const interfacesOutput = run('wg show interfaces').trim();
+    if (!interfacesOutput) {
+      return [];
+    }
+    return interfacesOutput.split(/\s+/).filter(Boolean);
+  } catch (error) {
+    return [];
+  }
+}
+
+function parseInterfaceSummary(filePath) {
+  const summary = { publicKey: '', address: '' };
+  try {
+    if (!fs.existsSync(filePath)) {
+      return summary;
+    }
+    const content = fs.readFileSync(filePath, 'utf8');
+    const lines = content.split('\n');
+    let section = null;
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) {
+        continue;
+      }
+      if (line.startsWith('#')) {
+        continue;
+      }
+      if (line === '[Interface]') {
+        section = 'interface';
+        continue;
+      }
+      if (line === '[Peer]') {
+        break;
+      }
+      if (section === 'interface' && line.includes('=')) {
+        const equalIndex = line.indexOf('=');
+        const key = line.substring(0, equalIndex).trim().toLowerCase();
+        const value = line.substring(equalIndex + 1).trim();
+        if (key === 'address') {
+          summary.address = value;
+        } else if (key === 'publickey') {
+          summary.publicKey = value;
+        } else if (key === 'privatekey' && !summary.publicKey) {
+          try {
+            summary.publicKey = run(`echo "${value}" | wg pubkey`).trim();
+          } catch (error) {
+            // ignore pubkey calculation errors
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error parsing interface summary:', error.message);
+  }
+  return summary;
+}
+
+function listInterfaces() {
+  if (!fs.existsSync(CONFIG_DIR)) {
+    return [];
+  }
+  const files = fs.readdirSync(CONFIG_DIR)
+    .filter(file => file.endsWith('.conf'))
+    .sort();
+  const activeSet = new Set(getActiveInterfaces());
+  return files.map(file => {
+    const interfaceName = path.basename(file, '.conf');
+    const summary = parseInterfaceSummary(path.join(CONFIG_DIR, file));
+    return {
+      name: interfaceName,
+      publicKey: summary.publicKey,
+      address: summary.address,
+      status: activeSet.has(interfaceName) ? 'connected' : 'disconnected'
+    };
+  });
+}
+
 function buildConfigFileContent() {
   let content = '[Interface]\n';
   
@@ -384,6 +464,16 @@ app.get('/api/key-status', (req, res) => {
     keyCreationDate: config.interface.keyCreationDate,
     keyExpiryDays: config.interface.keyExpiryDays
   });
+});
+
+// List all interfaces found in config directory
+app.get('/api/interfaces', (req, res) => {
+  try {
+    const interfaces = listInterfaces();
+    res.json({ success: true, interfaces });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // Generate keys
@@ -684,9 +774,14 @@ app.get('/api/vpn-status', (req, res) => {
   }
 });
 
-// Main app UI
+// Main home UI
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public/index.html'));
+  res.sendFile(path.join(FRONTEND_DIR, 'index.html'));
+});
+
+// Interface config UI (edit/add)
+app.get(['/editInterface/:id', '/addInterface/:id'], (req, res) => {
+  res.sendFile(path.join(FRONTEND_DIR, 'interface_config.html'));
 });
 
 // Dashboard route - serve dashboard.html
@@ -695,8 +790,20 @@ app.get('/dashboard', (req, res) => {
   res.sendFile(dashboardPath);
 });
 
+// Dashboard route for specific interface - serve dashboard.html
+app.get('/dashboard/:id', (req, res) => {
+  const dashboardPath = path.join(__dirname, '../frontend/dashboard.html');
+  res.sendFile(dashboardPath);
+});
+
 // Dashboard peer detail route - serve peer_detail.html
 app.get('/dashboard/peer/:id', (req, res) => {
+  const peerDetailPath = path.join(__dirname, '../frontend/peer_detail.html');
+  res.sendFile(peerDetailPath);
+});
+
+// Dashboard peer detail route for specific interface - serve peer_detail.html
+app.get('/dashboard/:id/peer/:peer_id', (req, res) => {
   const peerDetailPath = path.join(__dirname, '../frontend/peer_detail.html');
   res.sendFile(peerDetailPath);
 });

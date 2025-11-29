@@ -1,6 +1,29 @@
 let keyExpired = false;
 let checkKeyStatusInterval = null;
 let checkVPNStatusInterval = null;
+let interfaceInitialized = false;
+
+const pageContext = (() => {
+    const segments = window.location.pathname.split('/').filter(Boolean);
+    const editIndex = segments.indexOf('editInterface');
+    const addIndex = segments.indexOf('addInterface');
+
+    if (editIndex !== -1 && segments[editIndex + 1]) {
+        return { mode: 'edit', interfaceName: decodeURIComponent(segments[editIndex + 1]) };
+    }
+    if (addIndex !== -1 && segments[addIndex + 1]) {
+        return { mode: 'add', interfaceName: decodeURIComponent(segments[addIndex + 1]) };
+    }
+    return { mode: 'legacy', interfaceName: null };
+})();
+
+// Cập nhật nhãn interface ngay khi script chạy (script được nhúng sau HTML nên DOM đã sẵn sàng)
+if (pageContext.interfaceName) {
+    const label = document.getElementById('interface-context-name');
+    if (label) {
+        label.textContent = pageContext.interfaceName;
+    }
+}
 
 // Check key status from server
 async function checkKeyStatus() {
@@ -132,8 +155,22 @@ function enableAllFunctions() {
     loadPeers();
 }
 
-async function chooseInterface() {
-    const interface_name = document.getElementById('interface-input').value;
+function updateInterfaceContextName(name) {
+    const label = document.getElementById('interface-context-name');
+    if (label) {
+        label.textContent = name || 'Chưa chọn';
+    }
+}
+
+async function chooseInterface(forcedName, options = {}) {
+    const inputEl = document.getElementById('interface-input');
+    const interface_name = forcedName || (inputEl ? inputEl.value : '');
+    if (!interface_name) {
+        alert('Vui lòng nhập tên interface');
+        return;
+    }
+    const silent = options.silent === true;
+    updateInterfaceContextName(interface_name);
     try {
         const response = await fetch('/api/interface', {
             method: 'POST',
@@ -142,7 +179,11 @@ async function chooseInterface() {
         });
         const data = await response.json();
         if (data.success) {
-            document.getElementById('current-interface').textContent = data.interface;
+            const currentInterfaceEl = document.getElementById('current-interface');
+            if (currentInterfaceEl) {
+                currentInterfaceEl.textContent = data.interface;
+            }
+            updateInterfaceContextName(data.interface);
             // Update config with loaded data
             if (data.config) {
                 updateInterfaceDisplay(data.config.interface);
@@ -150,7 +191,11 @@ async function chooseInterface() {
                 // Check key status after loading interface
                 await checkKeyStatus();
             }
-            alert('Interface set to: ' + data.interface);
+            interfaceInitialized = true;
+            if (!silent) {
+                alert('Interface set to: ' + data.interface);
+            }
+            return data;
         } else {
             alert('Error: ' + data.error);
         }
@@ -563,38 +608,82 @@ async function disconnectVPN() {
     }
 }
 
-// Load peers and config on page load
-window.onload = async function() {
+async function initializeInterfaceContext() {
+    const interfaceSection = document.getElementById('interface-section');
+    if (pageContext.mode === 'edit') {
+        if (interfaceSection) {
+            interfaceSection.style.display = 'none';
+        }
+        if (pageContext.interfaceName) {
+            const interfaceInput = document.getElementById('interface-input');
+            if (interfaceInput) {
+                interfaceInput.value = pageContext.interfaceName;
+            }
+            updateInterfaceContextName(pageContext.interfaceName);
+            await chooseInterface(pageContext.interfaceName, { silent: true });
+        }
+        return;
+    }
+    if (pageContext.mode === 'add') {
+        // Ở trang addInterface, đã biết sẵn tên interface từ URL và không cần cho người dùng tự Set Interface nữa
+        if (interfaceSection) {
+            interfaceSection.style.display = 'none';
+        }
+        if (pageContext.interfaceName) {
+            const interfaceInput = document.getElementById('interface-input');
+            if (interfaceInput) {
+                interfaceInput.value = pageContext.interfaceName;
+            }
+            updateInterfaceContextName(pageContext.interfaceName);
+            await chooseInterface(pageContext.interfaceName, { silent: true });
+        }
+        return;
+    }
+    if (interfaceSection) {
+        interfaceSection.style.display = 'block';
+    }
     try {
-        // Get current interface first
         const interfaceResponse = await fetch('/api/interface');
         const interfaceData = await interfaceResponse.json();
         if (interfaceData.interface) {
-            document.getElementById('current-interface').textContent = interfaceData.interface;
+            const currentInterfaceEl = document.getElementById('current-interface');
+            if (currentInterfaceEl) {
+                currentInterfaceEl.textContent = interfaceData.interface;
+            }
             document.getElementById('interface-input').value = interfaceData.interface;
+            updateInterfaceContextName(interfaceData.interface);
         }
-        
-        // Reload config from file once on page load
+    } catch (error) {
+        console.error('Error getting current interface:', error);
+    }
+}
+
+async function reloadCurrentConfig() {
+    try {
         const reloadResponse = await fetch('/api/reload-config');
         const reloadData = await reloadResponse.json();
         if (reloadData.success && reloadData.config) {
             const interfaceConfig = reloadData.config.interface || {};
             updateInterfaceDisplay(interfaceConfig);
-            if (interfaceConfig.address) {
-                document.getElementById('address').value = interfaceConfig.address || '';
-                document.getElementById('listenPort').value = interfaceConfig.listenPort || '51820';
-                document.getElementById('dns').value = interfaceConfig.dns || '';
-                document.getElementById('table').value = interfaceConfig.table || '';
-                document.getElementById('preUp').value = interfaceConfig.preUp || '';
-                document.getElementById('postUp').value = interfaceConfig.postUp || '';
-                document.getElementById('preDown').value = interfaceConfig.preDown || '';
-                document.getElementById('postDown').value = interfaceConfig.postDown || '';
-            }
+            document.getElementById('address').value = interfaceConfig.address || '';
+            document.getElementById('listenPort').value = interfaceConfig.listenPort || '51820';
+            document.getElementById('dns').value = interfaceConfig.dns || '';
+            document.getElementById('table').value = interfaceConfig.table || '';
+            document.getElementById('preUp').value = interfaceConfig.preUp || '';
+            document.getElementById('postUp').value = interfaceConfig.postUp || '';
+            document.getElementById('preDown').value = interfaceConfig.preDown || '';
+            document.getElementById('postDown').value = interfaceConfig.postDown || '';
             loadPeersFromConfig(reloadData.config);
         }
     } catch (error) {
         console.error('Error loading initial config:', error);
     }
+}
+
+// Load peers and config on page load
+window.onload = async function() {
+    await initializeInterfaceContext();
+    await reloadCurrentConfig();
     // Start checking key status
     await checkKeyStatus();
 
