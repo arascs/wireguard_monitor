@@ -189,7 +189,9 @@ setInterval(loadPeers, 30000);
 const iface = window.location.pathname.split("/").pop();
 document.getElementById("title").innerText = `Dashboard: ${iface}`;
 
+const speedChart = echarts.init(document.getElementById('speedChart')); // Mới
 const bytesChart = echarts.init(document.getElementById('bytesChart'));
+const dropRateChart = echarts.init(document.getElementById('dropRateChart')); // Mới
 const dropChart = echarts.init(document.getElementById('dropChart'));
 
 let statsHistory = []; 
@@ -224,6 +226,50 @@ function updateCharts() {
     const rxDrop = statsHistory.map(p => p.rx_dropped);
     const txDrop = statsHistory.map(p => p.tx_dropped);
 
+    // 2. Tính toán dữ liệu cho biểu đồ TỐC ĐỘ (Rate) - Mới
+    const speedTimes = [];
+    const rxSpeed = []; // Bytes/s
+    const txSpeed = []; // Bytes/s
+    const rxDropRate = []; // Packets/s
+    const txDropRate = []; // Packets/s
+
+    for (let i = 1; i < statsHistory.length; i++) {
+        const curr = statsHistory[i];
+        const prev = statsHistory[i-1];
+
+        // Tính khoảng thời gian giữa 2 lần log (đổi ra giây)
+        // Backend gửi timestamp dạng ms, nên chia 1000
+        const timeDiff = (curr.timestamp - prev.timestamp) / 1000;
+
+        if (timeDiff > 0) {
+            speedTimes.push(new Date(curr.timestamp).toLocaleTimeString());
+
+            // Tính chênh lệch bytes, chia cho thời gian để ra tốc độ (Bytes/s)
+            // Math.max(0, ...) để tránh số âm nếu counter bị reset (khi reboot server)
+            rxSpeed.push(Math.max(0, curr.rx_bytes - prev.rx_bytes) / timeDiff);
+            txSpeed.push(Math.max(0, curr.tx_bytes - prev.tx_bytes) / timeDiff);
+
+            // Tương tự cho dropped packets
+            rxDropRate.push(Math.max(0, curr.rx_dropped - prev.rx_dropped) / timeDiff);
+            txDropRate.push(Math.max(0, curr.tx_dropped - prev.tx_dropped) / timeDiff);
+        }
+    }
+
+    // --- Cấu hình biểu đồ ---
+
+    // 1. Biểu đồ Tốc độ (Mới)
+    speedChart.setOption({
+        title: { text: "Network Speed (Bytes/sec)" },
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['Download Speed', 'Upload Speed'] },
+        xAxis: { type: 'category', data: speedTimes },
+        yAxis: { type: 'value' },
+        series: [
+            { name: "Download Speed", type: 'line', smooth: true, areaStyle: {}, data: rxSpeed },
+            { name: "Upload Speed", type: 'line', smooth: true, areaStyle: {}, data: txSpeed }
+        ]
+    });
+
     bytesChart.setOption({
         title: { text: "Bandwidth (bytes)" },
         tooltip: { trigger: 'axis' },
@@ -232,6 +278,19 @@ function updateCharts() {
         series: [
             { name: "rx_bytes", type: 'line', data: rxBytes, showSymbol: false }, // showSymbol: false giúp biểu đồ mượt hơn khi nhiều điểm
             { name: "tx_bytes", type: 'line', data: txBytes, showSymbol: false }
+        ]
+    });
+
+    // 3. Biểu đồ Tốc độ rớt gói (Mới)
+    dropRateChart.setOption({
+        title: { text: "Packet Drop Rate (Packets/sec)" },
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['RX Drop Rate', 'TX Drop Rate'] },
+        xAxis: { type: 'category', data: speedTimes },
+        yAxis: { type: 'value' },
+        series: [
+            { name: "RX Drop Rate", type: 'line', data: rxDropRate },
+            { name: "TX Drop Rate", type: 'line', data: txDropRate }
         ]
     });
 
