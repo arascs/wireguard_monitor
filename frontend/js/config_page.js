@@ -93,14 +93,14 @@ function updateKeyStatusBanner(statusData) {
     
     if (statusData.expired) {
         banner.className = 'key-status-banner expired';
-        banner.innerHTML = 'KEY ĐÃ HẾT HẠN! VPN đã bị ngắt kết nối. Vui lòng tạo key mới.';
+        banner.innerHTML = 'Key expired. Generate new keys to continue using VPN'; 
     } else if (statusData.remainingDays !== null) {
         if (statusData.remainingDays <= 7) {
             banner.className = 'key-status-banner warning';
-            banner.innerHTML = `Cảnh báo: Key sẽ hết hạn sau ${statusData.remainingDays} ngày. Vui lòng chuẩn bị tạo key mới.`;
+            banner.innerHTML = `Warning: Key expired after ${statusData.remainingDays} days. Generate new keys.`;
         } else {
             banner.className = 'key-status-banner valid';
-            banner.innerHTML = `Key hợp lệ. Còn ${statusData.remainingDays} ngày (Hết hạn: ${statusData.keyExpiryDays} ngày kể từ ngày tạo)`;
+            banner.innerHTML = `Key expired after ${statusData.remainingDays} days.`;
         }
     }
 }

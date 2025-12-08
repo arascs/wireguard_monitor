@@ -3,33 +3,25 @@ const router = express.Router();
 const { exec } = require('child_process');
 
 // Parse output wg show all → JSON
-function parseWG(output) {
-    const peers = [];
-    let current = null;
-
-    output.split("\n").forEach(line => {
-        line = line.trim();
-
-        if (line.startsWith("peer:")) {
-            if (current) peers.push(current);
-            current = { peer: line.split("peer:")[1].trim() };
-        }
-
-        if (line.startsWith("latest handshake:")) {
-            current.handshake = line.replace("latest handshake:", "").trim();
-        }
-
-        if (line.startsWith("transfer:")) {
-            const t = line.replace("transfer:", "").trim();
-            const [recv, sent] = t.split(",").map(x => x.trim());
-
-            current.received = recv;
-            current.sent = sent;
+function parseWGDump(output) {
+    const peersData = {};
+    const lines = output.trim().split('\n');
+    lines.forEach(line => {
+        const parts = line.split('\t');
+        if (parts.length >= 8) {
+            peersData[parts[0]] = { // Key là PublicKey
+                publicKey: parts[0],
+                presharedKey: parts[1],
+                endpoint: parts[2],
+                allowedIPs: parts[3],
+                handshake: parseInt(parts[4]), // Timestamp (seconds)
+                received: parseInt(parts[5]),  // Bytes
+                sent: parseInt(parts[6]),      // Bytes
+                persistentKeepalive: parts[7]
+            };
         }
     });
-
-    if (current) peers.push(current);
-    return peers;
+    return peersData;
 }
 
 // Convert bytes string to number (e.g., "1.5 MiB" -> bytes)
@@ -201,52 +193,32 @@ router.get('/peers', async (req, res) => {
         return res.status(500).json({ error: "Config not available" });
     }
     
-    // Get wg show data
-    exec("wg show all", (err, stdout, stderr) => {
-        if (err) {
-            // If wg show fails, return peers from config only
-            const peers = config.peers.map((peer, idx) => ({
-                id: idx,
-                name: peer.name || '',
-                publicKey: peer.publicKey || '',
-                status: peer.enabled === false ? 'disabled' : 'inactive',
-                received: 0,
-                sent: 0,
-                receivedBytes: 0,
-                sentBytes: 0,
-                handshake: null,
-                endpoint: peer.endpoint || '',
-                allowedIPs: peer.allowedIPs || '',
-                persistentKeepalive: peer.persistentKeepalive || '',
-                presharedKey: peer.presharedKey || ''
-            }));
-            return res.json(peers);
-        }
-        
-        const wgPeers = parseWG(stdout);
-        
-        // Combine config peers with wg show data
+    const ifaceName = interfaceId || 'wg0'; 
+
+    // SỬA: Dùng 'dump' thay vì 'all'
+    exec(`wg show ${ifaceName} dump`, (err, stdout, stderr) => {
+        const wgPeersMap = err ? {} : parseWGDump(stdout);
+
         const combinedPeers = config.peers.map((peer, idx) => {
-            const wgPeer = wgPeers.find(p => p.peer === peer.publicKey);
-            const receivedBytes = wgPeer ? convertBytesToNumber(wgPeer.received) : 0;
-            const sentBytes = wgPeer ? convertBytesToNumber(wgPeer.sent) : 0;
-            const totalBytes = receivedBytes + sentBytes;
+            const wgData = wgPeersMap[peer.publicKey];
             
+            const receivedBytes = wgData ? wgData.received : 0;
+            const sentBytes = wgData ? wgData.sent : 0;
+            const handshakeTime = wgData ? wgData.handshake : 0;
+
             return {
                 id: idx,
                 name: peer.name || '',
                 publicKey: peer.publicKey || '',
-                status: peer.enabled === false ? 'disabled' : (wgPeer ? 'active' : 'inactive'),
-                received: wgPeer ? wgPeer.received : '0 B',
-                sent: wgPeer ? wgPeer.sent : '0 B',
+                // Chỉ gửi dữ liệu thô về client, client sẽ tự tính active/inactive
+                isDisabled: peer.enabled === false, 
                 receivedBytes: receivedBytes,
                 sentBytes: sentBytes,
-                totalBytes: totalBytes,
-                handshake: wgPeer ? wgPeer.handshake : null,
-                endpoint: peer.endpoint || '',
+                totalBytes: receivedBytes + sentBytes,
+                handshake: handshakeTime, // Quan trọng: Đây là số giây (Unix timestamp)
+                endpoint: peer.endpoint || (wgData ? wgData.endpoint : ''),
                 allowedIPs: peer.allowedIPs || '',
-                persistentKeepalive: peer.persistentKeepalive || '',
-                presharedKey: peer.presharedKey || ''
+                persistentKeepalive: peer.persistentKeepalive || ''
             };
         });
         
@@ -511,10 +483,10 @@ router.get('/:id/stats', (req, res) => {
         // Đảm bảo các trường thiếu được điền số 0 (nếu cần thiết để vẽ biểu đồ mượt hơn)
         const finalResult = result.map(item => ({
             timestamp: item.timestamp,
-            rx_bytes: item.rx_bytes || 0,
-            tx_bytes: item.tx_bytes || 0,
-            rx_dropped: item.rx_dropped || 0,
-            tx_dropped: item.tx_dropped || 0,
+            rx_bytes: item.rx_bytes,
+            tx_bytes: item.tx_bytes,
+            rx_dropped: item.rx_dropped,
+            tx_dropped: item.tx_dropped,
             iface // Giữ lại field này nếu frontend cần
         }));
 
