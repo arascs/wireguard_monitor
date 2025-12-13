@@ -7,6 +7,33 @@ function formatBytes(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+// Format duration from seconds to human readable
+function formatDuration(seconds) {
+    if (!seconds || seconds === 0) return '0s';
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    
+    if (hours > 0) {
+        return `${hours}h ${minutes}m ${secs}s`;
+    } else if (minutes > 0) {
+        return `${minutes}m ${secs}s`;
+    } else {
+        return `${secs}s`;
+    }
+}
+
+// Format datetime string to readable format
+function formatDateTime(dateTimeStr) {
+    if (!dateTimeStr) return 'N/A';
+    try {
+        const date = new Date(dateTimeStr);
+        return date.toLocaleString();
+    } catch (e) {
+        return dateTimeStr;
+    }
+}
+
 // Get interface ID and peer ID from URL
 function getIdsFromUrl() {
     const path = window.location.pathname;
@@ -166,10 +193,92 @@ async function loadPeerDetails() {
         console.log('Rendering content...');
         document.getElementById('peer-detail-content').innerHTML = content;
         console.log('Content rendered successfully');
+        
+        // Load connections after peer details are loaded
+        if (interfaceId) {
+            loadPeerConnections(interfaceId, peerId);
+        }
     } catch (error) {
         console.error('Error loading peer details:', error);
         document.getElementById('peer-detail-content').innerHTML = 
             '<div class="error">Error loading peer details: ' + error.message + '</div>';
+    }
+}
+
+// Load peer connections from JSON file
+async function loadPeerConnections(interfaceId, peerId) {
+    try {
+        const url = `/api/dashboard/${encodeURIComponent(interfaceId)}/peer/${peerId}/connections`;
+        console.log('Fetching connections from:', url);
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+            console.error('Failed to load connections');
+            return;
+        }
+        
+        const data = await response.json();
+        console.log('Connections data received:', data);
+        
+        // Find the connections section or create it
+        let connectionsSection = document.getElementById('connections-section');
+        if (!connectionsSection) {
+            // Create connections section after throughput section
+            const peerDetailContent = document.getElementById('peer-detail-content');
+            connectionsSection = document.createElement('div');
+            connectionsSection.id = 'connections-section';
+            connectionsSection.className = 'detail-section';
+            peerDetailContent.appendChild(connectionsSection);
+        }
+        
+        // Build connections table
+        let tableHTML = `
+            <h3>Active Connections</h3>
+            <div style="margin-bottom: 10px; font-size: 0.9em; color: #666;">
+                Last updated: ${data.last_updated ? formatDateTime(data.last_updated) : 'N/A'} | 
+                Active connections: ${data.active_connections_count || 0}
+            </div>
+        `;
+        
+        if (data.sessions && data.sessions.length > 0) {
+            tableHTML += `
+                <table style="width: 100%; border-collapse: collapse; border: 1px solid #000;">
+                    <thead>
+                        <tr style="background-color: #f0f0f0;">
+                            <th style="padding: 10px; border: 1px solid #000; text-align: center;">Source</th>
+                            <th style="padding: 10px; border: 1px solid #000; text-align: center;">Service</th>
+                            <th style="padding: 10px; border: 1px solid #000; text-align: center;">Start Time</th>
+                            <th style="padding: 10px; border: 1px solid #000; text-align: center;">Duration</th>
+                            <th style="padding: 10px; border: 1px solid #000; text-align: center;">Bytes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            data.sessions.forEach(session => {
+                tableHTML += `
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #000;">${session.source || 'N/A'}</td>
+                        <td style="padding: 10px; border: 1px solid #000;">${session.service || 'N/A'}</td>
+                        <td style="padding: 10px; border: 1px solid #000;">${formatDateTime(session.start_time)}</td>
+                        <td style="padding: 10px; border: 1px solid #000;">${formatDuration(session.duration_sec)}</td>
+                        <td style="padding: 10px; border: 1px solid #000;">${formatBytes(session.bytes || 0)}</td>
+                    </tr>
+                `;
+            });
+            
+            tableHTML += `
+                    </tbody>
+                </table>
+            `;
+        } else {
+            tableHTML += '<div style="padding: 20px; text-align: center; color: #666;">No active connections</div>';
+        }
+        
+        connectionsSection.innerHTML = tableHTML;
+        
+    } catch (error) {
+        console.error('Error loading peer connections:', error);
     }
 }
 
@@ -196,7 +305,13 @@ function initPeerDetail() {
     };
     
     // Set up auto-refresh
-    setInterval(loadPeerDetails, 30000);
+    setInterval(() => {
+        const { interfaceId, peerId } = getIdsFromUrl();
+        loadPeerDetails();
+        if (interfaceId && peerId !== null) {
+            loadPeerConnections(interfaceId, peerId);
+        }
+    }, 30000);
 }
 
 // Start initialization immediately

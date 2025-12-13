@@ -498,5 +498,41 @@ router.get('/:id/stats', (req, res) => {
     }
 });
 
+// API: GET /api/dashboard/:interface/peer/:peerId/connections
+// API to fetch peer connections from JSON file
+router.get('/:interface/peer/:peerId/connections', (req, res) => {
+    const interfaceName = req.params.interface;
+    const peerId = req.params.peerId;
+    const STATUS_FILE = '/dev/shm/vpn_live_status.json';
+    
+    try {
+        if (!fs.existsSync(STATUS_FILE)) {
+            return res.json({
+                last_updated: null,
+                active_connections_count: 0,
+                sessions: []
+            });
+        }
+        
+        const fileContent = fs.readFileSync(STATUS_FILE, 'utf-8');
+        const data = JSON.parse(fileContent);
+        
+        // Filter sessions by interface and peer_id
+        const filteredSessions = data.sessions.filter(session => {
+            return session.interface === interfaceName && session.peer_id === peerId;
+        });
+        
+        res.json({
+            last_updated: data.last_updated,
+            active_connections_count: filteredSessions.length,
+            sessions: filteredSessions
+        });
+        
+    } catch (error) {
+        console.error("Error reading connections file:", error);
+        res.status(500).json({ error: "Failed to read connections" });
+    }
+});
+
 
 module.exports = router;

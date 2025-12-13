@@ -326,7 +326,6 @@ function updateCharts() {
 
 // --- 4. Initialization ---
 window.onload = async function() {
-    // ... (Giữ nguyên logic onload cũ)
     const interfaceId = getInterfaceIdFromUrl();
     if (interfaceId) {
         const success = await setInterface(interfaceId);

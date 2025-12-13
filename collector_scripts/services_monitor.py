@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+import time
+import json
+import subprocess
+import os
+import logging
+import xml.etree.ElementTree as ET
+from datetime import datetime
+
+# --- CẤU HÌNH ---
+INTERVAL = 5  # Chu kỳ quét (giây)
+CONF_DIR = "/home/sara/wireguard_CLI_interactive/config"
+LOG_FILE = "/var/log/vpn_monitor.log"
+STATUS_FILE = "/dev/shm/vpn_live_status.json" # Ghi vào RAM
+
+# Thiết lập Log
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+class VPNMonitor:
+    def __init__(self):
+        # peers_map: Key = IP_VPN, Value = {id, name, interface}
+        self.peers_map = {}
+        # resources_map: Key = "IP:Port", Value = service_name
+        self.resources_map = {}
+        # sessions: Key = (src_ip, sport, dst_ip, dport), Value = SessionData
+        self.sessions = {}
+        self.last_load_time = 0
+
+    def load_config(self):
+        """Load config Peers và Resources"""
+        try:
+            # Check file peers.json
+            p_path = f"{CONF_DIR}/peers.json"
+            r_path = f"{CONF_DIR}/resources.json"
+            
+            # Reload nếu file thay đổi (check timestamp của peers hoặc resources)
+            p_mtime = os.stat(p_path).st_mtime
+            r_mtime = os.stat(r_path).st_mtime
+            
+            if p_mtime <= self.last_load_time and r_mtime <= self.last_load_time:
+                return
+
+            # --- XỬ LÝ PEERS.JSON ---
+            with open(p_path, 'r') as f:
+                data = json.load(f)
+                new_peers = {}
+                # Duyệt qua từng Interface (wgA, wg2...)
+                for iface_name, peer_list in data.items():
+                    for peer in peer_list:
+                        # Map IP -> Thông tin kèm tên Interface
+                        new_peers[peer['IP_VPN']] = {
+                            'id': peer['id'],
+                            'name': peer['name'],
+                            'interface': iface_name 
+                        }
+                self.peers_map = new_peers
+
+            # --- XỬ LÝ RESOURCES.JSON ---
+            with open(r_path, 'r') as f:
+                r_data = json.load(f)
+                new_res = {}
+                for r in r_data.get('resources', []):
+                    # Ưu tiên lấy IP, nếu không có thì lấy IP_VPN
+                    target_ip = r.get('IP') or r.get('IP_VPN')
+                    key = f"{target_ip}:{r['port']}"
+                    new_res[key] = r['name']
+                self.resources_map = new_res
+            
+            self.last_load_time = time.time()
+            logging.info(f"Config reloaded. Peers: {len(self.peers_map)}, Resources: {len(self.resources_map)}")
+            
+        except Exception as e:
+            logging.error(f"Failed to load config: {e}")
+
+    def get_conntrack_table(self):
+        try:
+            output = subprocess.check_output(
+                ["conntrack", "-L", "-o", "xml"],
+                stderr=subprocess.DEVNULL
+            ).decode("utf-8", errors="ignore")
+
+            # Cắt bỏ banner, lấy XML thật
+            start = output.find("<conntrack>")
+            if start == -1:
+                raise ValueError("No <conntrack> tag found")
+
+            xml_body = output[start:]
+            return ET.fromstring(xml_body)
+
+        except Exception:
+            logging.exception("Unexpected error while reading conntrack")
+            return None
+
+
+    def run(self):
+        logging.info(f"VPN Monitor started. Interval: {INTERVAL}s")
+        
+        while True:
+            self.load_config()
+            root = self.get_conntrack_table()
+            #logging.info(f"Scan: Found {len(flows)} flows in conntrack.")
+            timestamp = time.time()
+            current_scan_keys = set()
+            
+            if root is not None:
+                flows = root.findall('flow')
+                logging.info(f"Scan: Found {len(flows)} flows in conntrack.") 
+                for flow in flows:
+                    try:
+                        meta = flow.find('meta')
+                        if meta is None: continue
+                        
+                        l3 = meta.find('layer3')
+                        l4 = meta.find('layer4')
+                        
+                        if l3 is None or l4 is None: continue
+                        if l3.get('protoname') != 'ipv4': continue
+                        
+                        # Lấy thông tin cơ bản
+                        src_ip = l3.find('src').text
+                        dst_ip = l3.find('dst').text
+                        
+                        # Lấy Port (TCP/UDP)
+                        if l4.get('protoname') not in ['tcp', 'udp']: continue
+                        sport = l4.find('sport').text
+                        dport = l4.find('dport').text
+                        
+                        # --- KIỂM TRA KHỚP (MATCHING) ---
+                        # 1. Check Peer
+                        peer_info = self.peers_map.get(src_ip)
+                        if not peer_info: continue
+
+                        # 2. Check Resource
+                        res_key = f"{dst_ip}:{dport}"
+                        service_name = self.resources_map.get(res_key)
+                        if not service_name: continue
+
+                        # --- TẠO KEY (Bao gồm Source Port) ---
+                        # Key định danh duy nhất: (SrcIP, Sport, DstIP, Dport)
+                        session_key = (src_ip, sport, dst_ip, dport)
+                        current_scan_keys.add(session_key)
+
+                        # Lấy số bytes
+                        counters = flow.findall('counters')
+                        total_bytes = 0
+                        for c in counters:
+                            if c.find('bytes') is not None:
+                                total_bytes += int(c.find('bytes').text)
+
+                        # --- CẬP NHẬT TRẠNG THÁI ---
+                        if session_key not in self.sessions:
+                            # New Session
+                            logging.info(f"START: {peer_info['interface']}/{peer_info['name']} ({src_ip}:{sport}) -> {service_name}")
+                            self.sessions[session_key] = {
+                                'interface': peer_info['interface'],
+                                'peer_id': peer_info['id'],
+                                'peer_name': peer_info['name'],
+                                'peer_ip': src_ip,
+                                'peer_port': sport,
+                                'service': service_name,
+                                'start_time': timestamp,
+                                'bytes': total_bytes
+                            }
+                        else:
+                            # Update Session
+                            self.sessions[session_key]['bytes'] = total_bytes
+
+                    except AttributeError:
+                        continue
+
+            # --- XỬ LÝ DESTROY (Kết nối đã đóng) ---
+            # Những key có trong self.sessions nhưng không có trong current_scan_keys
+            # nghĩa là kết nối đã biến mất khỏi bảng conntrack
+            active_keys = list(self.sessions.keys())
+            for key in active_keys:
+                if key not in current_scan_keys:
+                    s = self.sessions[key]
+                    duration = int(timestamp - s['start_time'])
+                    logging.info(f"STOP: {s['interface']}/{s['peer_name']} ({s['peer_ip']}:{s['peer_port']}) -> {s['service']} | Duration: {duration}s | Data: {s['bytes']} bytes")
+                    del self.sessions[key]
+
+            # --- XUẤT RA FILE JSON RAM ---
+            self.export_status()
+            
+            # Ngủ chờ chu kỳ tiếp theo
+            elapsed = time.time() - timestamp
+            time.sleep(max(0, INTERVAL - elapsed))
+
+    def export_status(self, file_path=STATUS_FILE):
+        data = {
+            "last_updated": datetime.now().isoformat(),
+            "active_connections_count": len(self.sessions),
+            "sessions": []
+        }
+        
+        for key, s in self.sessions.items():
+            duration = int(time.time() - s['start_time'])
+            data["sessions"].append({
+                "interface": s['interface'],
+                "peer_id": s['peer_id'],
+                "peer_name": s['peer_name'],
+                "source": f"{s['peer_ip']}:{s['peer_port']}",
+                "service": s['service'],
+                "start_time": datetime.fromtimestamp(s['start_time']).isoformat(),
+                "duration_sec": duration,
+                "bytes": s['bytes']
+            })
+            
+        # Ghi atomic
+        tmp = f"{file_path}.tmp"
+        with open(tmp, 'w') as f:
+            json.dump(data, f, indent=2)
+        os.rename(tmp, file_path)
+
+if __name__ == "__main__":
+    monitor = VPNMonitor()
+    monitor.run()
