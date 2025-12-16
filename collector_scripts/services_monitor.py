@@ -148,9 +148,13 @@ class VPNMonitor:
                         # Lấy số bytes
                         counters = flow.findall('counters')
                         total_bytes = 0
-                        for c in counters:
-                            if c.find('bytes') is not None:
-                                total_bytes += int(c.find('bytes').text)
+                        
+                        for meta_tag in flow.findall('meta'):
+                            counters = meta_tag.find('counters')
+                            if counters is not None:
+                                bytes_node = counters.find('bytes')
+                                if bytes_node is not None:
+                                    total_bytes += int(bytes_node.text)
 
                         # --- CẬP NHẬT TRẠNG THÁI ---
                         if session_key not in self.sessions:

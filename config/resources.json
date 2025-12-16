@@ -7,6 +7,12 @@
             "port": 22
         },
         {
+            "name": "ssh_ubuntu25_1",
+            "type": "ssh",
+            "IP": "10.0.0.1",
+            "port": 22
+        },
+        {
             "name": "Web_Wireguard_GUI",
             "type": "web",
             "IP_VPN": "10.10.10.1",

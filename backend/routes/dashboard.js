@@ -2,7 +2,37 @@ const express = require('express');
 const router = express.Router();
 const { exec } = require('child_process');
 
-// Parse output wg show all → JSON
+// Parse wg show all
+function parseWG(output) {
+    const peers = [];
+    let current = null;
+
+    output.split("\n").forEach(line => {
+        line = line.trim();
+
+        if (line.startsWith("peer:")) {
+            if (current) peers.push(current);
+            current = { peer: line.split("peer:")[1].trim() };
+        }
+
+        if (line.startsWith("latest handshake:")) {
+            current.handshake = line.replace("latest handshake:", "").trim();
+        }
+
+        if (line.startsWith("transfer:")) {
+            const t = line.replace("transfer:", "").trim();
+            const [recv, sent] = t.split(",").map(x => x.trim());
+
+            current.received = recv;
+            current.sent = sent;
+        }
+    });
+
+    if (current) peers.push(current);
+    return peers;
+}
+
+// Parse output wg show dump → JSON
 function parseWGDump(output) {
     const peersData = {};
     const lines = output.trim().split('\n');
