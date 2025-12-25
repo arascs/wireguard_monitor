@@ -126,7 +126,8 @@ class VPNMonitor:
                         dst_ip = l3.find('dst').text
                         
                         # Lấy Port (TCP/UDP)
-                        if l4.get('protoname') not in ['tcp', 'udp']: continue
+                        protocol = l4.get('protoname')
+                        if protocol not in ['tcp', 'udp']: continue
                         sport = l4.find('sport').text
                         dport = l4.find('dport').text
                         
@@ -145,16 +146,40 @@ class VPNMonitor:
                         session_key = (src_ip, sport, dst_ip, dport)
                         current_scan_keys.add(session_key)
 
-                        # Lấy số bytes
-                        counters = flow.findall('counters')
+                        # Trích xuất dữ liệu 2 chiều từ conntrack
+                        # Mỗi flow có 2 meta tags: original và reply
+                        direction1_packets = 0
+                        direction1_bytes = 0
+                        direction2_packets = 0
+                        direction2_bytes = 0
                         total_bytes = 0
                         
-                        for meta_tag in flow.findall('meta'):
-                            counters = meta_tag.find('counters')
-                            if counters is not None:
-                                bytes_node = counters.find('bytes')
+                        meta_tags = flow.findall('meta')
+                        if len(meta_tags) >= 1:
+                            # Direction 1: Peer -> Resource
+                            meta1 = meta_tags[0]
+                            counters1 = meta1.find('counters')
+                            if counters1 is not None:
+                                packets_node = counters1.find('packets')
+                                bytes_node = counters1.find('bytes')
+                                if packets_node is not None:
+                                    direction1_packets = int(packets_node.text)
                                 if bytes_node is not None:
-                                    total_bytes += int(bytes_node.text)
+                                    direction1_bytes = int(bytes_node.text)
+                                    total_bytes += direction1_bytes
+                        
+                        if len(meta_tags) >= 2:
+                            # Direction 2: Resource -> Peer
+                            meta2 = meta_tags[1]
+                            counters2 = meta2.find('counters')
+                            if counters2 is not None:
+                                packets_node = counters2.find('packets')
+                                bytes_node = counters2.find('bytes')
+                                if packets_node is not None:
+                                    direction2_packets = int(packets_node.text)
+                                if bytes_node is not None:
+                                    direction2_bytes = int(bytes_node.text)
+                                    total_bytes += direction2_bytes
 
                         # --- CẬP NHẬT TRẠNG THÁI ---
                         if session_key not in self.sessions:
@@ -166,13 +191,32 @@ class VPNMonitor:
                                 'peer_name': peer_info['name'],
                                 'peer_ip': src_ip,
                                 'peer_port': sport,
+                                'resource_ip': dst_ip,
+                                'resource_port': dport,
                                 'service': service_name,
+                                'protocol': protocol,
                                 'start_time': timestamp,
-                                'bytes': total_bytes
+                                'bytes': total_bytes,
+                                'direction1': {
+                                    'packets': direction1_packets,
+                                    'bytes': direction1_bytes
+                                },
+                                'direction2': {
+                                    'packets': direction2_packets,
+                                    'bytes': direction2_bytes
+                                }
                             }
                         else:
                             # Update Session
                             self.sessions[session_key]['bytes'] = total_bytes
+                            self.sessions[session_key]['direction1'] = {
+                                'packets': direction1_packets,
+                                'bytes': direction1_bytes
+                            }
+                            self.sessions[session_key]['direction2'] = {
+                                'packets': direction2_packets,
+                                'bytes': direction2_bytes
+                            }
 
                     except AttributeError:
                         continue
@@ -209,10 +253,14 @@ class VPNMonitor:
                 "peer_id": s['peer_id'],
                 "peer_name": s['peer_name'],
                 "source": f"{s['peer_ip']}:{s['peer_port']}",
+                "resource_ip_port": f"{s['resource_ip']}:{s['resource_port']}",
                 "service": s['service'],
+                "protocol": s['protocol'],
                 "start_time": datetime.fromtimestamp(s['start_time']).isoformat(),
                 "duration_sec": duration,
-                "bytes": s['bytes']
+                "bytes": s['bytes'],
+                "direction1": s.get('direction1', {'packets': 0, 'bytes': 0}),
+                "direction2": s.get('direction2', {'packets': 0, 'bytes': 0})
             })
             
         # Ghi atomic

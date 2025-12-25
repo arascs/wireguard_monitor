@@ -247,22 +247,47 @@ async function loadPeerConnections(interfaceId, peerId) {
                         <tr style="background-color: #f0f0f0;">
                             <th style="padding: 10px; border: 1px solid #000; text-align: center;">Source</th>
                             <th style="padding: 10px; border: 1px solid #000; text-align: center;">Service</th>
+                            <th style="padding: 10px; border: 1px solid #000; text-align: center;">Resource IP:Port</th>
+                            <th style="padding: 10px; border: 1px solid #000; text-align: center;">Protocol</th>
                             <th style="padding: 10px; border: 1px solid #000; text-align: center;">Start Time</th>
                             <th style="padding: 10px; border: 1px solid #000; text-align: center;">Duration</th>
                             <th style="padding: 10px; border: 1px solid #000; text-align: center;">Bytes</th>
+                            <th style="padding: 10px; border: 1px solid #000; text-align: center;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
             `;
             
-            data.sessions.forEach(session => {
+            data.sessions.forEach((session, index) => {
+                const sessionId = `session-${index}`;
+                const dir1 = session.direction1 || { packets: 0, bytes: 0 };
+                const dir2 = session.direction2 || { packets: 0, bytes: 0 };
                 tableHTML += `
                     <tr>
                         <td style="padding: 10px; border: 1px solid #000;">${session.source || 'N/A'}</td>
                         <td style="padding: 10px; border: 1px solid #000;">${session.service || 'N/A'}</td>
+                        <td style="padding: 10px; border: 1px solid #000;">${session.resource_ip_port || 'N/A'}</td>
+                        <td style="padding: 10px; border: 1px solid #000;">${(session.protocol || 'N/A').toUpperCase()}</td>
                         <td style="padding: 10px; border: 1px solid #000;">${formatDateTime(session.start_time)}</td>
                         <td style="padding: 10px; border: 1px solid #000;">${formatDuration(session.duration_sec)}</td>
                         <td style="padding: 10px; border: 1px solid #000;">${formatBytes(session.bytes || 0)}</td>
+                        <td style="padding: 10px; border: 1px solid #000; text-align: center;">
+                            <button onclick="toggleConnectionDetails(${index})" style="padding: 5px 10px; cursor: pointer; border: 1px solid #000; background: #fff;">View Details</button>
+                        </td>
+                    </tr>
+                    <tr id="detail-${index}" style="display: none;">
+                        <td colspan="8" style="padding: 15px; border: 1px solid #000; background-color: #f9f9f9;">
+                            <div style="margin-left: 20px;">
+                                <div style="margin-bottom: 10px;">
+                                    <strong>Direction 1: ${session.source || 'N/A'} → ${session.resource_ip_port || 'N/A'}</strong><br>
+                                    Packets: ${dir1.packets || 0} | Bytes: ${formatBytes(dir1.bytes || 0)}
+                                </div>
+                                <div>
+                                    <strong>Direction 2: ${session.resource_ip_port || 'N/A'} → ${session.source || 'N/A'}</strong><br>
+                                    Packets: ${dir2.packets || 0} | Bytes: ${formatBytes(dir2.bytes || 0)}
+                                </div>
+                            </div>
+                        </td>
                     </tr>
                 `;
             });
@@ -271,6 +296,7 @@ async function loadPeerConnections(interfaceId, peerId) {
                     </tbody>
                 </table>
             `;
+            
         } else {
             tableHTML += '<div style="padding: 20px; text-align: center; color: #666;">No active connections</div>';
         }
@@ -279,6 +305,18 @@ async function loadPeerConnections(interfaceId, peerId) {
         
     } catch (error) {
         console.error('Error loading peer connections:', error);
+    }
+}
+
+// Toggle connection details row
+function toggleConnectionDetails(index) {
+    const detailRow = document.getElementById(`detail-${index}`);
+    if (detailRow) {
+        if (detailRow.style.display === 'none') {
+            detailRow.style.display = '';
+        } else {
+            detailRow.style.display = 'none';
+        }
     }
 }
 
