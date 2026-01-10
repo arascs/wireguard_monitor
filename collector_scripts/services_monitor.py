@@ -7,13 +7,11 @@ import logging
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
-# --- CẤU HÌNH ---
-INTERVAL = 5  # Chu kỳ quét (giây)
+INTERVAL = 5
 CONF_DIR = "/home/sara/wireguard_CLI_interactive/config"
 LOG_FILE = "/var/log/vpn_monitor.log"
 STATUS_FILE = "/dev/shm/vpn_live_status.json" # Ghi vào RAM
 
-# Thiết lập Log
 logging.basicConfig(
     filename=LOG_FILE,
     level=logging.INFO,
@@ -34,7 +32,6 @@ class VPNMonitor:
     def load_config(self):
         """Load config Peers và Resources"""
         try:
-            # Check file peers.json
             p_path = f"{CONF_DIR}/peers.json"
             r_path = f"{CONF_DIR}/resources.json"
             
@@ -45,11 +42,11 @@ class VPNMonitor:
             if p_mtime <= self.last_load_time and r_mtime <= self.last_load_time:
                 return
 
-            # --- XỬ LÝ PEERS.JSON ---
+            # peers.json
             with open(p_path, 'r') as f:
                 data = json.load(f)
                 new_peers = {}
-                # Duyệt qua từng Interface (wgA, wg2...)
+                # Duyệt qua từng Interface
                 for iface_name, peer_list in data.items():
                     for peer in peer_list:
                         # Map IP -> Thông tin kèm tên Interface
@@ -60,13 +57,12 @@ class VPNMonitor:
                         }
                 self.peers_map = new_peers
 
-            # --- XỬ LÝ RESOURCES.JSON ---
+            # resources.json
             with open(r_path, 'r') as f:
                 r_data = json.load(f)
                 new_res = {}
                 for r in r_data.get('resources', []):
-                    # Ưu tiên lấy IP, nếu không có thì lấy IP_VPN
-                    target_ip = r.get('IP') or r.get('IP_VPN')
+                    target_ip = r.get('IP_VPN')
                     key = f"{target_ip}:{r['port']}"
                     new_res[key] = r['name']
                 self.resources_map = new_res
@@ -84,7 +80,6 @@ class VPNMonitor:
                 stderr=subprocess.DEVNULL
             ).decode("utf-8", errors="ignore")
 
-            # Cắt bỏ banner, lấy XML thật
             start = output.find("<conntrack>")
             if start == -1:
                 raise ValueError("No <conntrack> tag found")
@@ -121,7 +116,6 @@ class VPNMonitor:
                         if l3 is None or l4 is None: continue
                         if l3.get('protoname') != 'ipv4': continue
                         
-                        # Lấy thông tin cơ bản
                         src_ip = l3.find('src').text
                         dst_ip = l3.find('dst').text
                         
@@ -131,17 +125,14 @@ class VPNMonitor:
                         sport = l4.find('sport').text
                         dport = l4.find('dport').text
                         
-                        # --- KIỂM TRA KHỚP (MATCHING) ---
-                        # 1. Check Peer
+                        # hiểm tra khớp
                         peer_info = self.peers_map.get(src_ip)
                         if not peer_info: continue
 
-                        # 2. Check Resource
                         res_key = f"{dst_ip}:{dport}"
                         service_name = self.resources_map.get(res_key)
                         if not service_name: continue
 
-                        # --- TẠO KEY (Bao gồm Source Port) ---
                         # Key định danh duy nhất: (SrcIP, Sport, DstIP, Dport)
                         session_key = (src_ip, sport, dst_ip, dport)
                         current_scan_keys.add(session_key)
@@ -181,7 +172,7 @@ class VPNMonitor:
                                     direction2_bytes = int(bytes_node.text)
                                     total_bytes += direction2_bytes
 
-                        # --- CẬP NHẬT TRẠNG THÁI ---
+                        # Cập nhật trạng thái
                         if session_key not in self.sessions:
                             # New Session
                             logging.info(f"START: {peer_info['interface']}/{peer_info['name']} ({src_ip}:{sport}) -> {service_name}")
@@ -221,7 +212,7 @@ class VPNMonitor:
                     except AttributeError:
                         continue
 
-            # --- XỬ LÝ DESTROY (Kết nối đã đóng) ---
+            # Xóa những kết nối đã DESTROY
             # Những key có trong self.sessions nhưng không có trong current_scan_keys
             # nghĩa là kết nối đã biến mất khỏi bảng conntrack
             active_keys = list(self.sessions.keys())
@@ -232,10 +223,9 @@ class VPNMonitor:
                     logging.info(f"STOP: {s['interface']}/{s['peer_name']} ({s['peer_ip']}:{s['peer_port']}) -> {s['service']} | Duration: {duration}s | Data: {s['bytes']} bytes")
                     del self.sessions[key]
 
-            # --- XUẤT RA FILE JSON RAM ---
+            # Xuất ra RAM
             self.export_status()
             
-            # Ngủ chờ chu kỳ tiếp theo
             elapsed = time.time() - timestamp
             time.sleep(max(0, INTERVAL - elapsed))
 
@@ -263,7 +253,6 @@ class VPNMonitor:
                 "direction2": s.get('direction2', {'packets': 0, 'bytes': 0})
             })
             
-        # Ghi atomic
         tmp = f"{file_path}.tmp"
         with open(tmp, 'w') as f:
             json.dump(data, f, indent=2)

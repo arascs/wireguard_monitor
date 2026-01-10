@@ -1,0 +1,6 @@
+[Unit]
+Description=WireGuard Key Sync
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/bin/wg-key-sync.py

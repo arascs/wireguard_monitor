@@ -1,0 +1,15 @@
+[Unit]
+Description=VPN WireGuard Resource Monitor
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/services_monitor.py
+Restart=always
+RestartSec=5
+# Ensure python write log instantly
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+[Unit]
+Description=WireGuard traffic statistics collector
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/bin/wg_stats_collector.py

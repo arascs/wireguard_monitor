@@ -1,0 +1,15 @@
+[Unit]
+Description=Wireguard Monitor
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/wireguard_monitor/app/backend
+ExecStart=/usr/bin/node app.js
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

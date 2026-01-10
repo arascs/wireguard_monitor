@@ -1,0 +1,8 @@
+[Unit]
+Description=WireGuard Stats for interface Collector
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/general_interface_collector.sh
+User=root
