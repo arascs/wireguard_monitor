@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>WireGuard VPN Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f0f0f0;
+            color: #333;
+            font-size: 16px;
+            line-height: 1.6;
+        }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            margin: 0;
+        }
+
+        h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: rgba(134, 22, 24, 1);
+            margin-bottom: 1rem;
+        }
+
+        h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        p {
+            font-size: 1rem;
+            margin: 0.5rem 0;
+        }
+
+        .navbar {
+            background-color: rgba(134, 22, 24, 0.9);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            z-index: 1000;
+            box-sizing: border-box;
+        }
+
+        .navbar h1 {
+            margin: 0;
+            font-weight: 700;
+        }
+
+        .hostname-display {
+            color: white;
+            font-size: 0.85rem;
+            margin-right: 10px;
+            padding: 6px 14px;
+            font-weight: 500;
+            background-color: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .nav-buttons {
+            display: flex;
+            gap: 10px;
+            margin-right: 20px;
+        }
+
+        .nav-btn {
+            text-decoration: none;
+            padding: 8px 15px;
+            border-radius: 8px;
+            background-color: rgba(134, 22, 24, 0.8);
+            color: white;
+            transition: background-color 0.3s;
+            font-weight: 500;
+        }
+
+        .nav-btn:hover,
+        .nav-btn.active {
+            background-color: rgba(134, 22, 24, 1);
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 70px 20px 20px 20px;
+            background-color: #f0f0f0;
+            color: #333;
+            font-size: 16px;
+            line-height: 1.6;
+        }
+
+
+        .key-status-banner {
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 8px;
+            font-weight: bold;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .key-status-banner.valid {
+            background-color: #e8f5e9;
+            border: 1px solid #4caf50;
+            color: #2e7d32;
+        }
+
+        .key-status-banner.warning {
+            background-color: #fff3e0;
+            border: 1px solid #ff9800;
+            color: #e65100;
+        }
+
+        .key-status-banner.expired {
+            background-color: #ffebee;
+            border: 1px solid #f44336;
+            color: #c62828;
+        }
+
+        .key-status-banner.no-key {
+            background-color: #e3f2fd;
+            border: 1px solid #2196f3;
+            color: #1565c0;
+        }
+
+        .search-box {
+            margin: 15px 0;
+            padding: 15px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .search-box button {
+            margin-top: 6px;
+            /* chỉnh tăng/giảm tuỳ ý */
+        }
+
+        .search-box input {
+            width: 300px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+
+        .peer-item {
+            border: none;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 8px;
+            background-color: white;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .peer-item.disabled {
+            opacity: 0.6;
+            background-color: #f5f5f5;
+        }
+
+        .peer-item.hidden {
+            display: none;
+        }
+
+        .peer-header {
+            font-weight: 600;
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+        }
+
+        .peer-name {
+            color: rgba(134, 22, 24, 1);
+            font-size: 1.1rem;
+            font-weight: 500;
+        }
+
+        .peer-buttons {
+            margin-top: 15px;
+        }
+
+        .peer-buttons button {
+            margin: 5px;
+            padding: 10px 15px;
+            cursor: pointer;
+            background-color: rgba(134, 22, 24, 0.8);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+            font-weight: 500;
+        }
+
+        .peer-buttons button:hover {
+            background-color: rgba(134, 22, 24, 1);
+        }
+
+        .peer-info {
+            display: none;
+            margin-top: 15px;
+            padding: 15px;
+            background-color: #fafafa;
+            border-radius: 8px;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .peer-edit-form {
+            display: none;
+            margin-top: 15px;
+            padding: 20px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .peer-edit-form input {
+            width: 100%;
+            margin: 8px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+
+        .config-form {
+            display: none;
+            margin-top: 20px;
+            padding: 25px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .config-form.active {
+            display: block;
+        }
+
+        .interface-info {
+            padding: 15px;
+            margin: 15px 0;
+            background-color: #e8f5e9;
+            border: 1px solid #4caf50;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .interface-info h4 {
+            margin-top: 0;
+            font-size: 1.1rem;
+        }
+
+        .interface-context {
+            margin: 15px 0 25px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: white;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        label {
+            display: block;
+            margin-top: 15px;
+            font-weight: 500;
+            font-size: 0.95rem;
+        }
+
+        input[type="text"],
+        input[type="number"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 1rem;
+            margin-top: 5px;
+        }
+
+        hr {
+            margin: 30px 0;
+            border: none;
+            border-top: 1px solid #eee;
+        }
+
+        #key-expired-text {
+            color: #2e7d32;
+            font-weight: bold;
+            text-align: center;
+            display: block;
+        }
+
+        button {
+            background-color: rgba(134, 22, 24, 0.9);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            font-weight: 500;
+            font-size: 1rem;
+        }
+
+        button:hover {
+            background-color: rgba(134, 22, 24, 1);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="navbar">
+        <h1>WireGuard VPN Manager</h1>
+        <div class="nav-buttons">
+            <span class="hostname-display"><span></span><strong>{{HOSTNAME}}</strong></span>
+            <a href="/" class="nav-btn active">Home</a>
+        </div>
+    </div>
+    <div class="interface-context">
+        <div>
+            <strong>Currently configuring:</strong>
+            <span id="interface-context-name">Not chosen</span>
+            <br><span id="key-expired-text"></span>
+        </div>
+        <div>
+            <span id="vpn-status"><strong>Status: <span id="vpn-status-text">Checking...</span></strong></span>
+            <button onclick="connectVPN()" style="margin-left: 20px;">Start interface</button>
+            <button onclick="disconnectVPN()" style="margin-left: 10px;">Stop interface</button>
+            <button onclick="restartVPN()" style="margin-left: 10px;">Restart interface</button>
+        </div>
+    </div>
+    <div id="key-status-banner" class="key-status-banner"></div>
+
+    <div id="interface-section">
+        <h2>Choose Interface</h2>
+        <input type="text" id="interface-input" value="wg0">
+        <button onclick="chooseInterface()">Set Interface</button>
+        <p>Current interface: <span id="current-interface">wg0</span></p>
+    </div>
+
+    <hr>
+
+    <div id="config-buttons" style="margin-top: -10px;">
+        <button onclick="showConfigInterface()">Config Interface</button>
+        <button onclick="showConfigPeers()">Config Peers</button>
+    </div>
+
+    <div id="configure-section" style="display: none;">
+        <h2>Configure Interface</h2>
+        <div id="interface-info-display"></div>
+        <button onclick="toggleConfigInterfaceForm()" id="config-interface-btn">Configure Interface</button>
+        <div id="configure-form" class="config-form">
+            <h3>Keys</h3>
+            <button type="button" onclick="generateKeys()">Generate new key pair and distribute</button>
+            <div id="keys-output" style="margin: 10px 0; padding: 10px; background-color: #f0f0f0; border-radius: 2px;">
+            </div>
+
+            <h3>Network Configuration</h3>
+            <label>Address (e.g. 10.0.0.2/24):</label><br>
+            <input type="text" id="address"><br>
+
+            <label>Listen Port:</label><br>
+            <input type="text" id="listenPort" value="51820"><br>
+
+            <label>DNS server:</label><br>
+            <input type="text" id="dns"><br>
+
+            <label>Table:</label><br>
+            <input type="text" id="table"><br>
+
+            <label>MTU:</label><br>
+            <input type="text" id="mtu" value="1420"><br>
+
+            <label>PreUp command:</label><br>
+            <input type="text" id="preUp"><br>
+
+            <label>PostUp command:</label><br>
+            <input type="text" id="postUp"><br>
+
+            <label>PreDown command:</label><br>
+            <input type="text" id="preDown"><br>
+
+            <label>PostDown command:</label><br>
+            <input type="text" id="postDown"><br><br>
+
+            <button onclick="configureInterface()">Save Configuration</button>
+            <button onclick="toggleConfigInterfaceForm()">Cancel</button>
+            <div id="configure-output"></div>
+        </div>
+    </div>
+
+    <div id="peer-section" style="display: none;">
+        <h2>Config Peers</h2>
+
+        <button onclick="toggleAddPeerForm()" id="add-peer-btn">Add New Peer</button>
+        <button onclick="saveConfig()">Save Configuration</button>
+        <div id="add-peer-form" class="config-form">
+            <h3>Add New Peer</h3>
+
+            <label>Peer Name (optional):</label><br>
+            <input type="text" id="peer-name" placeholder="e.g. Home Server, Mobile Device"><br>
+
+            <label>Peer Public Key:</label><br>
+            <input type="text" id="peer-publicKey"><br>
+
+            <label>Endpoint (IP:Port):</label><br>
+            <input type="text" id="peer-endpoint"><br>
+
+            <label>Allowed IPs:</label><br>
+            <input type="text" id="peer-allowedIPs" value="0.0.0.0/0"><br>
+
+            <label>Persistent Keepalive (seconds):</label><br>
+            <input type="text" id="peer-keepalive" value="25"><br>
+
+            <label><input type="checkbox" id="peer-generatePsk"> Generate Preshared Key</label><br><br>
+
+            <button onclick="addPeer()">Add Peer</button>
+            <button onclick="toggleAddPeerForm()">Cancel</button>
+            <div id="peer-output"></div>
+        </div>
+
+        <h3>Current Peers</h3>
+
+        <div class="search-box">
+            <label>Search Peer:</label>
+            <input type="text" id="peer-search" placeholder="Enter peer name..." oninput="searchPeers()">
+            <button onclick="clearSearch()">Clear</button>
+        </div>
+
+        <div id="peers-list"></div>
+    </div>
+
+    <script src="/js/config_page.js"></script>
+</body>
+
+</html>

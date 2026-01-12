@@ -1,0 +1,21 @@
+{
+    "wgA": [
+        {
+            "id": "0",
+            "name": "peer B",
+            "IP_VPN": "10.10.10.2"
+        },
+        {
+            "id": "1",
+            "name": "peer C",
+            "IP_VPN": "10.10.10.3"
+        }
+    ],
+    "wg2": [
+        {   
+            "id": "0",
+            "name": "openVPN_server",
+            "IP_VPN": "10.0.0.2"
+        }
+    ]
+}
