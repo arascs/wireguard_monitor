@@ -491,6 +491,34 @@ app.get('/api/interfaces', (req, res) => {
   }
 });
 
+// Delete interface
+app.delete('/api/delete-interface/:name', (req, res) => {
+  try {
+    const interfaceName = decodeURIComponent(req.params.name);
+    const configFile = path.join(CONFIG_DIR, `${interfaceName}.conf`);
+    
+    if (!fs.existsSync(configFile)) {
+      return res.status(404).json({ success: false, error: 'Interface config file not found' });
+    }
+    
+    // Disconnect interface if running
+    try {
+      const status = run('wg show interfaces');
+      if (status.includes(interfaceName)) {
+        run(`wg-quick down ${interfaceName}`);
+      }
+    } catch (e) {
+      // Interface not running, continue
+    }
+    
+    // Delete config file
+    fs.unlinkSync(configFile);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Generate keys
 app.post('/api/generate-keys', (req, res) => {
   try {

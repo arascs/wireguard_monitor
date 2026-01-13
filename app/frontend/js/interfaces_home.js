@@ -20,14 +20,34 @@ function renderInterfaces(items) {
             <p><strong>Public Key:</strong> ${publicKey}</p>
             <p><strong>Address:</strong> ${address}</p>
             <p class="interface-status ${statusClass}">Status: ${iface.status === 'connected' ? 'Up' : 'Down'}</p>
-            <button data-name="${iface.name}" class="edit-btn">Edit Interface</button>
-            <button data-name="${iface.name}" class="monitor-btn">Monitor</button>
+            <div class="interface-buttons">
+                <button data-name="${iface.name}" class="edit-btn">Edit</button>
+                <button data-name="${iface.name}" class="monitor-btn">Monitor</button>
+                <button data-name="${iface.name}" class="delete-btn">Delete</button>
+            </div>
         `;
         card.querySelector('.edit-btn').addEventListener('click', () => {
             window.location.href = `/editInterface/${encodeURIComponent(iface.name)}`;
         });
         card.querySelector('.monitor-btn').addEventListener('click', () => {
             window.location.href = `/dashboard/${encodeURIComponent(iface.name)}`;
+        });
+        card.querySelector('.delete-btn').addEventListener('click', async () => {
+            if (confirm(`Bạn có chắc muốn xóa interface ${iface.name}?`)) {
+                try {
+                    const response = await fetch(`/api/delete-interface/${encodeURIComponent(iface.name)}`, {
+                        method: 'DELETE'
+                    });
+                    const data = await response.json();
+                    if (data.success) {
+                        loadInterfaces();
+                    } else {
+                        alert('Lỗi: ' + (data.error || 'Không thể xóa interface'));
+                    }
+                } catch (error) {
+                    alert('Lỗi: ' + error.message);
+                }
+            }
         });
         interfacesContainer.appendChild(card);
     });
