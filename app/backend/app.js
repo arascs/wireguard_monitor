@@ -6,11 +6,24 @@ const fs = require('fs');
 const path = require('path');
 const session = require('express-session');
 const bcrypt = require('bcrypt');
+const cors = require('cors');
 const dashboardRoutes = require('./routes/dashboard');
+const createUserRoutes = require('./routes/users');
+const createApplicationRoutes = require('./routes/applications');
+const createAccessRuleRoutes = require('./routes/accessRules');
 const { HOSTNAME } = require('./config');
+const mysql = require('mysql2/promise');
+
+const dbConfig = {
+  host: 'localhost',
+  user: 'root',      
+  password: 'root',     
+  database: 'wg_monitor' 
+};
 
 const app = express();
 const PORT = 3000;
+app.use(cors());
 
 const CONFIG_DIR = '/etc/wireguard/';
 let INTERFACE = 'wgA';
@@ -414,7 +427,7 @@ function buildConfigFileContent() {
     const prefix = isDisabled ? '# ' : '';
     content += `${prefix}PublicKey = ${peer.publicKey}\n`;
     if (peer.presharedKey) content += `${prefix}PresharedKey = ${peer.presharedKey}\n`;
-    content += `${prefix}Endpoint = ${peer.endpoint}\n`;
+    if (peer.endpoint) content += `${prefix}Endpoint = ${peer.endpoint}\n`;
     content += `${prefix}AllowedIPs = ${peer.allowedIPs}\n`;
     if (peer.persistentKeepalive) content += `${prefix}PersistentKeepalive = ${peer.persistentKeepalive}\n`;
   });
@@ -430,11 +443,6 @@ function saveConfigToFile() {
   }
   if (!config.interface.privateKey || !config.interface.address) {
     const err = new Error('Missing required fields (private key, address)');
-    err.statusCode = 400;
-    throw err;
-  }
-  if (config.peers.length === 0) {
-    const err = new Error('No peers configured');
     err.statusCode = 400;
     throw err;
   }
@@ -944,7 +952,52 @@ app.get('/dashboard/:id/peer/:peer_id', requireAuth, (req, res) => {
   res.send(renderHtmlWithHostname(htmlPath));
 });
 
+app.get('/users', requireAuth, (req, res) => {
+  const htmlPath = path.join(FRONTEND_DIR, 'users.html');
+  res.send(renderHtmlWithHostname(htmlPath));
+});
+
+app.get('/applications', requireAuth, (req, res) => {
+  const htmlPath = path.join(FRONTEND_DIR, 'applications.html');
+  res.send(renderHtmlWithHostname(htmlPath));
+});
+
+app.get('/access-rules', requireAuth, (req, res) => {
+  const htmlPath = path.join(FRONTEND_DIR, 'access_rules.html');
+  res.send(renderHtmlWithHostname(htmlPath));
+});
+
 app.use('/api/dashboard', dashboardRoutes);
+
+app.use(
+  '/api',
+  createUserRoutes({
+    mysql,
+    dbConfig,
+    bcrypt,
+    run,
+    requireAuth
+  })
+);
+
+app.use(
+  '/api',
+  createApplicationRoutes({
+    mysql,
+    dbConfig,
+    requireAuth
+  })
+);
+
+app.use(
+  '/api',
+  createAccessRuleRoutes({
+    mysql,
+    dbConfig,
+    run,
+    requireAuth
+  })
+);
 
 // Synchronize keys
 app.post('/api/sync-keys', (req, res) => {
@@ -953,6 +1006,109 @@ app.post('/api/sync-keys', (req, res) => {
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/user-login', async (req, res) => {
+  const originalInterface = INTERFACE;
+  const originalConfigFile = CONFIG_FILE;
+  const originalConfigObj = JSON.parse(JSON.stringify(config));
+  let connection;
+
+  try {
+      const { username, password, publicKey } = req.body;
+
+      if (!username || !password || !publicKey) {
+          return res.status(400).json({ success: false, error: 'Missing credentials' });
+      }
+
+      connection = await mysql.createConnection(dbConfig);
+      const [rows] = await connection.execute(
+          'SELECT password, public_key, allowed_ips FROM users WHERE username = ?', 
+          [username]
+      );
+      await connection.end();
+
+      if (rows.length === 0) {
+          return res.status(401).json({ success: false, error: 'Invalid username' });
+      }
+
+      const user = rows[0];
+
+      const match = await bcrypt.compare(password, user.password);
+      if (!match) {
+          return res.status(401).json({ success: false, error: 'Invalid password' });
+      }
+
+      if (user.public_key !== publicKey) {
+          return res.status(403).json({ success: false, error: 'Public key mismatch' });
+      }
+
+      // Default interface for client connections is wgC
+      INTERFACE = 'wg2';
+      CONFIG_FILE = path.join(CONFIG_DIR, 'wg2.conf');
+
+      if (!fs.existsSync(CONFIG_FILE)) {
+          throw new Error('Interface wgC config not found on server');
+      }
+
+      loadConfigFromFile();
+
+      let peer = config.peers.find(p => p.publicKey === publicKey);
+      let needSave = false;
+
+      if (peer) {
+          if (peer.enabled === false) {             
+              peer.enabled = true;
+              peer.name = username;
+              needSave = true;
+              console.log(`[INFO] Re-enabled user ${username} on wgC`);
+          }
+      } else {
+          const newPeer = {
+              name: username,
+              publicKey: publicKey,
+              presharedKey: '',
+              endpoint: '',
+              allowedIPs: user.allowed_ips || '0.0.0.0',
+              persistentKeepalive: '25',
+              enabled: true
+          };
+          config.peers.push(newPeer);
+          needSave = true;
+          console.log(`[INFO] Added new user ${username} to wgC`);
+      }
+
+      if (needSave) {
+          saveConfigToFile();
+          
+          try {
+              const status = run('wg show interfaces');
+              if (status.includes('wg2')) {
+                  run('bash -c "wg syncconf wg2 <(wg-quick strip wg2)"');
+              }
+          } catch (e) {
+              console.error('Error syncing wgC:', e.message);
+          }
+      }
+
+      res.json({
+        success: true,
+        allowedIPs: user.allowed_ips,          // IP Client sẽ dùng
+        serverPublicKey: config.interface.publicKey, // PubKey của wgC Interface
+        serverEndpoint: '172.16.0.128:51001'    // IP Server (User yêu cầu name là 10.10.10.10, giả định đây là endpoint)
+    });
+
+  } catch (error) {
+      console.error('Login error:', error);
+      res.status(500).json({ success: false, error: error.message });
+  } finally {
+      if (connection) await connection.end();
+
+      INTERFACE = originalInterface;
+      CONFIG_FILE = originalConfigFile;
+      config = originalConfigObj;
+      updateSharedConfig();
   }
 });
 

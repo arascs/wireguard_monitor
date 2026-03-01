@@ -2,7 +2,7 @@
 <html>
 
 <head>
-    <title>WireGuard VPN Manager</title>
+    <title>WireGuard VPN Manager - Access rules</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
@@ -158,63 +158,6 @@
             font-size: 1rem;
         }
 
-        .actions {
-            margin-top: 30px;
-            margin-bottom: 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .actions h2 {
-            color: rgba(134, 22, 24, 1);
-        }
-
-        .interfaces-wrapper {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-            gap: 15px;
-        }
-
-        .interface-card {
-            border: none;
-            border-radius: 8px;
-            padding: 20px;
-            background-color: white;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-            transition: box-shadow 0.3s;
-        }
-
-        .interface-card:hover {
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-        }
-
-        .interface-card h3 {
-            margin-top: 0;
-            margin-bottom: 10px;
-            color: rgba(134, 22, 24, 1);
-            font-size: 1.25rem;
-            font-weight: 600;
-        }
-
-        .interface-card p {
-            margin: 6px 0;
-            font-size: 0.95em;
-            word-break: break-all;
-        }
-
-        .interface-status {
-            font-weight: bold;
-        }
-
-        .interface-status.connected {
-            color: #28a745;
-        }
-
-        .interface-status.disconnected {
-            color: #dc3545;
-        }
-
         button {
             cursor: pointer;
             padding: 10px 20px;
@@ -229,28 +172,6 @@
 
         button:hover {
             background-color: rgba(134, 22, 24, 1);
-        }
-
-        #add-interface-btn {
-            background-color: rgba(134, 22, 24, 0.9);
-        }
-
-        .interface-buttons {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-            flex-wrap: wrap;
-        }
-
-        .interface-buttons button {
-            flex: 1;
-            min-width: 0;
-        }
-
-        #interfaces-empty {
-            margin-top: 30px;
-            text-align: center;
-            color: #666;
         }
 
         .section-title {
@@ -269,7 +190,8 @@
             font-size: 0.9rem;
         }
 
-        .form-group input {
+        .form-group input,
+        .form-group select {
             width: 100%;
             padding: 8px;
             border-radius: 4px;
@@ -305,12 +227,12 @@
     </style>
 </head>
 
-<body data-current="connections">
+<body data-current="access">
     <div class="navbar">
         <h1>WireGuard VPN Manager</h1>
         <div class="nav-buttons">
             <span class="hostname-display"><span></span><strong>{{HOSTNAME}}</strong></span>
-            <a href="/" class="nav-btn active">Home</a>
+            <a href="/" class="nav-btn">Home</a>
             <button id="change-password-btn" class="nav-btn">Change Password</button>
             <button id="logout-btn" class="nav-btn">Logout</button>
         </div>
@@ -327,23 +249,55 @@
     </div>
 
     <div id="main-content">
-        <div>
-            <div class="actions">
-                <div>
-                    <h2>Interfaces</h2>
-                </div>
-                <div style="display: flex; gap: 10px;">
-                    <button id="sync-keys-btn">Synchronize keys</button>
-                    <button id="add-interface-btn">Add Interface</button>
-                </div>
-            </div>
+        <h2 class="section-title">Access rules</h2>
 
-            <div id="interfaces-empty" style="display: none;">
-                <p>Chưa có interface nào trong /etc/wireguard.</p>
+        <form id="create-rule-form">
+            <div class="form-group">
+                <label for="rule-name">Name</label>
+                <input type="text" id="rule-name" required>
             </div>
+            <div class="form-group">
+                <label for="rule-source-type">Source type</label>
+                <select id="rule-source-type" required>
+                    <option value="user">User</option>
+                    <option value="ip">IP</option>
+                </select>
+            </div>
+            <div class="form-group" id="rule-source-user-group">
+                <label for="rule-user-id">User</label>
+                <select id="rule-user-id"></select>
+            </div>
+            <div class="form-group" id="rule-source-ip-group" style="display:none;">
+                <label for="rule-source-ip">Source IP</label>
+                <input type="text" id="rule-source-ip">
+            </div>
+            <div class="form-group">
+                <label for="rule-application-id">Destination application</label>
+                <select id="rule-application-id" required></select>
+            </div>
+            <div class="form-group">
+                <label for="rule-action">Action</label>
+                <select id="rule-action" required>
+                    <option value="allow">allow</option>
+                    <option value="block">block</option>
+                </select>
+            </div>
+            <button type="submit">Create new rule</button>
+        </form>
 
-            <div id="interfaces-container" class="interfaces-wrapper"></div>
-        </div>
+        <table class="simple-table" id="rules-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Source</th>
+                    <th>Destination</th>
+                    <th>Action</th>
+                    <th>Status</th>
+                    <th>Toggle</th>
+                </tr>
+            </thead>
+            <tbody id="rules-tbody"></tbody>
+        </table>
     </div>
 
     <div id="change-password-modal" class="change-password-form">
@@ -359,7 +313,8 @@
     </div>
 
     <script src="js/layout.js"></script>
-    <script src="js/interfaces_home.js"></script>
+    <script src="js/access_rules.js"></script>
 </body>
 
 </html>
+

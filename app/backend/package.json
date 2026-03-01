@@ -12,6 +12,8 @@
   "dependencies": {
     "express": "^5.1.0",
     "express-session": "^1.17.3",
-    "bcrypt": "^5.1.0"
+    "bcrypt": "^5.1.0",
+    "mysql2": "^3.9.1",
+    "cors": "^2.8.5"
   }
 }

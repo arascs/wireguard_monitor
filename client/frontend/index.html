@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WireGuard Client Manager</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 0 20px; }
+        h1 { color: #2c3e50; }
+        .server-list { margin-top: 20px; border-collapse: collapse; width: 100%; }
+        .server-list th, .server-list td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        .server-list th { background-color: #f2f2f2; }
+        .btn { padding: 8px 16px; cursor: pointer; background-color: #3498db; color: white; border: none; border-radius: 4px; }
+        .btn:hover { background-color: #2980b9; }
+        
+        /* Modal Styles */
+        .modal { display: none; position: fixed; z-index: 1; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.4); }
+        .modal-content { background-color: #fefefe; margin: 15% auto; padding: 20px; border: 1px solid #888; width: 300px; border-radius: 5px; }
+        .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; }
+        .form-group input { width: 100%; padding: 8px; box-sizing: border-box; }
+        #status { margin-top: 20px; padding: 10px; display: none; border-radius: 4px; }
+        .success { background-color: #dff0d8; color: #3c763d; }
+        .error { background-color: #f2dede; color: #a94442; }
+    </style>
+</head>
+<body>
+
+    <h1>VPN Servers</h1>
+    <table class="server-list" id="serverTable">
+        <thead>
+            <tr>
+                <th>Server Name</th>
+                <th>Address</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Dữ liệu sẽ được load vào đây -->
+        </tbody>
+    </table>
+
+    <div id="status"></div>
+
+    <!-- Login Modal -->
+    <div id="loginModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Login to VPN</h2>
+            <div class="form-group">
+                <label>Username</label>
+                <input type="text" id="username">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="password">
+            </div>
+            <button class="btn" onclick="submitLogin()">Connect</button>
+        </div>
+    </div>
+
+    <script>
+        let currentServer = null;
+
+        // 1. Load danh sách server khi mở trang
+        async function loadServers() {
+            try {
+                const res = await fetch('/api/servers');
+                const data = await res.json();
+                const tbody = document.querySelector('#serverTable tbody');
+                tbody.innerHTML = '';
+                
+                data.servers.forEach(server => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${server.name}</td>
+                        <td>${server.ip}:${server.port}</td>
+                        <td><button class="btn" onclick="openLogin('${server.ip}', ${server.port})">Connect</button></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (err) {
+                showStatus('Error loading servers: ' + err.message, 'error');
+            }
+        }
+
+        // UI: Mở Modal
+        function openLogin(ip, port) {
+            currentServer = { ip, port };
+            document.getElementById('loginModal').style.display = 'block';
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+            document.getElementById('status').style.display = 'none';
+        }
+
+        // UI: Đóng Modal
+        document.querySelector('.close').onclick = function() {
+            document.getElementById('loginModal').style.display = 'none';
+        }
+
+        // Logic chính: Xử lý Connect
+        async function submitLogin() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const btn = document.querySelector('.modal-content button');
+            
+            if (!username || !password) return alert('Please fill all fields');
+            
+            btn.disabled = true;
+            btn.innerText = 'Connecting...';
+
+            try {
+                // Bước 1: Lấy Public Key từ Backend Client (Local)
+                const keyRes = await fetch('/api/client-identity');
+                const keyData = await keyRes.json();
+                if (!keyData.success) throw new Error(keyData.error);
+
+                // Bước 2: Gọi API Login sang VPN Server (Remote)
+                // Lưu ý: Cần đảm bảo Server VPN đã bật CORS
+                const loginUrl = `http://${currentServer.ip}:${currentServer.port}/api/user-login`;
+                const loginRes = await fetch(loginUrl, {
+                    method: 'POST',
+                    mode: 'cors',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password,
+                        publicKey: keyData.publicKey
+                    })
+                });
+
+                const loginData = await loginRes.json();
+                if (!loginData.success) throw new Error(loginData.error || 'Login failed on server');
+
+                // Bước 3: Gửi kết quả về Backend Client để cấu hình Interface (Local)
+                // Server trả về endpoint không? Nếu không thì tự ghép.
+                const configPayload = {
+                    allowedIPs: loginData.allowedIPs,
+                    serverPublicKey: loginData.serverPublicKey,
+                    serverEndpoint: loginData.serverEndpoint || `${currentServer.ip}:51820`
+                };
+
+                const configRes = await fetch('/api/handle-login-response', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(configPayload)
+                });
+
+                const configResult = await configRes.json();
+                if (!configResult.success) throw new Error(configResult.error);
+
+                document.getElementById('loginModal').style.display = 'none';
+                showStatus(`Success! Connected to ${currentServer.ip}. IP: ${loginData.allowedIPs}`, 'success');
+
+            } catch (err) {
+                alert('Connection Failed: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'Connect';
+            }
+        }
+
+        function showStatus(msg, type) {
+            const el = document.getElementById('status');
+            el.style.display = 'block';
+            el.className = type;
+            el.innerText = msg;
+        }
+
+        // Khởi chạy
+        loadServers();
+    </script>
+</body>
+</html>
