@@ -79,7 +79,7 @@ app.post('/api/handle-login-response', (req, res) => {
 
     // Endpoint mặc định nếu server không trả về (lấy từ logic frontend gửi xuống hoặc fix cứng)
     // Ở bài trước server login trả về serverEndpoint
-    const endpoint = serverEndpoint || '172.16.0.128:51820'; 
+    const endpoint = serverEndpoint || '127.0.0.1:51820'; 
 
     const CLIENT_INTERFACE = 'wg_client';
     const CLIENT_CONFIG_FILE = path.join(CONFIG_DIR, `${CLIENT_INTERFACE}.conf`);
@@ -115,6 +115,37 @@ PersistentKeepalive = 25
     res.json({ success: true, message: 'Connected successfully!' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/disconnect-client', (req, res) => {
+  try {
+    const CLIENT_INTERFACE = 'wg_client';
+    const CLIENT_CONFIG_FILE = path.join(CONFIG_DIR, `${CLIENT_INTERFACE}.conf`);
+
+    try {
+      run(`ip link delete ${CLIENT_INTERFACE}`);
+    } catch (e) {
+      // ignore if interface does not exist
+    }
+
+    if (fs.existsSync(CLIENT_CONFIG_FILE)) {
+      fs.unlinkSync(CLIENT_CONFIG_FILE);
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 4. API: Lấy device name từ /etc/hostname
+app.get('/api/get-device-name', (req, res) => {
+  try {
+    const hostname = fs.readFileSync('/etc/hostname', 'utf8').trim();
+    res.json({ success: true, deviceName: hostname });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message, deviceName: 'device' });
   }
 });
 

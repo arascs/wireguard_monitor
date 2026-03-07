@@ -1,30 +1,114 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WireGuard Client Manager</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 0 20px; }
-        h1 { color: #2c3e50; }
-        .server-list { margin-top: 20px; border-collapse: collapse; width: 100%; }
-        .server-list th, .server-list td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-        .server-list th { background-color: #f2f2f2; }
-        .btn { padding: 8px 16px; cursor: pointer; background-color: #3498db; color: white; border: none; border-radius: 4px; }
-        .btn:hover { background-color: #2980b9; }
-        
-        /* Modal Styles */
-        .modal { display: none; position: fixed; z-index: 1; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.4); }
-        .modal-content { background-color: #fefefe; margin: 15% auto; padding: 20px; border: 1px solid #888; width: 300px; border-radius: 5px; }
-        .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 5px; }
-        .form-group input { width: 100%; padding: 8px; box-sizing: border-box; }
-        #status { margin-top: 20px; padding: 10px; display: none; border-radius: 4px; }
-        .success { background-color: #dff0d8; color: #3c763d; }
-        .error { background-color: #f2dede; color: #a94442; }
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+
+        h1 {
+            color: #2c3e50;
+        }
+
+        .server-list {
+            margin-top: 20px;
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        .server-list th,
+        .server-list td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+
+        .server-list th {
+            background-color: #f2f2f2;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            cursor: pointer;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+
+        .btn:hover {
+            background-color: #2980b9;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.4);
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 15% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 300px;
+            border-radius: 5px;
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+
+        #status {
+            margin-top: 20px;
+            padding: 10px;
+            display: none;
+            border-radius: 4px;
+        }
+
+        .success {
+            background-color: #dff0d8;
+            color: #3c763d;
+        }
+
+        .error {
+            background-color: #f2dede;
+            color: #a94442;
+        }
     </style>
 </head>
+
 <body>
 
     <h1>VPN Servers</h1>
@@ -37,13 +121,12 @@
             </tr>
         </thead>
         <tbody>
-            <!-- Dữ liệu sẽ được load vào đây -->
+
         </tbody>
     </table>
 
     <div id="status"></div>
 
-    <!-- Login Modal -->
     <div id="loginModal" class="modal">
         <div class="modal-content">
             <span class="close">&times;</span>
@@ -60,8 +143,50 @@
         </div>
     </div>
 
+    <div id="enrollModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Enroll Device</h2>
+            <div class="form-group">
+                <label>Username</label>
+                <input type="text" id="enroll-username">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="enroll-password">
+            </div>
+            <div class="form-group">
+                <label>Device Name</label>
+                <input type="text" id="enroll-device-name" readonly>
+            </div>
+            <button class="btn" onclick="submitEnroll()">Submit Enrollment</button>
+        </div>
+    </div>
+
     <script>
         let currentServer = null;
+        let deviceName = '';
+
+        // Fetch device name from /etc/hostname
+        async function fetchDeviceName() {
+            try {
+                const res = await fetch('/api/get-device-name');
+                const data = await res.json();
+                if (data.success && data.deviceName) {
+                    deviceName = data.deviceName.trim();
+                } else {
+                    deviceName = 'device';
+                }
+            } catch (err) {
+                console.error('Error fetching device name:', err);
+                deviceName = 'device';
+            }
+        }
+
+        // Get hostname
+        function getDeviceName() {
+            return deviceName || 'device';
+        }
 
         // 1. Load danh sách server khi mở trang
         async function loadServers() {
@@ -70,13 +195,17 @@
                 const data = await res.json();
                 const tbody = document.querySelector('#serverTable tbody');
                 tbody.innerHTML = '';
-                
+
                 data.servers.forEach(server => {
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td>${server.name}</td>
                         <td>${server.ip}:${server.port}</td>
-                        <td><button class="btn" onclick="openLogin('${server.ip}', ${server.port})">Connect</button></td>
+                        <td>
+                            <button class="btn" onclick="openEnroll('${server.ip}', ${server.port})" style="margin-left: 5px;">Enroll Device</button>
+                            <button class="btn" onclick="openLogin('${server.ip}', ${server.port})">Connect</button>
+                            <button class="btn" onclick="disconnectServer('${server.ip}', ${server.port})" style="margin-left: 5px; background-color: #e74c3c;">Disconnect</button>
+                        </td>
                     `;
                     tbody.appendChild(tr);
                 });
@@ -85,7 +214,7 @@
             }
         }
 
-        // UI: Mở Modal
+        // UI: Mở Modal Connect
         function openLogin(ip, port) {
             currentServer = { ip, port };
             document.getElementById('loginModal').style.display = 'block';
@@ -94,30 +223,97 @@
             document.getElementById('status').style.display = 'none';
         }
 
+        // UI: Mở Modal Enroll
+        function openEnroll(ip, port) {
+            currentServer = { ip, port };
+            document.getElementById('enrollModal').style.display = 'block';
+            document.getElementById('enroll-username').value = '';
+            document.getElementById('enroll-password').value = '';
+            document.getElementById('enroll-device-name').value = getDeviceName();
+            document.getElementById('status').style.display = 'none';
+        }
+
         // UI: Đóng Modal
-        document.querySelector('.close').onclick = function() {
-            document.getElementById('loginModal').style.display = 'none';
+        const closeButtons = document.querySelectorAll('.close');
+        closeButtons.forEach(btn => {
+            btn.onclick = function () {
+                document.getElementById('loginModal').style.display = 'none';
+                document.getElementById('enrollModal').style.display = 'none';
+            }
+        });
+
+        // Enroll Device
+        async function submitEnroll() {
+            const username = document.getElementById('enroll-username').value;
+            const password = document.getElementById('enroll-password').value;
+            const deviceName = document.getElementById('enroll-device-name').value;
+            const btn = document.querySelectorAll('.modal-content button')[1];
+
+            if (!username || !password || !deviceName) return alert('Please fill all fields');
+
+            btn.disabled = true;
+            btn.innerText = 'Submitting...';
+
+            try {
+                const enrollUrl = `http://${currentServer.ip}:${currentServer.port}/api/enroll-device`;
+                const enrollRes = await fetch(enrollUrl, {
+                    method: 'POST',
+                    mode: 'cors',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password,
+                        deviceName: deviceName
+                    })
+                });
+
+                const enrollData = await enrollRes.json();
+                if (!enrollData.success) throw new Error(enrollData.error || 'Enrollment failed');
+
+                document.getElementById('enrollModal').style.display = 'none';
+                showStatus('Device enrollment request submitted successfully! Please wait for admin approval.', 'success');
+            } catch (err) {
+                alert('Enrollment Failed: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'Submit Enrollment';
+            }
         }
 
         // Logic chính: Xử lý Connect
         async function submitLogin() {
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
-            const btn = document.querySelector('.modal-content button');
-            
+            const deviceName = getDeviceName();
+            const btn = document.querySelector('#loginModal .modal-content button');
+
             if (!username || !password) return alert('Please fill all fields');
-            
+
             btn.disabled = true;
             btn.innerText = 'Connecting...';
 
             try {
-                // Bước 1: Lấy Public Key từ Backend Client (Local)
-                const keyRes = await fetch('/api/client-identity');
-                const keyData = await keyRes.json();
-                if (!keyData.success) throw new Error(keyData.error);
+                // Bước 1: Check xem device đã enroll chưa
+                const checkUrl = `http://${currentServer.ip}:${currentServer.port}/api/check-device-enroll`;
+                const checkRes = await fetch(checkUrl, {
+                    method: 'POST',
+                    mode: 'cors',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password,
+                        deviceName: deviceName
+                    })
+                });
 
-                // Bước 2: Gọi API Login sang VPN Server (Remote)
-                // Lưu ý: Cần đảm bảo Server VPN đã bật CORS
+                const checkData = await checkRes.json();
+                if (!checkData.success) throw new Error(checkData.error || 'Check failed');
+
+                if (checkData.message === 'Device not enrolled') {
+                    throw new Error('Device not enrolled. Please enroll first.');
+                }
+
+                // Bước 2: Login
                 const loginUrl = `http://${currentServer.ip}:${currentServer.port}/api/user-login`;
                 const loginRes = await fetch(loginUrl, {
                     method: 'POST',
@@ -126,15 +322,14 @@
                     body: JSON.stringify({
                         username: username,
                         password: password,
-                        publicKey: keyData.publicKey
+                        deviceName: deviceName
                     })
                 });
 
                 const loginData = await loginRes.json();
                 if (!loginData.success) throw new Error(loginData.error || 'Login failed on server');
 
-                // Bước 3: Gửi kết quả về Backend Client để cấu hình Interface (Local)
-                // Server trả về endpoint không? Nếu không thì tự ghép.
+                // Bước 3: Configure interface
                 const configPayload = {
                     allowedIPs: loginData.allowedIPs,
                     serverPublicKey: loginData.serverPublicKey,
@@ -168,8 +363,39 @@
             el.innerText = msg;
         }
 
+        async function disconnectServer(ip, port) {
+            const deviceName = getDeviceName();
+            try {
+                const url = `http://${ip}:${port}/api/disconnect-vpn`;
+                const res = await fetch(url, {
+                    method: 'POST',
+                    mode: 'cors',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ device_name: deviceName })
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || 'Disconnect failed on server');
+
+                const localRes = await fetch('/api/disconnect-client', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                const localData = await localRes.json();
+                if (!localData.success) throw new Error(localData.error || 'Disconnect failed on client');
+
+                showStatus(`Disconnected from ${ip}`, 'success');
+            } catch (err) {
+                showStatus('Disconnect error: ' + err.message, 'error');
+            }
+        }
+
         // Khởi chạy
-        loadServers();
+        (async () => {
+            await fetchDeviceName();
+            loadServers();
+        })();
     </script>
 </body>
+
 </html>

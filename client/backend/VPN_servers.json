@@ -1,9 +1,9 @@
 {
-    "servers": [
-      {
-        "name": "VPN-server-1",
-        "ip": "127.0.0.1",
-        "port": 3000
-      }
-    ]
-  }
+  "servers": [
+    {
+      "name": "VPN-server-1",
+      "ip": "172.16.0.128",
+      "port": 3000
+    }
+  ]
+}

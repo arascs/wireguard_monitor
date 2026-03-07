@@ -7,9 +7,16 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
 ## Features
 
 ### Configuration UI
+#### Admin UI
 - Create, edit, and delete **WireGuard interfaces**
-- Manage **peers**
+- Manage peers for each interface
+- Manage client-to-site connections using user identity and device enrollment
+- Apply access rules to internal applications
+- Create new key pair and synchronize key to other peers
 - Apply configuration changes directly to the system
+
+#### Client UI
+- Log in using personal account, enroll device and connect to VPN server. 
 
 ---
 
@@ -46,6 +53,8 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
   - Root or sudo privileges
 - **NodeJS**
 - `bash`
+- python
+- mysql
 
 ---
 

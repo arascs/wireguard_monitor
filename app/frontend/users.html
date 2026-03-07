@@ -224,6 +224,16 @@
         .simple-table tbody tr:nth-child(even) {
             background-color: #fcfcfc;
         }
+
+        .btn-delete {
+            padding: 6px 12px;
+            background-color: #dc3545;
+            font-size: 0.85rem;
+        }
+
+        .btn-delete:hover {
+            background-color: #c82333;
+        }
     </style>
 </head>
 
@@ -239,17 +249,17 @@
     </div>
 
     <div class="sidebar">
-        <div class="sidebar-title">Menu</div>
         <div class="sidebar-menu">
             <button class="sidebar-item" data-section="connections" data-path="/">Connections</button>
-            <button class="sidebar-item" data-section="users" data-path="/users">User identity</button>
+            <button class="sidebar-item" data-section="users" data-path="/users">Identity</button>
+            <button class="sidebar-item" data-section="devices" data-path="/devices">Devices</button>
             <button class="sidebar-item" data-section="applications" data-path="/applications">Applications</button>
             <button class="sidebar-item" data-section="access" data-path="/access-rules">Access rules</button>
         </div>
     </div>
 
     <div id="main-content">
-        <h2 class="section-title">Quản lý user identity</h2>
+        <h2 class="section-title">Identity</h2>
 
         <form id="create-user-form">
             <div class="form-group">
@@ -261,8 +271,8 @@
                 <input type="password" id="user-password" required>
             </div>
             <div class="form-group">
-                <label for="user-allowedips">Allowed IPs</label>
-                <input type="text" id="user-allowedips" placeholder="10.10.10.0/24" required>
+                <label for="user-expire">Expire Days</label>
+                <input type="number" id="user-expire" placeholder="Ex: 90" min="1">
             </div>
             <button type="submit">Create new user</button>
         </form>
@@ -271,8 +281,9 @@
             <thead>
                 <tr>
                     <th>Username</th>
-                    <th>Allowed IPs</th>
-                    <th>Public key</th>
+                    <th>Create Day</th>
+                    <th>Expire Day</th>
+                    <th>Action</th>
                 </tr>
             </thead>
             <tbody id="users-tbody"></tbody>
@@ -291,16 +302,8 @@
         <p id="change-error" class="error"></p>
     </div>
 
-    <div id="user-key-modal" class="change-password-form">
-        <h3>Private key mới (chỉ hiển thị 1 lần)</h3>
-        <textarea id="user-private-key" rows="5" readonly></textarea>
-        <button type="button" id="copy-user-key-btn">Copy</button>
-        <button type="button" id="close-user-key-btn">Đóng</button>
-    </div>
-
     <script src="js/layout.js"></script>
     <script src="js/users.js"></script>
 </body>
 
 </html>
-

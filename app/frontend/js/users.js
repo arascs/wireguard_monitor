@@ -10,10 +10,29 @@ async function loadUsers() {
     tbody.innerHTML = '';
     (data.users || []).forEach((user) => {
       const tr = document.createElement('tr');
+
+      let createText = '';
+      if (user.create_day) {
+        const epochSeconds = parseInt(user.create_day, 10);
+        if (!Number.isNaN(epochSeconds)) {
+          const date = new Date(epochSeconds * 1000);
+          createText = date.toLocaleDateString('vi-VN') + ' ' + date.toLocaleTimeString('vi-VN');
+        }
+      }
+
+      let expireText = '';
+      if (user.expire_day) {
+        const epochSeconds = parseInt(user.expire_day, 10);
+        if (!Number.isNaN(epochSeconds)) {
+          const date = new Date(epochSeconds * 1000);
+          expireText = date.toLocaleDateString('vi-VN') + ' ' + date.toLocaleTimeString('vi-VN');
+        }
+      }
       tr.innerHTML = `
         <td>${user.username}</td>
-        <td>${user.allowed_ips || ''}</td>
-        <td>${user.public_key || ''}</td>
+        <td>${createText}</td>
+        <td>${expireText}</td>
+        <td><button class="btn-delete" onclick="deleteUser('${user.username}')">Delete</button></td>
       `;
       tbody.appendChild(tr);
     });
@@ -22,65 +41,53 @@ async function loadUsers() {
   }
 }
 
+async function deleteUser(username) {
+  if (!confirm(`Are you sure you want to delete user "${username}"? This will also disable all their devices.`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/users/${encodeURIComponent(username)}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await res.json();
+    if (data.success) {
+      loadUsers();
+      alert('User deleted successfully');
+    } else {
+      alert(data.error || 'Cannot delete user');
+    }
+  } catch (e) {
+    alert(e.message || 'Error deleting user');
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   loadUsers();
 
   const form = document.getElementById('create-user-form');
-  const keyModal = document.getElementById('user-key-modal');
-  const keyTextarea = document.getElementById('user-private-key');
-  const copyBtn = document.getElementById('copy-user-key-btn');
-  const closeBtn = document.getElementById('close-user-key-btn');
 
-  if (copyBtn && keyTextarea) {
-    copyBtn.addEventListener('click', async () => {
-      const value = keyTextarea.value || '';
-      if (!value) {
-        return;
-      }
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(value);
-        } else {
-          keyTextarea.focus();
-          keyTextarea.select();
-          document.execCommand('copy');
-        }
-        alert('Đã copy private key vào clipboard.');
-      } catch (e) {
-        alert('Không copy được tự động, hãy chọn và copy thủ công.');
-      }
-    });
-  }
-
-  if (closeBtn && keyModal && keyTextarea) {
-    closeBtn.addEventListener('click', () => {
-      keyModal.style.display = 'none';
-      keyTextarea.value = '';
-    });
-  }
   if (form) {
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const username = document.getElementById('user-username').value.trim();
       const password = document.getElementById('user-password').value;
-      const allowedIPs = document.getElementById('user-allowedips').value.trim();
-      if (!username || !password || !allowedIPs) {
+      const expireDay = document.getElementById('user-expire').value;
+      if (!username || !password) {
         return;
       }
 
       const res = await fetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, allowedIPs })
+        body: JSON.stringify({ username, password, expireDay })
       });
       const data = await res.json();
       if (data.success) {
         form.reset();
         loadUsers();
-        if (data.privateKey && keyModal && keyTextarea) {
-          keyTextarea.value = data.privateKey;
-          keyModal.style.display = 'block';
-        }
+        alert('User created successfully');
       } else {
         alert(data.error || 'Cannot create user');
       }
