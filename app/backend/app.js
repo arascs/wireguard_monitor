@@ -7,10 +7,12 @@ const path = require('path');
 const session = require('express-session');
 const bcrypt = require('bcrypt');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
 const dashboardRoutes = require('./routes/dashboard');
 const createUserRoutes = require('./routes/users');
 const createApplicationRoutes = require('./routes/applications');
 const createAccessRuleRoutes = require('./routes/accessRules');
+const createAuthRoutes = require('./routes/auth');
 const { HOSTNAME } = require('./config');
 const mysql = require('mysql2/promise');
 
@@ -20,6 +22,26 @@ const dbConfig = {
   password: 'root',
   database: 'wg_monitor'
 };
+
+const JWT_SECRET = process.env.JWT_SECRET || 'please_change_this_secret';
+
+// helper to verify token and attach user info
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader) return res.status(401).json({ success: false, error: 'Missing Authorization header' });
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') {
+    return res.status(401).json({ success: false, error: 'Malformed Authorization header' });
+  }
+  const token = parts[1];
+  jwt.verify(token, JWT_SECRET, (err, payload) => {
+    if (err) {
+      return res.status(401).json({ success: false, error: 'Invalid token' });
+    }
+    req.user = payload;
+    next();
+  });
+}
 
 const app = express();
 const PORT = 3000;
@@ -888,7 +910,7 @@ app.get('/login', (req, res) => {
   res.send(html);
 });
 
-app.post('/api/login', async (req, res) => {
+app.post('/api/admin-login', async (req, res) => {
   const { username, password } = req.body;
   const creds = loadCredentials();
   if (username === creds.username && await bcrypt.compare(password, creds.passwordHash)) {
@@ -974,6 +996,8 @@ app.get('/access-rules', requireAuth, (req, res) => {
 
 app.use('/api/dashboard', dashboardRoutes);
 
+app.use('/api', createAuthRoutes({ jwt, JWT_SECRET, mysql, dbConfig }));
+
 app.use(
   '/api',
   createUserRoutes({
@@ -981,7 +1005,8 @@ app.use(
     dbConfig,
     bcrypt,
     run,
-    requireAuth
+    requireAuth,
+    authenticateToken
   })
 );
 
@@ -1014,35 +1039,21 @@ app.post('/api/sync-keys', (req, res) => {
   }
 });
 
-app.post('/api/user-login', async (req, res) => {
+app.post('/api/user-login', authenticateToken, async (req, res) => {
   const originalInterface = INTERFACE;
   const originalConfigFile = CONFIG_FILE;
   const originalConfigObj = JSON.parse(JSON.stringify(config));
   let connection;
 
   try {
-    const { username, password, deviceName } = req.body;
+    const { deviceName } = req.body;
+    const username = req.user.username;
 
-    if (!username || !password || !deviceName) {
-      return res.status(400).json({ success: false, error: 'Missing credentials' });
+    if (!deviceName) {
+      return res.status(400).json({ success: false, error: 'Missing deviceName' });
     }
 
     connection = await mysql.createConnection(dbConfig);
-
-    // Check user credentials
-    const [users] = await connection.execute(
-      'SELECT password FROM users WHERE username = ?',
-      [username]
-    );
-
-    if (users.length === 0) {
-      return res.status(401).json({ success: false, error: 'Invalid username or password' });
-    }
-
-    const match = await bcrypt.compare(password, users[0].password);
-    if (!match) {
-      return res.status(401).json({ success: false, error: 'Invalid username or password' });
-    }
 
     // Get device info to find enrolled device
     const [devices] = await connection.execute(

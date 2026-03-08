@@ -2,7 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 
-function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth }) {
+function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authenticateToken }) {
   const router = express.Router();
   const CONFIG_DIR = '/etc/wireguard/';
 
@@ -332,29 +332,25 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth }) {
   });
 
   // Enroll device (client endpoint)
-  router.post('/enroll-device', async (req, res) => {
-    const { username, password, deviceName } = req.body || {};
-    if (!username || !password || !deviceName) {
-      return res.status(400).json({ success: false, error: 'Missing required fields' });
+  router.post('/enroll-device', authenticateToken, async (req, res) => {
+    const { deviceName } = req.body || {};
+    const username = req.user.username;
+    if (!deviceName) {
+      return res.status(400).json({ success: false, error: 'Missing deviceName' });
     }
 
     let connection;
     try {
       connection = await mysql.createConnection(dbConfig);
 
-      // Check user credentials
-      const [users] = await connection.execute(
-        'SELECT password FROM users WHERE username = ?',
-        [username]
+      // Check if enrollment request already exists for this device and user
+      const [existing] = await connection.execute(
+        'SELECT id FROM device_enrollment_requests WHERE device_name = ? AND username = ?',
+        [deviceName, username]
       );
 
-      if (users.length === 0) {
-        return res.status(401).json({ success: false, error: 'Invalid username or password' });
-      }
-
-      const match = await bcrypt.compare(password, users[0].password);
-      if (!match) {
-        return res.status(401).json({ success: false, error: 'Invalid username or password' });
+      if (existing.length > 0) {
+        return res.status(409).json({ success: false, error: 'Enrollment request already exists for this device' });
       }
 
       // Create enrollment request in separate table
@@ -375,30 +371,16 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth }) {
   });
 
   // Check user enroll status
-  router.post('/check-device-enroll', async (req, res) => {
-    const { username, password, deviceName } = req.body || {};
-    if (!username || !password || !deviceName) {
-      return res.status(400).json({ success: false, error: 'Missing required fields' });
+  router.post('/check-device-enroll', authenticateToken, async (req, res) => {
+    const { deviceName } = req.body || {};
+    const username = req.user.username;
+    if (!deviceName) {
+      return res.status(400).json({ success: false, error: 'Missing deviceName' });
     }
 
     let connection;
     try {
       connection = await mysql.createConnection(dbConfig);
-
-      // Check user credentials
-      const [users] = await connection.execute(
-        'SELECT password FROM users WHERE username = ?',
-        [username]
-      );
-
-      if (users.length === 0) {
-        return res.status(401).json({ success: false, error: 'Invalid username or password' });
-      }
-
-      const match = await bcrypt.compare(password, users[0].password);
-      if (!match) {
-        return res.status(401).json({ success: false, error: 'Invalid username or password' });
-      }
 
       // Check if device is enrolled
       const [devices] = await connection.execute(
@@ -421,8 +403,9 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth }) {
     }
   });
 
-  router.post('/disconnect-vpn', async (req, res) => {
+  router.post('/disconnect-vpn', authenticateToken, async (req, res) => {
     const deviceName = (req.body && (req.body.device_name || req.body.deviceName)) || '';
+    const username = req.user.username;
     if (!deviceName) {
       return res.status(400).json({ success: false, error: 'Missing device_name' });
     }
@@ -431,8 +414,8 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth }) {
     try {
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        'SELECT public_key FROM devices WHERE device_name = ? ORDER BY id DESC LIMIT 1',
-        [deviceName]
+        'SELECT public_key FROM devices WHERE device_name = ? AND username = ? ORDER BY id DESC LIMIT 1',
+        [deviceName, username]
       );
 
       if (rows.length === 0 || !rows[0].public_key) {

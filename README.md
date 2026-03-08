@@ -16,7 +16,13 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
 - Apply configuration changes directly to the system
 
 #### Client UI
-- Log in using personal account, enroll device and connect to VPN server. 
+- Web interface now requires local login using JWT tokens from identity server
+- After successful authentication the app will proxy enroll/connect actions so the password is never sent again from the browser
+
+#### Identity Server
+- New Python Flask server (`scripts/identity_server.py`) running on port 5001
+- Handles `/api/login` endpoint for user authentication, issues JWT tokens
+- Uses same credentials file as VPN server backend
 
 ---
 

@@ -9,7 +9,6 @@ const cors = require('cors');
 const app = express();
 const PORT = 5000;
 
-// Cấu hình đường dẫn
 const CONFIG_DIR = '/etc/wireguard/';
 const CLIENT_PRIVATE_KEY_FILE = path.join(CONFIG_DIR, 'wg_client.key');
 const CLIENT_PUBLIC_KEY_FILE = path.join(CONFIG_DIR, 'wg_client.pub');
@@ -17,7 +16,7 @@ const VPN_SERVERS_FILE = path.join(__dirname, 'VPN_servers.json');
 
 app.use(express.json());
 app.use(cors());
-app.use(express.static(path.join(__dirname, '../frontend'))); // Phục vụ file frontend
+app.use(express.static(path.join(__dirname, '../frontend')));
 
 function run(cmd) {
   try {
@@ -27,66 +26,14 @@ function run(cmd) {
   }
 }
 
-// 1. API: Lấy danh sách VPN Servers
-app.get('/api/servers', (req, res) => {
-  if (!fs.existsSync(VPN_SERVERS_FILE)) {
-    return res.json({ servers: [] });
-  }
-  const data = fs.readFileSync(VPN_SERVERS_FILE, 'utf8');
-  res.json(JSON.parse(data));
-});
+// Helper to configure WireGuard interface from login response
+function configureClientInterface({ allowedIPs, serverPublicKey, serverEndpoint }) {
+  const CLIENT_INTERFACE = 'wg_client';
+  const CLIENT_CONFIG_FILE = path.join(CONFIG_DIR, `${CLIENT_INTERFACE}.conf`);
+  const privateKey = fs.readFileSync(CLIENT_PRIVATE_KEY_FILE, 'utf8').trim();
 
-// 2. API: Lấy Public Key (Tự tạo nếu chưa có)
-app.get('/api/client-identity', (req, res) => {
-  try {
-    // Tạo thư mục nếu chưa có
-    if (!fs.existsSync(CONFIG_DIR)) {
-      fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    }
-
-    // Nếu chưa có Private Key -> Tạo mới
-    if (!fs.existsSync(CLIENT_PRIVATE_KEY_FILE)) {
-      const privateKey = run('wg genkey').trim();
-      fs.writeFileSync(CLIENT_PRIVATE_KEY_FILE, privateKey, { mode: 0o600 });
-      
-      // Tạo luôn Public Key từ Private Key vừa tạo
-      const publicKey = run(`echo "${privateKey}" | wg pubkey`).trim();
-      fs.writeFileSync(CLIENT_PUBLIC_KEY_FILE, publicKey, { mode: 0o644 });
-    }
-
-    // Đảm bảo file Public Key tồn tại (trường hợp có key private nhưng mất key public)
-    if (!fs.existsSync(CLIENT_PUBLIC_KEY_FILE)) {
-        const privateKey = fs.readFileSync(CLIENT_PRIVATE_KEY_FILE, 'utf8').trim();
-        const publicKey = run(`echo "${privateKey}" | wg pubkey`).trim();
-        fs.writeFileSync(CLIENT_PUBLIC_KEY_FILE, publicKey, { mode: 0o644 });
-    }
-
-    const publicKey = fs.readFileSync(CLIENT_PUBLIC_KEY_FILE, 'utf8').trim();
-    res.json({ success: true, publicKey });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// 3. API: Xử lý response từ server login (Code cũ của bạn)
-app.post('/api/handle-login-response', (req, res) => {
-  try {
-    const { allowedIPs, serverPublicKey, serverEndpoint } = req.body; // Thêm serverEndpoint nếu server trả về
-
-    if (!allowedIPs || !serverPublicKey) {
-      return res.status(400).json({ success: false, error: 'Missing config data' });
-    }
-
-    // Endpoint mặc định nếu server không trả về (lấy từ logic frontend gửi xuống hoặc fix cứng)
-    // Ở bài trước server login trả về serverEndpoint
-    const endpoint = serverEndpoint || '127.0.0.1:51820'; 
-
-    const CLIENT_INTERFACE = 'wg_client';
-    const CLIENT_CONFIG_FILE = path.join(CONFIG_DIR, `${CLIENT_INTERFACE}.conf`);
-
-    const privateKey = fs.readFileSync(CLIENT_PRIVATE_KEY_FILE, 'utf8').trim();
-
-    const configContent = `[Interface]
+  const endpoint = serverEndpoint || '127.0.0.1:51820';
+  const configContent = `[Interface]
 PrivateKey = ${privateKey}
 Address = ${allowedIPs}
 ListenPort = 51000
@@ -98,49 +45,265 @@ Endpoint = ${endpoint}
 PersistentKeepalive = 25
 `;
 
-    fs.writeFileSync(CLIENT_CONFIG_FILE, configContent, { mode: 0o600 });
-    
-    try {
-      const status = run('wg show interfaces');
-      if (status.includes(CLIENT_INTERFACE)) {
-        run(`wg-quick down ${CLIENT_INTERFACE}`);
-        run(`wg-quick up ${CLIENT_INTERFACE}`);
-      } else {
-        run(`wg-quick up ${CLIENT_INTERFACE}`);
-      }
-    } catch (e) {
-        return res.status(500).json({ success: false, error: 'Start VPN failed: ' + e.message });
-    }
-
-    res.json({ success: true, message: 'Connected successfully!' });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.post('/api/disconnect-client', (req, res) => {
+  fs.writeFileSync(CLIENT_CONFIG_FILE, configContent, { mode: 0o600 });
   try {
-    const CLIENT_INTERFACE = 'wg_client';
-    const CLIENT_CONFIG_FILE = path.join(CONFIG_DIR, `${CLIENT_INTERFACE}.conf`);
+    const status = run('wg show interfaces');
+    if (status.includes(CLIENT_INTERFACE)) {
+      run(`wg-quick down ${CLIENT_INTERFACE}`);
+      run(`wg-quick up ${CLIENT_INTERFACE}`);
+    } else {
+      run(`wg-quick up ${CLIENT_INTERFACE}`);
+    }
+  } catch (e) {
+    throw new Error('Start VPN failed: ' + e.message);
+  }
+}
 
-    try {
-      run(`ip link delete ${CLIENT_INTERFACE}`);
-    } catch (e) {
-      // ignore if interface does not exist
+// 1. Get VPN servers list
+app.get('/api/client/servers', (req, res) => {
+  if (!fs.existsSync(VPN_SERVERS_FILE)) {
+    return res.json({ servers: [] });
+  }
+  const data = fs.readFileSync(VPN_SERVERS_FILE, 'utf8');
+  res.json(JSON.parse(data));
+});
+
+// 2. Add VPN server
+app.post('/api/client/servers', (req, res) => {
+  try {
+    const { name, ip, port } = req.body;
+    if (!name || !ip || !port) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
 
-    if (fs.existsSync(CLIENT_CONFIG_FILE)) {
-      fs.unlinkSync(CLIENT_CONFIG_FILE);
+    let servers = [];
+    if (fs.existsSync(VPN_SERVERS_FILE)) {
+      const data = fs.readFileSync(VPN_SERVERS_FILE, 'utf8');
+      servers = JSON.parse(data).servers || [];
     }
 
-    res.json({ success: true });
+    // Check if server already exists
+    if (servers.some(s => s.ip === ip && s.port === port)) {
+      return res.status(409).json({ success: false, error: 'Server already exists' });
+    }
+
+    servers.push({ name, ip, port });
+    fs.writeFileSync(VPN_SERVERS_FILE, JSON.stringify({ servers }, null, 2));
+    res.json({ success: true, message: 'Server added' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// 4. API: Lấy device name từ /etc/hostname
-app.get('/api/get-device-name', (req, res) => {
+// 3. Delete VPN server
+app.delete('/api/client/servers/:ip/:port', (req, res) => {
+  try {
+    const { ip, port } = req.params;
+    if (!ip || !port) {
+      return res.status(400).json({ success: false, error: 'Missing ip or port' });
+    }
+
+    if (!fs.existsSync(VPN_SERVERS_FILE)) {
+      return res.status(404).json({ success: false, error: 'Servers file not found' });
+    }
+
+    const data = fs.readFileSync(VPN_SERVERS_FILE, 'utf8');
+    let { servers } = JSON.parse(data);
+    
+    servers = servers.filter(s => !(s.ip === ip && s.port === parseInt(port)));
+    fs.writeFileSync(VPN_SERVERS_FILE, JSON.stringify({ servers }, null, 2));
+    
+    res.json({ success: true, message: 'Server deleted' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 4. Proxy login to VPN server
+app.post('/api/client/login/:ip/:port', async (req, res) => {
+  try {
+    const { ip, port } = req.params;
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({ success: false, error: 'Username and password required' });
+    }
+
+    const loginUrl = `http://${ip}:${port}/api/login`;
+    const r = await fetch(loginUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await r.json();
+    res.status(r.status).json(data);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 5. Proxy enroll-device (with JWT from client)
+app.post('/api/client/enroll/:ip/:port', async (req, res) => {
+  try {
+    const { ip, port } = req.params;
+    const { username, deviceName } = req.body;
+    const authHeader = req.headers['authorization'];
+
+    if (!authHeader) {
+      return res.status(401).json({ success: false, error: 'Missing Authorization header' });
+    }
+
+    const enrollUrl = `http://${ip}:${port}/api/enroll-device`;
+    const r = await fetch(enrollUrl, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': authHeader
+      },
+      body: JSON.stringify({ username, deviceName })
+    });
+    const data = await r.json();
+    res.status(r.status).json(data);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 6. Proxy check-device-enroll (with JWT from client)
+app.post('/api/client/check-enrollment/:ip/:port', async (req, res) => {
+  try {
+    const { ip, port } = req.params;
+    const { username, deviceName } = req.body;
+    const authHeader = req.headers['authorization'];
+
+    if (!authHeader) {
+      return res.status(401).json({ success: false, error: 'Missing Authorization header' });
+    }
+
+    const checkUrl = `http://${ip}:${port}/api/check-device-enroll`;
+    const r = await fetch(checkUrl, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': authHeader
+      },
+      body: JSON.stringify({ username, deviceName })
+    });
+    const data = await r.json();
+    res.status(r.status).json(data);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 7. Proxy user-login/connect (with JWT from client)
+app.post('/api/client/connect/:ip/:port', async (req, res) => {
+  try {
+    const { ip, port } = req.params;
+    const { username, deviceName } = req.body;
+    const authHeader = req.headers['authorization'];
+
+    if (!authHeader) {
+      return res.status(401).json({ success: false, error: 'Missing Authorization header' });
+    }
+
+    // 7a. Check enrollment
+    const checkUrl = `http://${ip}:${port}/api/check-device-enroll`;
+    let r = await fetch(checkUrl, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': authHeader
+      },
+      body: JSON.stringify({ username, deviceName })
+    });
+    let data = await r.json();
+    if (!data.success || data.message === 'Device not enrolled') {
+      return res.status(400).json({ success: false, error: 'Device not enrolled' });
+    }
+
+    // 7b. Login and get config
+    const loginUrl = `http://${ip}:${port}/api/user-login`;
+    r = await fetch(loginUrl, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': authHeader
+      },
+      body: JSON.stringify({ username, deviceName })
+    });
+    data = await r.json();
+    if (!data.success) return res.status(r.status).json(data);
+
+    // 7c. Configure local interface
+    configureClientInterface({
+      allowedIPs: data.allowedIPs,
+      serverPublicKey: data.serverPublicKey,
+      serverEndpoint: data.serverEndpoint || `${ip}:51820`
+    });
+
+    res.json({ success: true, allowedIPs: data.allowedIPs });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 8. Proxy disconnect (with JWT from client)
+app.post('/api/client/disconnect/:ip/:port', async (req, res) => {
+  try {
+    const { ip, port } = req.params;
+    const { deviceName } = req.body;
+    const authHeader = req.headers['authorization'];
+
+    if (!authHeader) {
+      return res.status(401).json({ success: false, error: 'Missing Authorization header' });
+    }
+
+    const disconnectUrl = `http://${ip}:${port}/api/disconnect-vpn`;
+    const r = await fetch(disconnectUrl, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': authHeader
+      },
+      body: JSON.stringify({ deviceName })
+    });
+    const data = await r.json();
+    res.status(r.status).json(data);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 9. Get client identity
+app.get('/api/client/identity', (req, res) => {
+  try {
+    if (!fs.existsSync(CONFIG_DIR)) {
+      fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    }
+
+    if (!fs.existsSync(CLIENT_PRIVATE_KEY_FILE)) {
+      const privateKey = run('wg genkey').trim();
+      fs.writeFileSync(CLIENT_PRIVATE_KEY_FILE, privateKey, { mode: 0o600 });
+      const publicKey = run(`echo "${privateKey}" | wg pubkey`).trim();
+      fs.writeFileSync(CLIENT_PUBLIC_KEY_FILE, publicKey, { mode: 0o644 });
+    }
+
+    if (!fs.existsSync(CLIENT_PUBLIC_KEY_FILE)) {
+      const privateKey = fs.readFileSync(CLIENT_PRIVATE_KEY_FILE, 'utf8').trim();
+      const publicKey = run(`echo "${privateKey}" | wg pubkey`).trim();
+      fs.writeFileSync(CLIENT_PUBLIC_KEY_FILE, publicKey, { mode: 0o644 });
+    }
+
+    const publicKey = fs.readFileSync(CLIENT_PUBLIC_KEY_FILE, 'utf8').trim();
+    res.json({ success: true, publicKey });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 10. Get device name
+app.get('/api/client/device-name', (req, res) => {
   try {
     const hostname = fs.readFileSync('/etc/hostname', 'utf8').trim();
     res.json({ success: true, deviceName: hostname });

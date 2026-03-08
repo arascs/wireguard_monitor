@@ -8,13 +8,17 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 800px;
+            max-width: 1000px;
             margin: 20px auto;
             padding: 0 20px;
         }
 
         h1 {
             color: #2c3e50;
+        }
+
+        .controls {
+            margin-bottom: 20px;
         }
 
         .server-list {
@@ -41,16 +45,33 @@
             color: white;
             border: none;
             border-radius: 4px;
+            margin-right: 5px;
         }
 
         .btn:hover {
             background-color: #2980b9;
         }
 
+        .btn-danger {
+            background-color: #e74c3c;
+        }
+
+        .btn-danger:hover {
+            background-color: #c0392b;
+        }
+
+        .btn-success {
+            background-color: #27ae60;
+        }
+
+        .btn-success:hover {
+            background-color: #229954;
+        }
+
         .modal {
             display: none;
             position: fixed;
-            z-index: 1;
+            z-index: 1000;
             left: 0;
             top: 0;
             width: 100%;
@@ -60,10 +81,10 @@
 
         .modal-content {
             background-color: #fefefe;
-            margin: 15% auto;
+            margin: 10% auto;
             padding: 20px;
             border: 1px solid #888;
-            width: 300px;
+            width: 350px;
             border-radius: 5px;
         }
 
@@ -82,6 +103,7 @@
         .form-group label {
             display: block;
             margin-bottom: 5px;
+            font-weight: bold;
         }
 
         .form-group input {
@@ -112,65 +134,71 @@
 <body>
 
     <h1>VPN Servers</h1>
+
+    <div class="controls">
+        <button class="btn btn-success" onclick="showAddServerModal()">Add Server</button>
+    </div>
+
     <table class="server-list" id="serverTable">
         <thead>
             <tr>
                 <th>Server Name</th>
                 <th>Address</th>
-                <th>Action</th>
+                <th>Actions</th>
             </tr>
         </thead>
-        <tbody>
-
-        </tbody>
+        <tbody></tbody>
     </table>
 
     <div id="status"></div>
 
+    <!-- Login Modal -->
     <div id="loginModal" class="modal">
         <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2>Login to VPN</h2>
+            <span class="close" onclick="closeLoginModal()">&times;</span>
+            <h2 id="loginTitle">Login to Server</h2>
             <div class="form-group">
                 <label>Username</label>
-                <input type="text" id="username">
+                <input type="text" id="loginUsername">
             </div>
             <div class="form-group">
                 <label>Password</label>
-                <input type="password" id="password">
+                <input type="password" id="loginPassword">
             </div>
-            <button class="btn" onclick="submitLogin()">Connect</button>
+            <button class="btn" id="loginBtn" onclick="submitLogin()">Login</button>
         </div>
     </div>
 
-    <div id="enrollModal" class="modal">
+    <!-- Add Server Modal -->
+    <div id="addServerModal" class="modal">
         <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2>Enroll Device</h2>
+            <span class="close" onclick="closeAddServerModal()">&times;</span>
+            <h2>Add VPN Server</h2>
             <div class="form-group">
-                <label>Username</label>
-                <input type="text" id="enroll-username">
+                <label>Server Name</label>
+                <input type="text" id="serverName">
             </div>
             <div class="form-group">
-                <label>Password</label>
-                <input type="password" id="enroll-password">
+                <label>Server IP</label>
+                <input type="text" id="serverIp">
             </div>
             <div class="form-group">
-                <label>Device Name</label>
-                <input type="text" id="enroll-device-name" readonly>
+                <label>Server Port</label>
+                <input type="number" id="serverPort" value="3000">
             </div>
-            <button class="btn" onclick="submitEnroll()">Submit Enrollment</button>
+            <button class="btn btn-success" onclick="submitAddServer()">Add Server</button>
         </div>
     </div>
 
     <script>
-        let currentServer = null;
         let deviceName = '';
+        let currentServer = null;
+        let currentToken = null;
 
-        // Fetch device name from /etc/hostname
+        // Get device name
         async function fetchDeviceName() {
             try {
-                const res = await fetch('/api/get-device-name');
+                const res = await fetch('/api/client/device-name');
                 const data = await res.json();
                 if (data.success && data.deviceName) {
                     deviceName = data.deviceName.trim();
@@ -183,28 +211,37 @@
             }
         }
 
-        // Get hostname
-        function getDeviceName() {
-            return deviceName || 'device';
-        }
-
-        // 1. Load danh sách server khi mở trang
+        // Load servers from VPN_servers.json
         async function loadServers() {
             try {
-                const res = await fetch('/api/servers');
+                const res = await fetch('/api/client/servers');
                 const data = await res.json();
                 const tbody = document.querySelector('#serverTable tbody');
                 tbody.innerHTML = '';
 
+                if (!data.servers || data.servers.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="3">No servers configured. Add one to get started.</td></tr>';
+                    return;
+                }
+
                 data.servers.forEach(server => {
+                    const tokenKey = `token_${server.ip}_${server.port}`;
+                    const hasToken = !!localStorage.getItem(tokenKey);
+
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td>${server.name}</td>
                         <td>${server.ip}:${server.port}</td>
                         <td>
-                            <button class="btn" onclick="openEnroll('${server.ip}', ${server.port})" style="margin-left: 5px;">Enroll Device</button>
-                            <button class="btn" onclick="openLogin('${server.ip}', ${server.port})">Connect</button>
-                            <button class="btn" onclick="disconnectServer('${server.ip}', ${server.port})" style="margin-left: 5px; background-color: #e74c3c;">Disconnect</button>
+                            ${hasToken ? `
+                                <button class="btn" onclick="enrollDevice('${server.ip}', ${server.port})">Enroll</button>
+                                <button class="btn" onclick="connectDevice('${server.ip}', ${server.port})">Connect</button>
+                                <button class="btn btn-danger" onclick="disconnect('${server.ip}', ${server.port})">Disconnect</button>
+                                <button class="btn btn-danger" onclick="logout('${server.ip}', ${server.port})" style="margin-left: 10px;">Logout</button>
+                            ` : `
+                                <button class="btn" onclick="showLoginModal('${server.name}', '${server.ip}', ${server.port})">Login</button>
+                            `}
+                            <button class="btn btn-danger" onclick="deleteServer('${server.ip}', ${server.port})" style="margin-left: 10px;">Delete</button>
                         </td>
                     `;
                     tbody.appendChild(tr);
@@ -214,148 +251,206 @@
             }
         }
 
-        // UI: Mở Modal Connect
-        function openLogin(ip, port) {
-            currentServer = { ip, port };
+        // Show login modal for specific server
+        function showLoginModal(serverName, ip, port) {
+            currentServer = { name: serverName, ip, port };
+            document.getElementById('loginTitle').innerText = `Login to ${serverName}`;
+            document.getElementById('loginUsername').value = '';
+            document.getElementById('loginPassword').value = '';
             document.getElementById('loginModal').style.display = 'block';
-            document.getElementById('username').value = '';
-            document.getElementById('password').value = '';
-            document.getElementById('status').style.display = 'none';
         }
 
-        // UI: Mở Modal Enroll
-        function openEnroll(ip, port) {
-            currentServer = { ip, port };
-            document.getElementById('enrollModal').style.display = 'block';
-            document.getElementById('enroll-username').value = '';
-            document.getElementById('enroll-password').value = '';
-            document.getElementById('enroll-device-name').value = getDeviceName();
-            document.getElementById('status').style.display = 'none';
+        function closeLoginModal() {
+            document.getElementById('loginModal').style.display = 'none';
+            currentServer = null;
         }
 
-        // UI: Đóng Modal
-        const closeButtons = document.querySelectorAll('.close');
-        closeButtons.forEach(btn => {
-            btn.onclick = function () {
-                document.getElementById('loginModal').style.display = 'none';
-                document.getElementById('enrollModal').style.display = 'none';
-            }
-        });
-
-        // Enroll Device
-        async function submitEnroll() {
-            const username = document.getElementById('enroll-username').value;
-            const password = document.getElementById('enroll-password').value;
-            const deviceName = document.getElementById('enroll-device-name').value;
-            const btn = document.querySelectorAll('.modal-content button')[1];
-
-            if (!username || !password || !deviceName) return alert('Please fill all fields');
-
-            btn.disabled = true;
-            btn.innerText = 'Submitting...';
-
-            try {
-                const enrollUrl = `http://${currentServer.ip}:${currentServer.port}/api/enroll-device`;
-                const enrollRes = await fetch(enrollUrl, {
-                    method: 'POST',
-                    mode: 'cors',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        username: username,
-                        password: password,
-                        deviceName: deviceName
-                    })
-                });
-
-                const enrollData = await enrollRes.json();
-                if (!enrollData.success) throw new Error(enrollData.error || 'Enrollment failed');
-
-                document.getElementById('enrollModal').style.display = 'none';
-                showStatus('Device enrollment request submitted successfully! Please wait for admin approval.', 'success');
-            } catch (err) {
-                alert('Enrollment Failed: ' + err.message);
-            } finally {
-                btn.disabled = false;
-                btn.innerText = 'Submit Enrollment';
-            }
-        }
-
-        // Logic chính: Xử lý Connect
+        // Login to VPN server - get JWT token
         async function submitLogin() {
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-            const deviceName = getDeviceName();
-            const btn = document.querySelector('#loginModal .modal-content button');
+            if (!currentServer) return alert('No server selected');
+
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
 
             if (!username || !password) return alert('Please fill all fields');
 
+            const btn = document.getElementById('loginBtn');
             btn.disabled = true;
-            btn.innerText = 'Connecting...';
+            btn.innerText = 'Logging in...';
 
             try {
-                // Bước 1: Check xem device đã enroll chưa
-                const checkUrl = `http://${currentServer.ip}:${currentServer.port}/api/check-device-enroll`;
-                const checkRes = await fetch(checkUrl, {
-                    method: 'POST',
-                    mode: 'cors',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        username: username,
-                        password: password,
-                        deviceName: deviceName
-                    })
-                });
-
-                const checkData = await checkRes.json();
-                if (!checkData.success) throw new Error(checkData.error || 'Check failed');
-
-                if (checkData.message === 'Device not enrolled') {
-                    throw new Error('Device not enrolled. Please enroll first.');
-                }
-
-                // Bước 2: Login
-                const loginUrl = `http://${currentServer.ip}:${currentServer.port}/api/user-login`;
-                const loginRes = await fetch(loginUrl, {
-                    method: 'POST',
-                    mode: 'cors',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        username: username,
-                        password: password,
-                        deviceName: deviceName
-                    })
-                });
-
-                const loginData = await loginRes.json();
-                if (!loginData.success) throw new Error(loginData.error || 'Login failed on server');
-
-                // Bước 3: Configure interface
-                const configPayload = {
-                    allowedIPs: loginData.allowedIPs,
-                    serverPublicKey: loginData.serverPublicKey,
-                    serverEndpoint: loginData.serverEndpoint || `${currentServer.ip}:51820`
-                };
-
-                const configRes = await fetch('/api/handle-login-response', {
+                const res = await fetch(`/api/client/login/${currentServer.ip}/${currentServer.port}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(configPayload)
+                    body: JSON.stringify({ username, password })
                 });
+                const data = await res.json();
 
-                const configResult = await configRes.json();
-                if (!configResult.success) throw new Error(configResult.error);
+                if (!data.success) throw new Error(data.error || 'Login failed');
 
-                document.getElementById('loginModal').style.display = 'none';
-                showStatus(`Success! Connected to ${currentServer.ip}. IP: ${loginData.allowedIPs}`, 'success');
-
+                // Store token per server
+                const tokenKey = `token_${currentServer.ip}_${currentServer.port}`;
+                const usernameKey = `username_${currentServer.ip}_${currentServer.port}`;
+                localStorage.setItem(tokenKey, data.token);
+                localStorage.setItem(usernameKey, username);
+                showStatus(`Logged in to ${currentServer.name}`, 'success');
+                closeLoginModal();
+                await loadServers();
             } catch (err) {
-                alert('Connection Failed: ' + err.message);
+                alert('Login failed: ' + err.message);
             } finally {
                 btn.disabled = false;
-                btn.innerText = 'Connect';
+                btn.innerText = 'Login';
             }
         }
 
+        // Get token for specific server
+        function getServerToken(ip, port) {
+            return localStorage.getItem(`token_${ip}_${port}`);
+        }
+
+        function getServerUsername(ip, port) {
+            return localStorage.getItem(`username_${ip}_${port}`);
+        }
+
+        // Enroll device
+        async function enrollDevice(ip, port) {
+            const token = getServerToken(ip, port);
+            const username = getServerUsername(ip, port);
+            if (!token || !username) return alert('Not logged in');
+
+            try {
+                const res = await fetch(`/api/client/enroll/${ip}/${port}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ username, deviceName })
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                showStatus('Device enrollment request submitted! Wait for admin approval.', 'success');
+            } catch (err) {
+                showStatus('Enrollment failed: ' + err.message, 'error');
+            }
+        }
+
+        // Connect device (enable peer on VPN)
+        async function connectDevice(ip, port) {
+            const token = getServerToken(ip, port);
+            const username = getServerUsername(ip, port);
+            if (!token || !username) return alert('Not logged in');
+
+            try {
+                const res = await fetch(`/api/client/connect/${ip}/${port}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ username, deviceName })
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                showStatus(`Connected to VPN! Assigned IP: ${data.allowedIPs}`, 'success');
+            } catch (err) {
+                showStatus('Connection failed: ' + err.message, 'error');
+            }
+        }
+
+        // Disconnect device
+        async function disconnect(ip, port) {
+            const token = getServerToken(ip, port);
+            const username = getServerUsername(ip, port);
+            if (!token || !username) return alert('Not logged in');
+
+            try {
+                const res = await fetch(`/api/client/disconnect/${ip}/${port}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ deviceName })
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                showStatus('Disconnected from VPN', 'success');
+            } catch (err) {
+                showStatus('Disconnect failed: ' + err.message, 'error');
+            }
+        }
+
+        // Logout from server
+        function logout(ip, port) {
+            const tokenKey = `token_${ip}_${port}`;
+            const usernameKey = `username_${ip}_${port}`;
+            localStorage.removeItem(tokenKey);
+            localStorage.removeItem(usernameKey);
+            loadServers();
+            showStatus('Logged out', 'success');
+        }
+
+        // Show add server modal
+        function showAddServerModal() {
+            document.getElementById('serverName').value = '';
+            document.getElementById('serverIp').value = '';
+            document.getElementById('serverPort').value = '3000';
+            document.getElementById('addServerModal').style.display = 'block';
+        }
+
+        function closeAddServerModal() {
+            document.getElementById('addServerModal').style.display = 'none';
+        }
+
+        // Add server
+        async function submitAddServer() {
+            const name = document.getElementById('serverName').value;
+            const ip = document.getElementById('serverIp').value;
+            const port = parseInt(document.getElementById('serverPort').value);
+
+            if (!name || !ip || !port) return alert('Please fill all fields');
+
+            try {
+                const res = await fetch('/api/client/servers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, ip, port })
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                closeAddServerModal();
+                await loadServers();
+                showStatus('Server added successfully', 'success');
+            } catch (err) {
+                alert('Failed to add server: ' + err.message);
+            }
+        }
+
+        // Delete server
+        async function deleteServer(ip, port) {
+            if (!confirm(`Delete server ${ip}:${port}?`)) return;
+
+            try {
+                const res = await fetch(`/api/client/servers/${ip}/${port}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+
+                // Clear token for this server
+                const tokenKey = `token_${ip}_${port}`;
+                const usernameKey = `username_${ip}_${port}`;
+                localStorage.removeItem(tokenKey);
+                localStorage.removeItem(usernameKey);
+
+                await loadServers();
+                showStatus('Server deleted', 'success');
+            } catch (err) {
+                showStatus('Failed to delete server: ' + err.message, 'error');
+            }
+        }
+
+        // Show status message
         function showStatus(msg, type) {
             const el = document.getElementById('status');
             el.style.display = 'block';
@@ -363,37 +458,10 @@
             el.innerText = msg;
         }
 
-        async function disconnectServer(ip, port) {
-            const deviceName = getDeviceName();
-            try {
-                const url = `http://${ip}:${port}/api/disconnect-vpn`;
-                const res = await fetch(url, {
-                    method: 'POST',
-                    mode: 'cors',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ device_name: deviceName })
-                });
-                const data = await res.json();
-                if (!data.success) throw new Error(data.error || 'Disconnect failed on server');
-
-                const localRes = await fetch('/api/disconnect-client', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
-                });
-                const localData = await localRes.json();
-                if (!localData.success) throw new Error(localData.error || 'Disconnect failed on client');
-
-                showStatus(`Disconnected from ${ip}`, 'success');
-            } catch (err) {
-                showStatus('Disconnect error: ' + err.message, 'error');
-            }
-        }
-
-        // Khởi chạy
+        // Initialize
         (async () => {
             await fetchDeviceName();
-            loadServers();
+            await loadServers();
         })();
     </script>
 </body>
