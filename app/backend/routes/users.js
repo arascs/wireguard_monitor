@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const { logAction } = require('../auditLogger');
 
 function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authenticateToken }) {
   const router = express.Router();
@@ -25,7 +26,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
     return null;
   }
 
-  function disablePeerInWgCConfigByPublicKey(publicKey) {
+  function deletePeerByPublicKey(publicKey) {
     const configFile = path.join(CONFIG_DIR, 'wg2.conf');
     if (!fs.existsSync(configFile)) {
       return { updated: false, reason: 'wg2.conf not found' };
@@ -136,6 +137,12 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
         [username, passwordHash, expireEpoch, createEpoch]
       );
 
+      // audit log
+      try {
+        const admin = req.session && req.session.user ? req.session.user : 'unknown';
+        logAction(admin, 'create_user', { username });
+      } catch (e) {}
+
       res.json({
         success: true,
         user: {
@@ -171,10 +178,10 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
         [username]
       );
 
-      // Delete/disable peers in wg2.conf for each device
+      // Delete peers from wg2.conf for each device
       for (const device of devices) {
         if (device.public_key) {
-          disablePeerInWgCConfigByPublicKey(device.public_key);
+          deletePeerByPublicKey(device.public_key);
         }
       }
 
@@ -183,6 +190,12 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
         'DELETE FROM users WHERE username = ?',
         [username]
       );
+
+      // audit
+      try {
+        const admin = req.session && req.session.user ? req.session.user : 'unknown';
+        logAction(admin, 'delete_user', { username });
+      } catch (e) {}
 
       res.json({ success: true, message: 'User deleted successfully' });
     } catch (error) {
@@ -200,8 +213,9 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
     let connection;
     try {
       connection = await mysql.createConnection(dbConfig);
+      // include status so frontend can know whether a device is enabled or disabled
       const [rows] = await connection.execute(
-        'SELECT id, device_name, username, allowed_ips, public_key FROM devices ORDER BY id DESC'
+        'SELECT id, device_name, username, allowed_ips, public_key, expire_date, status FROM devices ORDER BY id DESC'
       );
       res.json({ success: true, devices: rows });
     } catch (error) {
@@ -215,7 +229,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
   });
 
   router.post('/devices/approve', requireAuth, async (req, res) => {
-    const { id, allowedIPs } = req.body || {};
+    const { id, allowedIPs, expireDate } = req.body || {};
     if (!id || !allowedIPs) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
@@ -243,11 +257,32 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       const publicKey = run(`echo "${privateKey}" | wg pubkey`).trim();
       const privateKeyHash = await bcrypt.hash(privateKey, 10);
 
+      // Calculate expire epoch
+      let expireEpoch = null;
+      if (expireDate) {
+        const expireDateObj = new Date(expireDate);
+        if (!isNaN(expireDateObj.getTime())) {
+          expireEpoch = Math.floor(expireDateObj.getTime() / 1000);
+        }
+      }
+
       // Insert into approved devices table
       await connection.execute(
-        'INSERT INTO devices (device_name, username, allowed_ips, private_key, public_key) VALUES (?, ?, ?, ?, ?)',
-        [deviceName, username, allowedIPs, privateKeyHash, publicKey]
+        'INSERT INTO devices (device_name, username, allowed_ips, private_key, public_key, expire_date, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [deviceName, username, allowedIPs, privateKeyHash, publicKey, expireEpoch, 1]
       );
+
+      // audit
+      try {
+        const admin = req.session && req.session.user ? req.session.user : 'unknown';
+        logAction(admin, 'device_approve', {
+          device_name: deviceName,
+          user: username,
+          allowed_ips: allowedIPs,
+          public_key: publicKey,
+          expire_date: expireEpoch
+        });
+      } catch (e) {}
 
       // Remove enrollment request
       await connection.execute(
@@ -287,6 +322,54 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
     }
   });
 
+  // Delete device
+  router.delete('/devices/:id', requireAuth, async (req, res) => {
+    const { id } = req.params;
+    if (!id || isNaN(id)) {
+      return res.status(400).json({ success: false, error: 'Invalid device ID' });
+    }
+
+    let connection;
+    try {
+      connection = await mysql.createConnection(dbConfig);
+
+      // Get device info including public key
+      const [devices] = await connection.execute(
+        'SELECT public_key FROM devices WHERE id = ?',
+        [id]
+      );
+
+      if (devices.length === 0) {
+        return res.status(404).json({ success: false, error: 'Device not found' });
+      }
+
+      const device = devices[0];
+
+      // Delete peer from wg2.conf if public key exists
+      if (device.public_key) {
+        const result = deletePeerByPublicKey(device.public_key);
+        if (!result.updated) {
+          return res.status(500).json({ success: false, error: `Failed to update config: ${result.reason}` });
+        }
+      }
+
+      // Delete device from database
+      await connection.execute(
+        'DELETE FROM devices WHERE id = ?',
+        [id]
+      );
+
+      res.json({ success: true, message: 'Device deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting device:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    } finally {
+      if (connection) {
+        await connection.end();
+      }
+    }
+  });
+
   // route for retrieving pending enrollment requests
   router.get('/enrollment-requests', requireAuth, async (req, res) => {
     let connection;
@@ -315,10 +398,23 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
     let connection;
     try {
       connection = await mysql.createConnection(dbConfig);
+      // retrieve info to log
+      const [reqs] = await connection.execute(
+        'SELECT device_name, username FROM device_enrollment_requests WHERE id = ?',
+        [id]
+      );
       await connection.execute(
         'DELETE FROM device_enrollment_requests WHERE id = ?',
         [id]
       );
+
+      // audit
+      if (reqs && reqs.length > 0) {
+        try {
+          const admin = req.session && req.session.user ? req.session.user : 'unknown';
+          logAction(admin, 'device_decline', { device_name: reqs[0].device_name, user: reqs[0].username });
+        } catch (e) {}
+      }
 
       res.json({ success: true, message: 'Enrollment request declined' });
     } catch (error) {
@@ -403,6 +499,132 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
     }
   });
 
+  router.post('/disable-device/:id', requireAuth, async (req, res) => {
+    const { id } = req.params;
+    if (!id || isNaN(id)) {
+      return res.status(400).json({ success: false, error: 'Invalid device ID' });
+    }
+
+    let connection;
+    try {
+      connection = await mysql.createConnection(dbConfig);
+      // fetch info for log
+      const [rows] = await connection.execute(
+        'SELECT device_name, username FROM devices WHERE id = ?',
+        [id]
+      );
+      await connection.execute(
+        'UPDATE devices SET status = 0 WHERE id = ?',
+        [id]
+      );
+      // audit
+      if (rows && rows.length > 0) {
+        try {
+          const admin = req.session && req.session.user ? req.session.user : 'unknown';
+          logAction(admin, 'disable_device', { device_name: rows[0].device_name, user: rows[0].username });
+        } catch (e) {}
+      }
+      res.json({ success: true, message: 'Device disabled successfully' });
+    } catch (error) {
+      console.error('Error disabling device:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    } finally {
+      if (connection) {
+        await connection.end();
+      }
+    }
+  });
+
+  router.post('/enable-device/:id', requireAuth, async (req, res) => {
+    const { id } = req.params;
+    if (!id || isNaN(id)) {
+      return res.status(400).json({ success: false, error: 'Invalid device ID' });
+    }
+    let connection;
+    try {
+      const nowEpoch = Math.floor(Date.now() / 1000);
+      const newExpire = nowEpoch + 90 * 24 * 60 * 60; // 90 days from now
+
+      connection = await mysql.createConnection(dbConfig);
+      // fetch current expire_date in case it's still valid, also grab name/user for logging
+      const [rows] = await connection.execute(
+        'SELECT expire_date, device_name, username FROM devices WHERE id = ?',
+        [id]
+      );
+      let expireEpoch = null;
+      let deviceName = null;
+      let deviceUser = null;
+      if (rows.length > 0) {
+        const cur = rows[0].expire_date;
+        deviceName = rows[0].device_name;
+        deviceUser = rows[0].username;
+        if (!cur || cur < nowEpoch) {
+          // reset only when missing or already expired
+          expireEpoch = newExpire;
+        } else {
+          expireEpoch = cur; // leave existing
+        }
+      }
+
+      if (expireEpoch !== null) {
+        await connection.execute(
+          'UPDATE devices SET status = 1, expire_date = ? WHERE id = ?',
+          [expireEpoch, id]
+        );
+      } else {
+        await connection.execute(
+          'UPDATE devices SET status = 1 WHERE id = ?',
+          [id]
+        );
+      }
+
+      // audit
+      try {
+        const admin = req.session && req.session.user ? req.session.user : 'unknown';
+        logAction(admin, 'enable_device', { device_name: deviceName, user: deviceUser });
+      } catch (e) {}
+
+      res.json({ success: true, message: 'Device enabled successfully', expire_date: expireEpoch });
+    } catch (error) {
+      console.error('Error enabling device:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    } finally {
+      if (connection) {
+        await connection.end();
+      }
+    }});
+
+
+  // edit expire date for a device (admin UI)
+  router.post('/devices/:id/expire-date', requireAuth, async (req, res) => {
+    const { id } = req.params;
+    const { expireDate } = req.body || {};
+    if (!id || isNaN(id)) {
+      return res.status(400).json({ success: false, error: 'Invalid device ID' });
+    }
+    if (!expireDate || isNaN(expireDate)) {
+      return res.status(400).json({ success: false, error: 'Invalid expire date' });
+    }
+    const expireEpoch = parseInt(expireDate, 10);
+
+    let connection;
+    try {
+      connection = await mysql.createConnection(dbConfig);
+      await connection.execute(
+        'UPDATE devices SET expire_date = ? WHERE id = ?',
+        [expireEpoch, id]
+      );
+      res.json({ success: true, expire_date: expireEpoch });
+    } catch (error) {
+      console.error('Error updating expire date:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    } finally {
+      if (connection) {
+        await connection.end();
+      }
+    }
+  });
+
   router.post('/disconnect-vpn', authenticateToken, async (req, res) => {
     const deviceName = (req.body && (req.body.device_name || req.body.deviceName)) || '';
     const username = req.user.username;
@@ -430,7 +652,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
         return res.json({ success: true, active: false, disabled: false });
       }
 
-      const result = disablePeerInWgCConfigByPublicKey(publicKey);
+      const result = deletePeerByPublicKey(publicKey);
       if (!result.updated) {
         return res.status(404).json({ success: false, error: result.reason || 'Cannot disable peer' });
       }

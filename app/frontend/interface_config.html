@@ -104,7 +104,7 @@
             font-family: 'Roboto', sans-serif;
             max-width: 1200px;
             margin: 0 auto;
-            padding: 70px 20px 20px 20px;
+            padding: 70px 20px 20px 220px; /* accomodate sidebar */
             background-color: #f0f0f0;
             color: #333;
             font-size: 16px;
@@ -327,15 +327,62 @@
         button:hover {
             background-color: rgba(134, 22, 24, 1);
         }
+
+        /* sidebar styling */
+        .sidebar {
+            position: fixed;
+            top: 60px;
+            left: 0;
+            bottom: 0;
+            width: 200px;
+            background-color: #ffffff;
+            box-shadow: 2px 0 8px rgba(0, 0, 0, 0.08);
+            padding: 15px 10px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .sidebar-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .sidebar-item {
+            border: none;
+            border-radius: 5px;
+            padding: 8px 10px;
+            text-align: left;
+            background-color: transparent;
+            color: #333;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s, color 0.2s;
+        }
+        .sidebar-item.active {
+            background-color: rgba(134, 22, 24, 0.1);
+            color: rgba(134, 22, 24, 1);
+        }
     </style>
 </head>
 
-<body>
+<body data-current="connections">
     <div class="navbar">
         <h1>WireGuard VPN Manager</h1>
         <div class="nav-buttons">
             <span class="hostname-display"><span></span><strong>{{HOSTNAME}}</strong></span>
             <a href="/" class="nav-btn active">Home</a>
+        </div>
+    </div>
+    <div class="sidebar">
+        <div class="sidebar-menu">
+            <button class="sidebar-item" data-section="connections" data-path="/">Connections</button>
+            <button class="sidebar-item" data-section="users" data-path="/users">Identity</button>
+            <button class="sidebar-item" data-section="devices" data-path="/devices">Devices</button>
+            <button class="sidebar-item" data-section="applications" data-path="/applications">Applications</button>
+            <button class="sidebar-item" data-section="access" data-path="/access-rules">Access rules</button>
+            <button class="sidebar-item" data-section="audit" data-path="/audit-log">Audit log</button>
         </div>
     </div>
     <div class="interface-context">

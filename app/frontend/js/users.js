@@ -42,7 +42,7 @@ async function loadUsers() {
 }
 
 async function deleteUser(username) {
-  if (!confirm(`Are you sure you want to delete user "${username}"? This will also disable all their devices.`)) {
+  if (!confirm(`Are you sure you want to delete user "${username}"? This will also delete all their devices.`)) {
     return;
   }
 

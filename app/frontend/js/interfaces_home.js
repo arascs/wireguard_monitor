@@ -21,15 +21,12 @@ function renderInterfaces(items) {
             <p><strong>Address:</strong> ${address}</p>
             <p class="interface-status ${statusClass}">Status: ${iface.status === 'connected' ? 'Up' : 'Down'}</p>
             <div class="interface-buttons">
-                <button data-name="${iface.name}" class="edit-btn">Edit</button>
-                <button data-name="${iface.name}" class="monitor-btn">Monitor</button>
+                <button data-name="${iface.name}" class="details-btn">Details</button>
                 <button data-name="${iface.name}" class="delete-btn">Delete</button>
             </div>
         `;
-        card.querySelector('.edit-btn').addEventListener('click', () => {
-            window.location.href = `/editInterface/${encodeURIComponent(iface.name)}`;
-        });
-        card.querySelector('.monitor-btn').addEventListener('click', () => {
+        card.querySelector('.details-btn').addEventListener('click', () => {
+            // go to dashboard/details page for this interface
             window.location.href = `/dashboard/${encodeURIComponent(iface.name)}`;
         });
         card.querySelector('.delete-btn').addEventListener('click', async () => {

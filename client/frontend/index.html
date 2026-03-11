@@ -144,6 +144,7 @@
             <tr>
                 <th>Server Name</th>
                 <th>Address</th>
+                <th>Status</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -194,6 +195,7 @@
         let deviceName = '';
         let currentServer = null;
         let currentToken = null;
+        window.serverStatus = {};
 
         // Get device name
         async function fetchDeviceName() {
@@ -220,18 +222,23 @@
                 tbody.innerHTML = '';
 
                 if (!data.servers || data.servers.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="3">No servers configured. Add one to get started.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="4">No servers configured. Add one to get started.</td></tr>';
                     return;
                 }
 
                 data.servers.forEach(server => {
                     const tokenKey = `token_${server.ip}_${server.port}`;
                     const hasToken = !!localStorage.getItem(tokenKey);
+                    const statusKey = `${server.ip}:${server.port}`;
+                    const isConnected = window.serverStatus && window.serverStatus[statusKey];
+                    const statusText = isConnected ? 'Connected' : 'Disconnected';
+                    const statusClass = isConnected ? 'success' : 'error';
 
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td>${server.name}</td>
                         <td>${server.ip}:${server.port}</td>
+                        <td class="${statusClass}">${statusText}</td>
                         <td>
                             ${hasToken ? `
                                 <button class="btn" onclick="enrollDevice('${server.ip}', ${server.port})">Enroll</button>
@@ -309,6 +316,23 @@
             return localStorage.getItem(`token_${ip}_${port}`);
         }
 
+        // Check connection status via backend
+        async function loadConnectionStatus() {
+            try {
+                const res = await fetch('/api/client/connection-status');
+                const data = await res.json();
+                // Store status in a map for each server
+                window.serverStatus = {};
+                data.servers.forEach(s => {
+                    window.serverStatus[`${s.ip}:${s.port}`] = s.connected;
+                });
+                // Reload servers to update display
+                await loadServers();
+            } catch (err) {
+                console.error('Error fetching connection status', err);
+            }
+        }
+
         function getServerUsername(ip, port) {
             return localStorage.getItem(`username_${ip}_${port}`);
         }
@@ -353,7 +377,8 @@
                 });
                 const data = await res.json();
                 if (!data.success) throw new Error(data.error);
-                showStatus(`Connected to VPN! Assigned IP: ${data.allowedIPs}`, 'success');
+                // don't show success message; status will update on reload
+                await loadConnectionStatus();
             } catch (err) {
                 showStatus('Connection failed: ' + err.message, 'error');
             }
@@ -462,6 +487,7 @@
         (async () => {
             await fetchDeviceName();
             await loadServers();
+            await loadConnectionStatus();
         })();
     </script>
 </body>

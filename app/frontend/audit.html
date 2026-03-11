@@ -2,7 +2,7 @@
 <html>
 
 <head>
-    <title>WireGuard VPN Manager - Applications</title>
+    <title>WireGuard VPN Manager - Audit Log</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
@@ -16,22 +16,6 @@
             color: #333;
             font-size: 16px;
             line-height: 1.6;
-        }
-
-        h1 {
-            font-size: 2rem;
-            font-weight: 700;
-        }
-
-        h2 {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: rgba(134, 22, 24, 1);
-        }
-
-        p {
-            font-size: 1rem;
-            margin: 0.5rem 0;
         }
 
         .navbar {
@@ -52,25 +36,7 @@
             box-sizing: border-box;
         }
 
-        .navbar h1 {
-            margin: 0;
-            font-weight: 700;
-        }
-
-        .hostname-display {
-            color: white;
-            font-size: 0.85rem;
-            margin-right: 10px;
-            padding: 6px 14px;
-            font-weight: 500;
-            background-color: rgba(255, 255, 255, 0.15);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 6px;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-
+        /* navbar button group */
         .nav-buttons {
             display: flex;
             gap: 10px;
@@ -92,6 +58,45 @@
             background-color: rgba(134, 22, 24, 1);
         }
 
+        .navbar h1 {
+            margin: 0;
+            font-weight: 700;
+        }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 700;
+        }
+
+        h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: rgba(134, 22, 24, 1);
+        }
+
+        p {
+            font-size: 1rem;
+            margin: 0.5rem 0;
+        }
+
+        .hostname-display {
+            color: white;
+            font-size: 0.85rem;
+            margin-right: 10px;
+            padding: 6px 14px;
+            font-weight: 500;
+            background-color: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .hostname-display strong {
+            font-weight: 700;
+        }
+
         .sidebar {
             position: fixed;
             top: 60px;
@@ -105,18 +110,6 @@
             display: flex;
             flex-direction: column;
             gap: 10px;
-        }
-
-        .sidebar-title {
-            font-weight: 600;
-            margin-bottom: 5px;
-            color: rgba(134, 22, 24, 1);
-        }
-
-        .sidebar-menu {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
         }
 
         .sidebar-item {
@@ -137,66 +130,16 @@
             color: rgba(134, 22, 24, 1);
         }
 
-        .change-password-form {
-            display: none;
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: white;
-            padding: 25px;
-            border-radius: 5px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-        }
-
-        .change-password-form input {
-            display: block;
-            margin: 10px 0;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            font-size: 1rem;
-        }
-
-        button {
-            cursor: pointer;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            background-color: rgba(134, 22, 24, 0.8);
-            color: white;
-            transition: background-color 0.3s;
-            font-weight: 500;
-            font-size: 1rem;
-        }
-
-        button:hover {
-            background-color: rgba(134, 22, 24, 1);
-        }
-
-        .section-title {
+        .sidebar-title {
+            font-weight: 600;
+            margin-bottom: 5px;
             color: rgba(134, 22, 24, 1);
-            margin-top: 10px;
-            margin-bottom: 15px;
         }
 
-        .form-group {
-            margin-bottom: 10px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 4px;
-            font-size: 0.9rem;
-        }
-
-        .form-group input {
-            width: 100%;
-            padding: 8px;
-            border-radius: 4px;
-            border: 1px solid #ddd;
-            box-sizing: border-box;
-            font-size: 0.95rem;
+        .sidebar-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
 
         .simple-table {
@@ -223,10 +166,52 @@
         .simple-table tbody tr:nth-child(even) {
             background-color: #fcfcfc;
         }
+
+        button {
+            cursor: pointer;
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            background-color: rgba(134, 22, 24, 0.8);
+            color: white;
+            transition: background-color 0.3s;
+            font-weight: 500;
+            font-size: 0.85rem;
+        }
+
+        button:hover {
+            background-color: rgba(134, 22, 24, 1);
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 10% auto;
+            padding: 30px;
+            border: 1px solid #888;
+            border-radius: 5px;
+            width: 500px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+        }
+
+        .modal-content h2,
+        .modal-content h3 {
+            margin-top: 0;
+        }
     </style>
 </head>
 
-<body data-current="applications">
+<body data-current="audit">
     <div class="navbar">
         <h1>WireGuard VPN Manager</h1>
         <div class="nav-buttons">
@@ -249,55 +234,35 @@
     </div>
 
     <div id="main-content">
-        <h2 class="section-title">Applications</h2>
-
-        <form id="create-application-form">
-            <div class="form-group">
-                <label for="app-name">Name</label>
-                <input type="text" id="app-name" required>
-            </div>
-            <div class="form-group">
-                <label for="app-type">Type</label>
-                <input type="text" id="app-type" required>
-            </div>
-            <div class="form-group">
-                <label for="app-ip">IP</label>
-                <input type="text" id="app-ip" required>
-            </div>
-            <div class="form-group">
-                <label for="app-port">Port</label>
-                <input type="number" id="app-port" required>
-            </div>
-            <button type="submit">Create new application</button>
-        </form>
-
-        <table class="simple-table" id="applications-table">
+        <h2 class="section-title">Audit log</h2>
+        <table class="simple-table" id="audit-table">
             <thead>
                 <tr>
-                    <th>Name</th>
-                    <th>Type</th>
-                    <th>IP</th>
-                    <th>Port</th>
+                    <th>Timestamp</th>
+                    <th>Admin</th>
+                    <th>Action</th>
+                    <th>Details</th>
                 </tr>
             </thead>
-            <tbody id="applications-tbody"></tbody>
+            <tbody id="audit-body"></tbody>
         </table>
     </div>
 
-    <div id="change-password-modal" class="change-password-form">
-        <h3>Change Password</h3>
-        <form id="change-password-form">
-            <input type="password" id="current-password" placeholder="Current Password" required>
-            <input type="password" id="new-password" placeholder="New Password" required>
-            <input type="password" id="confirm-password" placeholder="Confirm New Password" required>
-            <button type="submit">Change</button>
-            <button type="button" id="cancel-change">Cancel</button>
-        </form>
-        <p id="change-error" class="error"></p>
+    <div id="change-password-modal" class="modal">
+        <div class="modal-content">
+            <h3>Change Password</h3>
+            <form id="change-password-form">
+                <input type="password" id="current-password" placeholder="Current Password" required>
+                <input type="password" id="new-password" placeholder="New Password" required>
+                <input type="password" id="confirm-password" placeholder="Confirm New Password" required>
+                <button type="submit">Change</button>
+                <button type="button" id="cancel-change">Cancel</button>
+            </form>
+            <p id="change-error" class="error"></p>
+        </div>
     </div>
-
-    <script src="js/layout.js"></script>
-    <script src="js/applications.js"></script>
+    <script src="/js/layout.js"></script>
+    <script src="/js/audit.js"></script>
 </body>
 
 </html>

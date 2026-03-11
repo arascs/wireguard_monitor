@@ -12,7 +12,7 @@
             font-family: 'Roboto', sans-serif;
             max-width: 1400px;
             margin: 0 auto;
-            padding: 70px 20px 20px 20px;
+            padding: 70px 20px 20px 220px; /* left padding for sidebar */
             background-color: #f0f0f0;
             color: #333;
             font-size: 16px;
@@ -143,6 +143,59 @@
             background-color: rgba(134, 22, 24, 1);
         }
 
+        /* sidebar styles copied from index.html */
+        .sidebar {
+            position: fixed;
+            top: 60px;
+            left: 0;
+            bottom: 0;
+            width: 200px;
+            background-color: #ffffff;
+            box-shadow: 2px 0 8px rgba(0, 0, 0, 0.08);
+            padding: 15px 10px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .sidebar-title {
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: rgba(134, 22, 24, 1);
+        }
+
+        .sidebar-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .sidebar-submenu {
+            display: flex;
+            flex-direction: column;
+            margin-left: 10px;
+            gap: 4px;
+        }
+
+        .sidebar-item {
+            border: none;
+            border-radius: 5px;
+            padding: 8px 10px;
+            text-align: left;
+            background-color: transparent;
+            color: #333;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s, color 0.2s;
+        }
+
+        .sidebar-item.active {
+            background-color: rgba(134, 22, 24, 0.1);
+            color: rgba(134, 22, 24, 1);
+        }
+
         .interface-info-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -268,7 +321,7 @@
     </style>
 </head>
 
-<body>
+<body data-current="connections">
     <div class="navbar">
         <h1>WireGuard VPN Manager</h1>
         <div class="nav-buttons">
@@ -277,7 +330,31 @@
         </div>
     </div>
 
+    <!-- sidebar menu shown on every page -->
+    <div class="sidebar">
+        <div class="sidebar-menu">
+            <button class="sidebar-item" data-section="connections" data-path="/">Connections</button>
+            <button class="sidebar-item" data-section="users" data-path="/users">Identity</button>
+            <button class="sidebar-item" data-section="devices" data-path="/devices">Devices</button>
+            <button class="sidebar-item" data-section="applications" data-path="/applications">Applications</button>
+            <button class="sidebar-item" data-section="access" data-path="/access-rules">Access rules</button>
+            <button class="sidebar-item" data-section="audit" data-path="/audit-log">Audit log</button>
+        </div>
+    </div>
+
     <div class="interface-overview">
+    <!-- top row: interface title, status and controls -->
+    <div id="interface-controls" style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+            <h2>Interface Overview</h2>
+            <h3 id="title" style="margin:0;color:rgba(134,22,24,1);"></h3>
+        </div>
+        <div id="top-buttons" style="display:flex;gap:10px;align-items:center;">
+            <span id="iface-status" style="font-weight:bold;color:#666;">Status: ?</span>
+            <button id="start-stop-btn">Start</button>
+            <button id="edit-interface-btn">Edit Interface</button>
+        </div>
+    </div>
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <h2>Interface Overview</h2>
             <h3 id="title" style="margin: 0; color: rgba(134, 22, 24, 1);"></h3>
@@ -300,10 +377,50 @@
     </div>
 
     <div class="peers-section">
-        <h2>Peers</h2>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+            <h2>Peers</h2>
+            <button id="add-peer-btn" style="padding:8px 15px; background-color:rgba(134,22,24,0.8); color:white; border:none; border-radius:5px;">Add Peer</button>
+        </div>
         <div id="peers-container" class="loading">Loading peers...</div>
     </div>
 
+    <!-- edit interface modal -->
+    <div id="edit-interface-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:25px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.15);z-index:2000;max-width:500px;width:100%;">
+        <h3>Edit Interface</h3>
+        <form id="edit-interface-form">
+            <div style="margin-bottom:10px;"><label>Address:</label><input type="text" id="edit-if-address" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>Listen Port:</label><input type="text" id="edit-if-port" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>DNS:</label><input type="text" id="edit-if-dns" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>MTU:</label><input type="text" id="edit-if-mtu" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>PreUp:</label><input type="text" id="edit-if-preup" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>PostUp:</label><input type="text" id="edit-if-postup" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>PreDown:</label><input type="text" id="edit-if-predown" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>PostDown:</label><input type="text" id="edit-if-postdown" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="text-align:right;">
+                <button type="button" id="cancel-edit-if" style="margin-right:10px;">Cancel</button>
+                <button type="submit">Save</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- add peer modal -->
+    <div id="add-peer-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:25px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.15);z-index:2000;max-width:500px;width:100%;">
+        <h3>Add New Peer</h3>
+        <form id="add-peer-form">
+            <div style="margin-bottom:10px;"><label>Name:</label><input type="text" id="new-peer-name" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>Public Key:</label><input type="text" id="new-peer-publicKey" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>Endpoint:</label><input type="text" id="new-peer-endpoint" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>Allowed IPs:</label><input type="text" id="new-peer-allowedIPs" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;" value="0.0.0.0/0"></div>
+            <div style="margin-bottom:10px;"><label>Persistent Keepalive:</label><input type="text" id="new-peer-keepalive" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;" value="25"></div>
+            <div style="margin-bottom:10px;"><label><input type="checkbox" id="new-peer-generatePsk"> Generate PSK</label></div>
+            <div style="text-align:right;">
+                <button type="button" id="cancel-add-peer" style="margin-right:10px;">Cancel</button>
+                <button type="submit">Add</button>
+            </div>
+        </form>
+    </div>
+
+    <script src="/js/layout.js"></script>
     <script src="/js/dashboard_page.js"></script>
 </body>
 

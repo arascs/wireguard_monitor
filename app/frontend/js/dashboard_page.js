@@ -29,28 +29,31 @@ async function setInterface(interfaceName) {
     }
 }
 
+let currentInterfaceConfig = {};
+
 async function loadInterfaceInfo() {
     try {
         const response = await fetch('/api/config');
         const data = await response.json();
         
         if (data.success && data.config) {
-            const interface = data.config.interface;
+            const ifaceObj = data.config.interface;
+            currentInterfaceConfig = ifaceObj || {};
             const interfaceInfo = document.getElementById('interface-info');
             
             interfaceInfo.innerHTML = `
                 <div class="interface-info-grid">
                     <div class="info-item">
                         <strong>Public Key</strong>
-                        <span>${interface.publicKey ? interface.publicKey : 'Not set'}</span>
+                        <span>${ifaceObj.publicKey ? ifaceObj.publicKey : 'Not set'}</span>
                     </div>
                     <div class="info-item">
                         <strong>Address</strong>
-                        <span>${interface.address || 'Not set'}</span>
+                        <span>${ifaceObj.address || 'Not set'}</span>
                     </div>
                     <div class="info-item">
                         <strong>Listen Port</strong>
-                        <span>${interface.listenPort || 'Not set'}</span>
+                        <span>${ifaceObj.listenPort || 'Not set'}</span>
                     </div>
                 
                     <div class="info-item" style="border-color: #007bff; background-color: #e3f2fd;">
@@ -60,16 +63,16 @@ async function loadInterfaceInfo() {
 
                     <div class="info-item">
                         <strong>DNS</strong>
-                        <span>${interface.dns || 'Not set'}</span>
+                        <span>${ifaceObj.dns || 'Not set'}</span>
                     </div>
                     <div class="info-item">
                         <strong>MTU</strong>
-                        <span>${interface.mtu || 'Not set'}</span>
+                        <span>${ifaceObj.mtu || 'Not set'}</span>
                     </div>
-                    ${interface.preUp ? `<div class="info-item"><strong>PreUp</strong><span>${interface.preUp}</span></div>` : ''}
-                    ${interface.postUp ? `<div class="info-item"><strong>PostUp</strong><span>${interface.postUp}</span></div>` : ''}
-                    ${interface.preDown ? `<div class="info-item"><strong>PreDown</strong><span>${interface.preDown}</span></div>` : ''}
-                    ${interface.postDown ? `<div class="info-item"><strong>PostDown</strong><span>${interface.postDown}</span></div>` : ''}
+                    ${ifaceObj.preUp ? `<div class="info-item"><strong>PreUp</strong><span>${ifaceObj.preUp}</span></div>` : ''}
+                    ${ifaceObj.postUp ? `<div class="info-item"><strong>PostUp</strong><span>${ifaceObj.postUp}</span></div>` : ''}
+                    ${ifaceObj.preDown ? `<div class="info-item"><strong>PreDown</strong><span>${ifaceObj.preDown}</span></div>` : ''}
+                    ${ifaceObj.postDown ? `<div class="info-item"><strong>PostDown</strong><span>${ifaceObj.postDown}</span></div>` : ''}
                 </div>
             `;
         } else {
@@ -113,7 +116,8 @@ async function loadPeers() {
             // Active nếu handshake > 0 VÀ cách đây < 180 giây
             let calculatedStatus = 'inactive';
             
-            if (peer.status === 'disabled') {
+            // treat disabled flag coming from backend
+            if (peer.isDisabled) {
                 calculatedStatus = 'disabled';
             } else if (lastHandshake > 0 && diff < 180) {
                 calculatedStatus = 'active';
@@ -144,17 +148,27 @@ async function loadPeers() {
         peersContainer.innerHTML = '<div class="peers-grid"></div>';
         const peersGrid = peersContainer.querySelector('.peers-grid');
         
-        processedPeers.forEach(peer => {
+        processedPeers.forEach((peer, index) => {
             const peerCard = document.createElement('div');
             peerCard.className = `peer-card ${peer.calculatedStatus}`;
-            
-            peerCard.onclick = () => {
+
+            // card click navigates to detail page; ignore clicks on action buttons
+            peerCard.addEventListener('click', (ev) => {
+                if (ev.target.closest('.peer-action-btn')) return; // let button handler manage it
                 const link = interfaceId ? `/dashboard/${encodeURIComponent(interfaceId)}/peer/${peer.id}` : `/dashboard/peer/${peer.id}`;
                 window.location.href = link;
-            };
-            
+            });
+
             const badgeClass = `badge-${peer.calculatedStatus}`;
-            
+
+            // build action buttons for peer management (use explicit enabled flag)
+            const disabled = peer.isDisabled === true;
+            const actionsHtml = `
+                <div style="margin-top:12px; display:flex; gap:6px; flex-wrap:wrap;">
+                    <button class="peer-action-btn" data-action="delete" data-index="${peer.id}" style="flex:1;">Delete</button>
+                    <button class="peer-action-btn" data-action="${disabled?'enable':'disable'}" data-index="${peer.id}" style="flex:1;">${disabled?'Enable':'Disable'}</button>
+                </div>`;
+
             peerCard.innerHTML = `
                 <div class="peer-name">
                     ${peer.name || `Peer ${peer.id}`}
@@ -174,8 +188,9 @@ async function loadPeers() {
                         <span>TX:</span> <strong>${formatBytes(peer.sentBytes)}</strong>
                     </div>
                 </div>
+                ${actionsHtml}
             `;
-            
+
             peersGrid.appendChild(peerCard);
         });
     } catch (error) {
@@ -333,11 +348,18 @@ window.onload = async function() {
     }
     
     await loadInterfaceInfo();
+    checkVPNStatus();
     await loadPeers();
     fetchStats();
     
     setInterval(loadPeers, 30000); 
     setInterval(fetchStats, 60000); 
+
+    setupInterfaceControls();
+    setupPeerModals();
+
+    // sidebar activation (reuse layout code)
+    initSidebar();
     
     // Filter logic
     document.getElementById('applyFilter').addEventListener('click', () => {
@@ -359,10 +381,176 @@ window.onload = async function() {
     });
 };
 
-// Handle resize for all charts
-window.addEventListener('resize', function() {
-    rxSpeedChart.resize();
-    txSpeedChart.resize();
-    rxDropRateChart.resize();
-    txDropRateChart.resize();
-});
+// helper to initialize sidebar behavior (same as layout.js)
+function initSidebar() {
+    const sidebarItems = document.querySelectorAll('.sidebar-item');
+    const currentSection = 'connections'; // always connections for dashboard
+    sidebarItems.forEach((btn) => {
+        const section = btn.dataset.section;
+        const path = btn.dataset.path;
+        if (section === currentSection) btn.classList.add('active');
+        btn.addEventListener('click', () => {
+            if (window.location.pathname !== path) {
+                window.location.href = path;
+            }
+        });
+    });
+}
+
+// VPN status control functions
+async function checkVPNStatus() {
+    try {
+        const r = await fetch('/api/vpn-status');
+        const d = await r.json();
+        updateVpnButton(d.connected);
+    } catch (e) {
+        console.error(e);
+        updateVpnButton(false);
+    }
+}
+
+function updateVpnButton(isConnected) {
+    const statusSpan = document.getElementById('iface-status');
+    const btn = document.getElementById('start-stop-btn');
+    if (isConnected) {
+        statusSpan.textContent = 'Status: Up';
+        statusSpan.style.color = '#28a745';
+        btn.textContent = 'Stop';
+    } else {
+        statusSpan.textContent = 'Status: Down';
+        statusSpan.style.color = '#dc3545';
+        btn.textContent = 'Start';
+    }
+}
+
+async function toggleVpn() {
+    const btn = document.getElementById('start-stop-btn');
+    if (btn.textContent === 'Start') {
+        const r = await fetch('/api/connect', {method:'POST'});
+        const d = await r.json();
+        if (d.success) checkVPNStatus();
+    } else {
+        const r = await fetch('/api/disconnect', {method:'POST'});
+        const d = await r.json();
+        if (d.success) checkVPNStatus();
+    }
+}
+
+// interface editing modal
+function setupInterfaceControls() {
+    document.getElementById('start-stop-btn').addEventListener('click', toggleVpn);
+    document.getElementById('edit-interface-btn').addEventListener('click', openEditInterfaceModal);
+    document.getElementById('cancel-edit-if').addEventListener('click', closeEditInterfaceModal);
+    document.getElementById('edit-interface-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const updated = {
+            address: document.getElementById('edit-if-address').value,
+            listenPort: document.getElementById('edit-if-port').value,
+            dns: document.getElementById('edit-if-dns').value,
+            mtu: document.getElementById('edit-if-mtu').value,
+            preUp: document.getElementById('edit-if-preup').value,
+            postUp: document.getElementById('edit-if-postup').value,
+            preDown: document.getElementById('edit-if-predown').value,
+            postDown: document.getElementById('edit-if-postdown').value,
+            saveToFile: true
+        };
+        try {
+            const res = await fetch('/api/configure-interface', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify(updated)
+            });
+            const data = await res.json();
+            if (data.success) {
+                closeEditInterfaceModal();
+                await loadInterfaceInfo();
+                // also refresh peer list so active count is recalculated
+                loadPeers();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        } catch(err){ alert(err.message); }
+    });
+}
+
+function openEditInterfaceModal() {
+    const cfg = currentInterfaceConfig;
+    document.getElementById('edit-if-address').value = cfg.address || '';
+    document.getElementById('edit-if-port').value = cfg.listenPort || '';
+    document.getElementById('edit-if-dns').value = cfg.dns || '';
+    document.getElementById('edit-if-mtu').value = cfg.mtu || '';
+    document.getElementById('edit-if-preup').value = cfg.preUp || '';
+    document.getElementById('edit-if-postup').value = cfg.postUp || '';
+    document.getElementById('edit-if-predown').value = cfg.preDown || '';
+    document.getElementById('edit-if-postdown').value = cfg.postDown || '';
+    document.getElementById('edit-interface-modal').style.display = 'block';
+}
+
+function closeEditInterfaceModal() {
+    document.getElementById('edit-interface-modal').style.display = 'none';
+}
+
+// peer add/delete/enable/disable/edit actions
+function setupPeerModals() {
+    document.getElementById('add-peer-btn').addEventListener('click', () => {
+        document.getElementById('add-peer-modal').style.display = 'block';
+    });
+    document.getElementById('cancel-add-peer').addEventListener('click', () => {
+        document.getElementById('add-peer-modal').style.display = 'none';
+    });
+    document.getElementById('add-peer-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const peer = {
+            name: document.getElementById('new-peer-name').value,
+            publicKey: document.getElementById('new-peer-publicKey').value,
+            endpoint: document.getElementById('new-peer-endpoint').value,
+            allowedIPs: document.getElementById('new-peer-allowedIPs').value,
+            persistentKeepalive: document.getElementById('new-peer-keepalive').value,
+            generatePsk: document.getElementById('new-peer-generatePsk').checked
+        };
+        try {
+            const res = await fetch('/api/add-peer', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body:JSON.stringify(peer)
+            });
+            const data = await res.json();
+            if (data.success) {
+                document.getElementById('add-peer-modal').style.display = 'none';
+                loadPeers();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        } catch(err){ alert(err.message); }
+    });
+
+    // delegate action buttons
+    document.getElementById('peers-container').addEventListener('click', async (ev) => {
+        const btn = ev.target.closest('.peer-action-btn');
+        if (!btn) return;
+        ev.stopPropagation();
+        const action = btn.dataset.action;
+        const peerId = btn.dataset.index;
+        let url = '';
+        let method = 'POST';
+        if (action === 'delete') {
+            if (!confirm('Delete peer?')) return;
+            url = `/api/delete-peer/${peerId}`;
+            method = 'DELETE';
+        } else if (action === 'enable') {
+            url = `/api/enable-peer/${peerId}`;
+        } else if (action === 'disable') {
+            url = `/api/disable-peer/${peerId}`;
+        }
+        try {
+            const r = await fetch(url, { method });
+            const d = await r.json();
+            if (d.success) {
+                // persist the change to disk so it survives restarts and is applied to wg
+                await fetch('/api/save-config', { method: 'POST' });
+                await loadPeers();
+            } else {
+                alert('Error: '+d.error);
+            }
+        } catch(e) {
+            alert(e.message);
+        }
+    })};

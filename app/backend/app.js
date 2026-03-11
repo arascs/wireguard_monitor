@@ -15,6 +15,7 @@ const createAccessRuleRoutes = require('./routes/accessRules');
 const createAuthRoutes = require('./routes/auth');
 const { HOSTNAME } = require('./config');
 const mysql = require('mysql2/promise');
+const { logAction, getLogs } = require('./auditLogger');
 
 const dbConfig = {
   host: 'localhost',
@@ -148,12 +149,16 @@ function loadCredentials() {
 }
 
 // Middleware to require authentication
+// for page requests, redirect to login; for API endpoints, return 401 JSON
 function requireAuth(req, res, next) {
-  if (req.session.user) {
-    next();
-  } else {
-    res.redirect('/login');
+  if (req.session && req.session.user) {
+    return next();
   }
+  if (req.path && req.path.startsWith('/api/')) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+  // otherwise assume browser navigation
+  res.redirect('/login');
 }
 
 // Load configuration from file
@@ -672,6 +677,10 @@ app.post('/api/add-peer', (req, res) => {
 
     config.peers.push(peer);
     updateSharedConfig();
+    try {
+      const admin = req.session && req.session.user ? req.session.user : 'unknown';
+      logAction(admin, 'create_peer', { peer: config.peers[idx] });
+    } catch (e) {}
     res.json({ success: true, peer, index: config.peers.length - 1 });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -692,6 +701,9 @@ app.put('/api/edit-peer/:index', (req, res) => {
     const idx = parseInt(req.params.index);
     if (idx >= 0 && idx < config.peers.length) {
       const peer = config.peers[idx];
+      console.log(`Editing peer at index ${idx}:`, peer);
+      const oldPeer = { ...peer };
+
       peer.name = req.body.name !== undefined ? req.body.name : peer.name;
       peer.publicKey = req.body.publicKey !== undefined ? req.body.publicKey : peer.publicKey;
       peer.endpoint = req.body.endpoint !== undefined ? req.body.endpoint : peer.endpoint;
@@ -702,6 +714,17 @@ app.put('/api/edit-peer/:index', (req, res) => {
       }
 
       updateSharedConfig();
+
+      try {
+        const admin = req.session && req.session.user ? req.session.user : 'unknown';
+        logAction(admin, 'edit_peer', { 
+          oldConfig: oldPeer, 
+          newConfig: peer 
+        });
+      } catch (e) {
+        console.error('Audit log error:', e.message);
+      }
+
       res.json({ success: true, peer });
     } else {
       res.status(404).json({ success: false, error: 'Peer not found' });
@@ -726,6 +749,10 @@ app.delete('/api/delete-peer/:index', (req, res) => {
     if (idx >= 0 && idx < config.peers.length) {
       config.peers.splice(idx, 1);
       updateSharedConfig();
+      try {
+        const admin = req.session && req.session.user ? req.session.user : 'unknown';
+        logAction(admin, 'delete_peer', { peer: config.peers[idx] });
+      } catch (e) {}
       res.json({ success: true });
     } else {
       res.status(404).json({ success: false, error: 'Peer not found' });
@@ -750,6 +777,11 @@ app.post('/api/enable-peer/:index', (req, res) => {
     if (idx >= 0 && idx < config.peers.length) {
       config.peers[idx].enabled = true;
       updateSharedConfig();
+      // audit log
+      try {
+        const admin = req.session && req.session.user ? req.session.user : 'unknown';
+        logAction(admin, 'enable_peer', { peer: config.peers[idx] });
+      } catch (e) {}
       res.json({ success: true, peer: config.peers[idx] });
     } else {
       res.status(404).json({ success: false, error: 'Peer not found' });
@@ -774,6 +806,11 @@ app.post('/api/disable-peer/:index', (req, res) => {
     if (idx >= 0 && idx < config.peers.length) {
       config.peers[idx].enabled = false;
       updateSharedConfig();
+      // audit log
+      try {
+        const admin = req.session && req.session.user ? req.session.user : 'unknown';
+        logAction(admin, 'disable_peer', { peer: config.peers[idx] });
+      } catch (e) {}
       res.json({ success: true, peer: config.peers[idx] });
     } else {
       res.status(404).json({ success: false, error: 'Peer not found' });
@@ -823,6 +860,12 @@ app.post('/api/save-config', (req, res) => {
 // Connect VPN
 app.post('/api/connect', (req, res) => {
   try {
+    // audit start interface
+    try {
+      const admin = req.session && req.session.user ? req.session.user : 'unknown';
+      logAction(admin, 'start_interface', { interface: INTERFACE });
+    } catch (e) {}
+
     // Check if key is expired
     if (isKeyExpired()) {
       return res.status(403).json({
@@ -858,6 +901,12 @@ app.post('/api/connect', (req, res) => {
 // Disconnect VPN
 app.post('/api/disconnect', (req, res) => {
   try {
+    // audit stop interface
+    try {
+      const admin = req.session && req.session.user ? req.session.user : 'unknown';
+      logAction(admin, 'stop_interface', { interface: INTERFACE });
+    } catch (e) {}
+
     run(`wg-quick down ${INTERFACE}`);
     res.json({ success: true });
   } catch (error) {
@@ -868,6 +917,13 @@ app.post('/api/disconnect', (req, res) => {
 // Restart VPN
 app.post('/api/restart-vpn', (req, res) => {
   try {
+    // audit stop and start interface
+    try {
+      const admin = req.session && req.session.user ? req.session.user : 'unknown';
+      logAction(admin, 'stop_interface', { interface: INTERFACE });
+      logAction(admin, 'start_interface', { interface: INTERFACE });
+    } catch (e) {}
+
     // Check if key is expired
     if (isKeyExpired()) {
       return res.status(403).json({
@@ -891,6 +947,16 @@ app.post('/api/restart-vpn', (req, res) => {
   }
 });
 
+// audit logs retrieval
+app.get('/api/audit-logs', requireAuth, (req, res) => {
+  try {
+    const logs = getLogs();
+    res.json({ success: true, logs });
+  } catch (e) {
+    res.status(500).json({ success: false, error: 'cannot read audit logs' });
+  }
+});
+
 // Get VPN status
 app.get('/api/vpn-status', (req, res) => {
   try {
@@ -901,6 +967,12 @@ app.get('/api/vpn-status', (req, res) => {
     // If command fails, VPN is likely not connected
     res.json({ success: true, connected: false });
   }
+});
+
+// audit log page
+app.get('/audit-log', requireAuth, (req, res) => {
+  const htmlPath = path.join(FRONTEND_DIR, 'audit.html');
+  res.send(renderHtmlWithHostname(htmlPath));
 });
 
 app.get('/login', (req, res) => {
@@ -1039,7 +1111,7 @@ app.post('/api/sync-keys', (req, res) => {
   }
 });
 
-app.post('/api/user-login', authenticateToken, async (req, res) => {
+app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
   const originalInterface = INTERFACE;
   const originalConfigFile = CONFIG_FILE;
   const originalConfigObj = JSON.parse(JSON.stringify(config));
@@ -1057,7 +1129,7 @@ app.post('/api/user-login', authenticateToken, async (req, res) => {
 
     // Get device info to find enrolled device
     const [devices] = await connection.execute(
-      'SELECT allowed_ips, public_key FROM devices WHERE username = ? AND device_name = ?',
+      'SELECT allowed_ips, public_key, status FROM devices WHERE username = ? AND device_name = ?',
       [username, deviceName]
     );
 
@@ -1065,6 +1137,21 @@ app.post('/api/user-login', authenticateToken, async (req, res) => {
 
     if (devices.length === 0) {
       return res.status(403).json({ success: false, error: 'Device not enrolled' });
+    }
+
+    now = Math.floor(Date.now() / 1000);
+    if (devices[0].expire_date < now) {
+      let connection = await mysql.createConnection(dbConfig);
+      await connection.execute(
+        'UPDATE devices SET status = 0 WHERE username = ? AND device_name = ?',
+        [username, deviceName]
+      );
+      await connection.end();
+      return res.status(403).json({ success: false, error: 'Device expired' });
+    }
+
+    if (devices[0].status === 0) {
+      return res.status(403).json({ success: false, error: 'Device disabled' });
     }
 
     const device = devices[0];

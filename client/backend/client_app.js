@@ -223,7 +223,7 @@ app.post('/api/client/connect/:ip/:port', async (req, res) => {
     }
 
     // 7b. Login and get config
-    const loginUrl = `http://${ip}:${port}/api/user-login`;
+    const loginUrl = `http://${ip}:${port}/api/connect-vpn`;
     r = await fetch(loginUrl, {
       method: 'POST',
       headers: { 
@@ -241,6 +241,18 @@ app.post('/api/client/connect/:ip/:port', async (req, res) => {
       serverPublicKey: data.serverPublicKey,
       serverEndpoint: data.serverEndpoint || `${ip}:51820`
     });
+
+    // 7d. Save server public key to VPN_servers.json
+    try {
+      const serversData = JSON.parse(fs.readFileSync(VPN_SERVERS_FILE, 'utf8'));
+      const server = serversData.servers.find(s => s.ip === ip && s.port === parseInt(port));
+      if (server) {
+        server.publicKey = data.serverPublicKey;
+        fs.writeFileSync(VPN_SERVERS_FILE, JSON.stringify(serversData, null, 2));
+      }
+    } catch (saveError) {
+      console.error('Error saving public key:', saveError);
+    }
 
     res.json({ success: true, allowedIPs: data.allowedIPs });
   } catch (error) {
@@ -309,6 +321,60 @@ app.get('/api/client/device-name', (req, res) => {
     res.json({ success: true, deviceName: hostname });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message, deviceName: 'device' });
+  }
+});
+
+// 11. Check WireGuard client connection status for each server based on public keys
+app.get('/api/client/connection-status', (req, res) => {
+  try {
+    const serversData = JSON.parse(fs.readFileSync(VPN_SERVERS_FILE, 'utf8'));
+    const servers = serversData.servers || [];
+
+    const output = run('wg show wg_client dump').trim();
+    const lines = output ? output.split('\n') : [];
+
+    const peerMap = {};
+
+    // Bỏ dòng interface
+    const peerLines = lines.slice(1);
+
+    for (const line of peerLines) {
+      const parts = line.trim().split(/\s+/);
+
+      if (parts.length >= 8) {
+        const publicKey = parts[0];          // ✔ đúng field
+        const handshake = parseInt(parts[4], 10);
+
+        if (!isNaN(handshake)) {
+          peerMap[publicKey] = handshake;
+        }
+      }
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+
+    const status = servers.map(server => {
+      const handshake = peerMap[server.publicKey] || 0;
+
+      let connected = false;
+
+      if (handshake > 0) {
+        const age = now - handshake;
+        connected = age <= 180;
+      }
+
+      return {
+        ip: server.ip,
+        port: server.port,
+        connected,
+        lastHandshake: handshake
+      };
+    });
+
+    res.json({ servers: status });
+
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

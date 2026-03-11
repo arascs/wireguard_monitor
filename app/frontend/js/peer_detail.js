@@ -414,7 +414,91 @@ function setupFilterEventListeners() {
     };
 }
 
+// sidebar helper
+function initSidebar() {
+    const sidebarItems = document.querySelectorAll('.sidebar-item');
+    const currentSection = 'connections';
+    sidebarItems.forEach((btn) => {
+        const section = btn.dataset.section;
+        const path = btn.dataset.path;
+        if (section === currentSection) btn.classList.add('active');
+        btn.addEventListener('click', () => {
+            if (window.location.pathname !== path) {
+                window.location.href = path;
+            }
+        });
+    });
+}
+
+// edit peer modal logic
+function setupEditPeerModal() {
+    const btn = document.getElementById('edit-peer-btn');
+    const modal = document.getElementById('edit-peer-modal');
+    const cancelBtn = document.getElementById('cancel-edit-peer');
+    const form = document.getElementById('edit-peer-form');
+    let currentPeer = null;
+
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+        const ids = getIdsFromUrl();
+        if (!ids.peerId) return;
+        const url = ids.interfaceId ?
+            `/api/dashboard/peer/${ids.peerId}?interface=${encodeURIComponent(ids.interfaceId)}` :
+            `/api/dashboard/peer/${ids.peerId}`;
+        try {
+            const res = await fetch(url);
+            const peerData = await res.json();
+            currentPeer = peerData;
+            document.getElementById('edit-peer-name').value = peerData.name || '';
+            document.getElementById('edit-peer-publicKey').value = peerData.publicKey || '';
+            document.getElementById('edit-peer-endpoint').value = peerData.endpoint || '';
+            document.getElementById('edit-peer-allowedIPs').value = peerData.allowedIPs || '';
+            document.getElementById('edit-peer-keepalive').value = peerData.persistentKeepalive || '';
+            modal.style.display = 'block';
+        } catch (e) {
+            console.error(e);
+        }
+    });
+
+    if (cancelBtn) cancelBtn.addEventListener('click', () => {
+        modal.style.display = 'none';
+    });
+
+    if (form) form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!currentPeer) return;
+        const ids = getIdsFromUrl();
+        const peerId = ids.peerId;
+        const payload = {
+            name: document.getElementById('edit-peer-name').value,
+            publicKey: document.getElementById('edit-peer-publicKey').value,
+            endpoint: document.getElementById('edit-peer-endpoint').value,
+            allowedIPs: document.getElementById('edit-peer-allowedIPs').value,
+            persistentKeepalive: document.getElementById('edit-peer-keepalive').value
+        };
+        try {
+            const path = `/api/edit-peer/${peerId}`;
+            const res = await fetch(path, {
+                method: 'PUT', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.success) {
+                // persist the updated configuration to disk
+                await fetch('/api/save-config', { method: 'POST' });
+                modal.style.display = 'none';
+                // reload entire peer page so name/allowedIPs etc update
+                await loadPeerPage();
+            } else {
+                alert('Error: '+data.error);
+            }
+        } catch(err){ alert(err.message); }
+    });
+}
+
 function initPeerDetail() {
+    initSidebar();
+    setupEditPeerModal();
     loadPeerPage();
 
     setInterval(() => {

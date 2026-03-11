@@ -3,7 +3,8 @@
     {
       "name": "VPN-server-1",
       "ip": "172.16.0.128",
-      "port": 3000
+      "port": 3000,
+      "publicKey": ""
     }
   ]
 }
