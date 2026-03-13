@@ -145,6 +145,10 @@
         }
 
         .tab-btn {
+            background: none;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
             transition: color 0.2s, border-color 0.2s;
         }
 
@@ -161,6 +165,7 @@
 
         .tab-btn:hover {
             color: rgba(134, 22, 24, 0.8);
+            background: none;
         }
 
         .section-title {
@@ -391,12 +396,8 @@
     <div id="main-content">
         <div
             style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px;">
-            <button id="tab-approved" class="tab-btn active"
-                style="padding: 10px 20px; border: none; background: none; color: rgba(134, 22, 24, 1); font-weight: 600; font-size: 1rem; cursor: pointer; border-bottom: 3px solid rgba(134, 22, 24, 1); margin-bottom: -11px;">Approved
-                Devices</button>
-            <button id="tab-requests" class="tab-btn"
-                style="padding: 10px 20px; border: none; background: none; color: #666; font-weight: 600; font-size: 1rem; cursor: pointer;">Enrollment
-                Requests</button>
+            <button id="tab-approved" class="tab-btn active">Approved Devices</button>
+            <button id="tab-requests" class="tab-btn">Enrollment Requests</button>
         </div>
 
         <div id="approved-view">

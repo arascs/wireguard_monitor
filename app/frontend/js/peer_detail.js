@@ -441,7 +441,8 @@ function setupEditPeerModal() {
     if (!btn) return;
     btn.addEventListener('click', async () => {
         const ids = getIdsFromUrl();
-        if (!ids.peerId) return;
+        // peerId may be 0 so guard against null/undefined rather than falsy
+        if (ids.peerId === null || ids.peerId === undefined) return;
         const url = ids.interfaceId ?
             `/api/dashboard/peer/${ids.peerId}?interface=${encodeURIComponent(ids.interfaceId)}` :
             `/api/dashboard/peer/${ids.peerId}`;

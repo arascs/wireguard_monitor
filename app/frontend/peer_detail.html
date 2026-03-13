@@ -12,7 +12,8 @@
             font-family: 'Roboto', sans-serif;
             max-width: 1200px;
             margin: 0 auto;
-            padding: 70px 20px 20px 220px; /* space for sidebar */
+            padding: 70px 20px 20px 220px;
+            /* space for sidebar */
             background-color: #f0f0f0;
             color: #333;
         }
@@ -298,20 +299,29 @@
 
     <div class="peer-detail-container">
         <div style="text-align:right; margin-bottom:10px;">
-            <button id="edit-peer-btn" style="padding:8px 15px; background-color:rgba(134,22,24,0.8); color:white; border:none; border-radius:5px;">Edit Peer</button>
+            <button id="edit-peer-btn"
+                style="padding:8px 15px; background-color:rgba(134,22,24,0.8); color:white; border:none; border-radius:5px;">Edit
+                Peer</button>
         </div>
         <div id="peer-detail-content" class="loading">Loading peer details...</div>
     </div>
 
     <!-- edit peer modal -->
-    <div id="edit-peer-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:25px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.15);z-index:2000;max-width:500px;width:100%;">
+    <div id="edit-peer-modal"
+        style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:25px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.15);z-index:2000;max-width:500px;width:100%;">
         <h3>Edit Peer</h3>
         <form id="edit-peer-form">
-            <div style="margin-bottom:10px;"><label>Name:</label><input type="text" id="edit-peer-name" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-            <div style="margin-bottom:10px;"><label>Public Key:</label><input type="text" id="edit-peer-publicKey" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-            <div style="margin-bottom:10px;"><label>Endpoint:</label><input type="text" id="edit-peer-endpoint" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-            <div style="margin-bottom:10px;"><label>Allowed IPs:</label><input type="text" id="edit-peer-allowedIPs" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-            <div style="margin-bottom:10px;"><label>Persistent Keepalive:</label><input type="text" id="edit-peer-keepalive" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>Name:</label><input type="text" id="edit-peer-name"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>Public Key:</label><input type="text" id="edit-peer-publicKey"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>Endpoint:</label><input type="text" id="edit-peer-endpoint"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>Allowed IPs:</label><input type="text" id="edit-peer-allowedIPs"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>Persistent Keepalive:</label><input type="text"
+                    id="edit-peer-keepalive" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;">
+            </div>
             <div style="text-align:right;">
                 <button type="button" id="cancel-edit-peer" style="margin-right:10px;">Cancel</button>
                 <button type="submit">Save</button>

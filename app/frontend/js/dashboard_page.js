@@ -31,6 +31,41 @@ async function setInterface(interfaceName) {
 
 let currentInterfaceConfig = {};
 
+// fetch key expiration info and update banner
+async function checkKeyStatus() {
+    try {
+        const response = await fetch('/api/key-status');
+        const data = await response.json();
+        if (data.success) {
+            updateKeyStatusBanner(data);
+        }
+    } catch (error) {
+        console.error('Error checking key status:', error);
+    }
+}
+
+function updateKeyStatusBanner(statusData) {
+    const banner = document.getElementById('key-status-banner');
+    if (!banner) return;
+    if (!statusData.keyCreationDate) {
+        banner.className = 'key-status-banner no-key';
+        banner.innerHTML = 'Chưa có key. Vui lòng tạo key mới để sử dụng.';
+        return;
+    }
+    if (statusData.expired) {
+        banner.className = 'key-status-banner expired';
+        banner.innerHTML = 'Key expired. Generate new keys to continue using VPN';
+    } else if (statusData.remainingDays !== null) {
+        if (statusData.remainingDays <= 7) {
+            banner.className = 'key-status-banner warning';
+            banner.innerHTML = `Warning: Key expired after ${statusData.remainingDays} days. Generate new keys.`;
+        } else {
+            banner.className = 'key-status-banner valid';
+            banner.innerHTML = `Key expires in ${statusData.remainingDays} days.`;
+        }
+    }
+}
+
 async function loadInterfaceInfo() {
     try {
         const response = await fetch('/api/config');
@@ -58,7 +93,7 @@ async function loadInterfaceInfo() {
                 
                     <div class="info-item" style="border-color: #007bff; background-color: #e3f2fd;">
                         <strong>Active Peers (< 180s)</strong>
-                        <span id="active-peers-stat" style="font-size: 1.1em; font-weight: bold; color: #0056b3;">Loading...</span>
+                        <span id="active-peers-stat" style="font-size: 1.1em; font-weight: bold; color: #0056b3;">0/0</span>
                     </div>
 
                     <div class="info-item">
@@ -200,7 +235,7 @@ async function loadPeers() {
 }
 
 // Vẽ biểu đồ
-document.getElementById("title").innerText = `Dashboard: ${iface}`;
+document.getElementById("title").innerText = `${iface}`;
 
 const rxSpeedChart = echarts.init(document.getElementById('rxSpeedChart'));
 const txSpeedChart = echarts.init(document.getElementById('txSpeedChart'));
@@ -348,6 +383,10 @@ window.onload = async function() {
     }
     
     await loadInterfaceInfo();
+    // check key expiration banner
+    await checkKeyStatus();
+    // refresh key status periodically (5 minutes)
+    setInterval(checkKeyStatus, 5 * 60 * 1000);
     checkVPNStatus();
     await loadPeers();
     fetchStats();
@@ -470,6 +509,45 @@ function setupInterfaceControls() {
             }
         } catch(err){ alert(err.message); }
     });
+
+    // generate new key pair from edit modal
+    const genBtn = document.getElementById('edit-if-generate-keys');
+    if (genBtn) {
+        genBtn.addEventListener('click', async () => {
+            const output = document.getElementById('edit-if-keys-output');
+            if (output) output.innerHTML = 'Generating new key pair...';
+            try {
+                const res = await fetch('/api/generate-keys', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ force: true })
+                });
+                const data = await res.json();
+                if (data.needConfirmation) {
+                    // shouldn't happen since we force, but handle just in case
+                    if (confirm(data.message)) {
+                        genBtn.click();
+                    }
+                    return;
+                }
+                if (data.success) {
+                    if (output) {
+                        output.innerHTML = '<p><strong>New key pair created.</strong></p>';
+                        if (data.peers && data.peers.length) {
+                            output.innerHTML += `<p>Distributed keys to ${data.peers.length} peers.</p>`;
+                        }
+                    }
+                    await checkKeyStatus();
+                    await loadInterfaceInfo();
+                    loadPeers();
+                } else if (output) {
+                    output.innerHTML = '<p style="color:red;">Error: ' + data.error + '</p>';
+                }
+            } catch (err) {
+                if (output) output.innerHTML = '<p style="color:red;">Error: ' + err.message + '</p>';
+            }
+        });
+    }
 }
 
 function openEditInterfaceModal() {
@@ -482,6 +560,9 @@ function openEditInterfaceModal() {
     document.getElementById('edit-if-postup').value = cfg.postUp || '';
     document.getElementById('edit-if-predown').value = cfg.preDown || '';
     document.getElementById('edit-if-postdown').value = cfg.postDown || '';
+    // clear any previous key-generation messages
+    const output = document.getElementById('edit-if-keys-output');
+    if (output) output.innerHTML = '';
     document.getElementById('edit-interface-modal').style.display = 'block';
 }
 

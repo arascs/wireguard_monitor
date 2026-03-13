@@ -248,6 +248,7 @@ function switchTab(tabName) {
   const requestsView = document.getElementById('requests-view');
   const tabApproved = document.getElementById('tab-approved');
   const tabRequests = document.getElementById('tab-requests');
+  const sidebarDevices = document.querySelector('.sidebar-item[data-section="devices"]');
 
   if (tabName === 'approved') {
     approvedView.style.display = 'block';

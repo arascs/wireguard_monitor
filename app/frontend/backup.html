@@ -2,7 +2,7 @@
 <html>
 
 <head>
-    <title>WireGuard VPN Manager - Audit Log</title>
+    <title>WireGuard VPN Manager - Backup & Restore</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
@@ -112,6 +112,18 @@
             gap: 10px;
         }
 
+        .sidebar-title {
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: rgba(134, 22, 24, 1);
+        }
+
+        .sidebar-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
         .sidebar-item {
             border: none;
             border-radius: 5px;
@@ -128,18 +140,6 @@
         .sidebar-item.active {
             background-color: rgba(134, 22, 24, 0.1);
             color: rgba(134, 22, 24, 1);
-        }
-
-        .sidebar-title {
-            font-weight: 600;
-            margin-bottom: 5px;
-            color: rgba(134, 22, 24, 1);
-        }
-
-        .sidebar-menu {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
         }
 
         .simple-table {
@@ -208,41 +208,10 @@
         .modal-content h3 {
             margin-top: 0;
         }
-
-        /* tabs for audit/session (reusing device styles) */
-        .tab-btn {
-            background: none;
-            border: none;
-            padding: 10px 20px;
-            cursor: pointer;
-            transition: color 0.2s, border-color 0.2s;
-        }
-
-        .tab-btn.active {
-            color: rgba(134, 22, 24, 1);
-            border-bottom: 3px solid rgba(134, 22, 24, 1);
-            margin-bottom: -11px;
-        }
-
-        .tab-btn:not(.active) {
-            color: #666;
-            border-bottom: none;
-        }
-
-        .tab-btn:hover {
-            color: rgba(134, 22, 24, 0.8);
-            background: none;
-        }
-
-        /* old log-tabs rules kept for compatibility */
-        #log-tabs .log-tab.active {
-            background-color: #e0e0e0;
-            font-weight: 600;
-        }
     </style>
 </head>
 
-<body data-current="audit">
+<body data-current="backup">
     <div class="navbar">
         <h1>WireGuard VPN Manager</h1>
         <div class="nav-buttons">
@@ -265,22 +234,23 @@
     </div>
 
     <div id="main-content">
-        <div
-            style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px;">
-            <button id="tab-audit" class="tab-btn active">Audit log</button>
-            <button id="tab-sessions" class="tab-btn">Session log</button>
+        <h2 class="section-title">Backup & Restore</h2>
+        <div style="margin-bottom:15px;">
+            <button id="btn-create-db">Create DB backup</button>
+            <button id="btn-create-wg">Create WG config backup</button>
+            <button id="btn-create-full">Create full backup</button>
         </div>
-        <h2 class="section-title" id="section-title">Audit log</h2>
-        <table class="simple-table" id="log-table">
+        <table class="simple-table" id="backups-table">
             <thead>
-                <tr id="log-header-row">
-                    <th>Timestamp</th>
-                    <th>Admin</th>
-                    <th>Action</th>
-                    <th>Details</th>
+                <tr>
+                    <th>Filename</th>
+                    <th>Size</th>
+                    <th>Created</th>
+                    <th>Type</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
-            <tbody id="log-body"></tbody>
+            <tbody id="backups-body"></tbody>
         </table>
     </div>
 
@@ -298,7 +268,7 @@
         </div>
     </div>
     <script src="/js/layout.js"></script>
-    <script src="/js/audit.js"></script>
+    <script src="/js/backup.js"></script>
 </body>
 
 </html>

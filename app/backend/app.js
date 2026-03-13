@@ -8,11 +8,14 @@ const session = require('express-session');
 const bcrypt = require('bcrypt');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
+const os = require('os');
 const dashboardRoutes = require('./routes/dashboard');
 const createUserRoutes = require('./routes/users');
 const createApplicationRoutes = require('./routes/applications');
 const createAccessRuleRoutes = require('./routes/accessRules');
 const createAuthRoutes = require('./routes/auth');
+const createSessionLogRoutes = require('./routes/sessionLogs');
+const createBackupRoutes = require('./routes/backups');
 const { HOSTNAME } = require('./config');
 const mysql = require('mysql2/promise');
 const { logAction, getLogs } = require('./auditLogger');
@@ -53,6 +56,12 @@ let INTERFACE = 'wgA';
 let CONFIG_FILE = path.join(CONFIG_DIR, `${INTERFACE}.conf`);
 const FRONTEND_DIR = path.join(__dirname, '../frontend');
 const CREDENTIALS_FILE = '/etc/wireguard/credentials.txt';
+
+// backup directory for stored archives
+const BACKUP_DIR = '/var/backups/wg_monitor';
+if (!fs.existsSync(BACKUP_DIR)) {
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+}
 
 let config = {
   interface: {
@@ -957,6 +966,13 @@ app.get('/api/audit-logs', requireAuth, (req, res) => {
   }
 });
 
+// session history retrieval (sessions log)
+const HISTORY_DIR = '/var/log/vpn_history';
+app.use('/api', createSessionLogRoutes({ requireAuth, HISTORY_DIR }));
+
+// backup APIs
+app.use('/api', createBackupRoutes({ requireAuth, BACKUP_DIR, CONFIG_DIR, dbConfig }));
+
 // Get VPN status
 app.get('/api/vpn-status', (req, res) => {
   try {
@@ -972,6 +988,12 @@ app.get('/api/vpn-status', (req, res) => {
 // audit log page
 app.get('/audit-log', requireAuth, (req, res) => {
   const htmlPath = path.join(FRONTEND_DIR, 'audit.html');
+  res.send(renderHtmlWithHostname(htmlPath));
+});
+
+// backup/restore page
+app.get('/backup', requireAuth, (req, res) => {
+  const htmlPath = path.join(FRONTEND_DIR, 'backup.html');
   res.send(renderHtmlWithHostname(htmlPath));
 });
 
@@ -1021,10 +1043,6 @@ app.get('/', requireAuth, (req, res) => {
   res.send(renderHtmlWithHostname(htmlPath));
 });
 
-app.get(['/editInterface/:id', '/addInterface/:id'], requireAuth, (req, res) => {
-  const htmlPath = path.join(FRONTEND_DIR, 'interface_config.html');
-  res.send(renderHtmlWithHostname(htmlPath));
-});
 
 app.get('/dashboard', requireAuth, (req, res) => {
   const htmlPath = path.join(__dirname, '../frontend/dashboard.html');

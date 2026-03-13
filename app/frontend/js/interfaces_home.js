@@ -66,16 +66,76 @@ async function loadInterfaces() {
     }
 }
 
-function handleAddInterface() {
-    const name = prompt('Enter new interface name (e.g. wgA):');
+// open modal to collect interface details
+function showAddInterfaceModal() {
+    const modal = document.getElementById('add-interface-modal');
+    if (modal) {
+        modal.style.display = 'block';
+    }
+}
+
+function hideAddInterfaceModal() {
+    const modal = document.getElementById('add-interface-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+
+async function submitAddInterfaceForm(e) {
+    e.preventDefault();
+    const name = document.getElementById('new-interface-name').value.trim();
     if (!name) {
+        alert('Interface name is required');
         return;
     }
-    const trimmed = name.trim();
-    if (!trimmed) {
-        return;
+    // optional fields
+    const address = document.getElementById('new-interface-address').value.trim();
+    const listenPort = document.getElementById('new-interface-listenPort').value.trim();
+    const dns = document.getElementById('new-interface-dns').value.trim();
+    const mtu = document.getElementById('new-interface-mtu').value.trim();
+    const preUp = document.getElementById('new-interface-preUp').value.trim();
+    const postUp = document.getElementById('new-interface-postUp').value.trim();
+    const preDown = document.getElementById('new-interface-preDown').value.trim();
+    const postDown = document.getElementById('new-interface-postDown').value.trim();
+
+    try {
+        // set interface on server
+        await fetch('/api/interface', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ interface: name })
+        });
+
+        // send configuration
+        const configPayload = { saveToFile: true };
+        if (address) configPayload.address = address;
+        if (listenPort) configPayload.listenPort = listenPort;
+        if (dns) configPayload.dns = dns;
+        if (mtu) configPayload.mtu = mtu;
+        if (preUp) configPayload.preUp = preUp;
+        if (postUp) configPayload.postUp = postUp;
+        if (preDown) configPayload.preDown = preDown;
+        if (postDown) configPayload.postDown = postDown;
+        await fetch('/api/configure-interface', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(configPayload)
+        });
+
+        // automatically generate keys for new interface
+        await fetch('/api/generate-keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force: false })
+        });
+
+        hideAddInterfaceModal();
+        // after creation redirect to dashboard for new interface
+        window.location.href = `/dashboard/${encodeURIComponent(name)}`;
+    } catch (err) {
+        alert('Error: ' + err.message);
     }
-    window.location.href = `/addInterface/${encodeURIComponent(trimmed)}`;
 }
 
 async function handleSyncKeys() {
@@ -95,7 +155,12 @@ async function handleSyncKeys() {
 
 document.addEventListener('DOMContentLoaded', () => {
     loadInterfaces();
-    addInterfaceBtn.addEventListener('click', handleAddInterface);
+    addInterfaceBtn.addEventListener('click', showAddInterfaceModal);
     document.getElementById('sync-keys-btn').addEventListener('click', handleSyncKeys);
+    // modal cancel button
+    const cancelBtn = document.getElementById('cancel-add-interface');
+    if (cancelBtn) cancelBtn.addEventListener('click', hideAddInterfaceModal);
+    const form = document.getElementById('add-interface-form');
+    if (form) form.addEventListener('submit', submitAddInterfaceForm);
 });
 

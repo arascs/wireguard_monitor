@@ -3,22 +3,6 @@ let checkKeyStatusInterval = null;
 let checkVPNStatusInterval = null;
 let interfaceInitialized = false;
 
-// sidebar activation helper reused across pages
-function initSidebar() {
-    const sidebarItems = document.querySelectorAll('.sidebar-item');
-    sidebarItems.forEach((btn) => {
-        const path = btn.dataset.path;
-        if (path && window.location.pathname === path) {
-            btn.classList.add('active');
-        }
-        btn.addEventListener('click', () => {
-            if (window.location.pathname !== path) {
-                window.location.href = path;
-            }
-        });
-    });
-}
-
 const pageContext = (() => {
     const segments = window.location.pathname.split('/').filter(Boolean);
     const editIndex = segments.indexOf('editInterface');
@@ -753,7 +737,6 @@ async function reloadCurrentConfig() {
 
 // Load peers and config on page load
 window.onload = async function() {
-    initSidebar();
     await initializeInterfaceContext();
     await reloadCurrentConfig();
     // Start checking key status
