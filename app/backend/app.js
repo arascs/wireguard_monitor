@@ -8,7 +8,7 @@ const session = require('express-session');
 const bcrypt = require('bcrypt');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
-const os = require('os');
+const fetch = require('node-fetch');
 const dashboardRoutes = require('./routes/dashboard');
 const createUserRoutes = require('./routes/users');
 const createApplicationRoutes = require('./routes/applications');
@@ -63,6 +63,25 @@ if (!fs.existsSync(BACKUP_DIR)) {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
 }
 
+// Global settings
+const SETTINGS_FILE = path.join(__dirname, 'settings.json');
+function loadGlobalSettings() {
+  const defaultSettings = {
+    keyExpiryDays: 90,
+    peerDisableHours: 12,
+    keyRenewalTime: "08:00"
+  };
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const data = fs.readFileSync(SETTINGS_FILE, 'utf8');
+      return { ...defaultSettings, ...JSON.parse(data) };
+    }
+  } catch (e) {
+    console.error('Error loading settings:', e.message);
+  }
+  return defaultSettings;
+}
+
 let config = {
   interface: {
     privateKey: '',
@@ -77,7 +96,7 @@ let config = {
     preDown: '',
     postDown: '',
     keyCreationDate: null,
-    keyExpiryDays: 90
+    keyExpiryDays: loadGlobalSettings().keyExpiryDays
   },
   peers: []
 };
@@ -189,7 +208,7 @@ function loadConfigFromFile() {
           preDown: '',
           postDown: '',
           keyCreationDate: null,
-          keyExpiryDays: 90
+          keyExpiryDays: loadGlobalSettings().keyExpiryDays
         },
         peers: []
       };
@@ -218,7 +237,7 @@ function loadConfigFromFile() {
         preDown: '',
         postDown: '',
         keyCreationDate: null,
-        keyExpiryDays: 90
+        keyExpiryDays: loadGlobalSettings().keyExpiryDays
       },
       peers: []
     };
@@ -284,7 +303,7 @@ function loadConfigFromFile() {
             continue;
           }
           if (lowerKey === 'key expiry days' && section === 'interface') {
-            config.interface.keyExpiryDays = parseInt(value) || 90;
+            config.interface.keyExpiryDays = parseInt(value) || loadGlobalSettings().keyExpiryDays;
             continue;
           }
         }
@@ -545,6 +564,9 @@ app.delete('/api/delete-interface/:name', (req, res) => {
       return res.status(404).json({ success: false, error: 'Interface config file not found' });
     }
 
+    // Read interface info for audit log before deleting
+    const ifaceSummary = parseInterfaceSummary(configFile);
+
     // Disconnect interface if running
     try {
       const status = run('wg show interfaces');
@@ -557,14 +579,79 @@ app.delete('/api/delete-interface/:name', (req, res) => {
 
     // Delete config file
     fs.unlinkSync(configFile);
+
+    // Audit log
+    try {
+      const admin = req.session && req.session.user ? req.session.user : 'unknown';
+      logAction(admin, 'delete_interface', {
+        interface: interfaceName,
+        publicKey: ifaceSummary.publicKey,
+        address: ifaceSummary.address
+      });
+    } catch (e) { }
+
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
+// Get global settings
+app.get('/api/settings', (req, res) => {
+  try {
+    const settings = loadGlobalSettings();
+    res.json({ success: true, settings });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Update global settings
+app.post('/api/settings', (req, res) => {
+  try {
+    const currentSettings = loadGlobalSettings();
+    const newSettings = {
+      keyExpiryDays: req.body.keyExpiryDays ? parseInt(req.body.keyExpiryDays, 10) : currentSettings.keyExpiryDays,
+      peerDisableHours: req.body.peerDisableHours ? parseInt(req.body.peerDisableHours, 10) : currentSettings.peerDisableHours,
+      keyRenewalTime: req.body.keyRenewalTime || currentSettings.keyRenewalTime
+    };
+
+    // Save to settings.json
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(newSettings, null, 2), 'utf8');
+
+    // If time changed, rewrite timer and reload
+    if (newSettings.keyRenewalTime !== currentSettings.keyRenewalTime) {
+      const timerPath = '/etc/systemd/system/wg-key-renewal.timer';
+      if (fs.existsSync(timerPath)) {
+        let timerContent = fs.readFileSync(timerPath, 'utf8');
+        // Replace OnCalendar line
+        timerContent = timerContent.replace(/^OnCalendar=.*$/m, `OnCalendar=*-*-* ${newSettings.keyRenewalTime}:00`);
+        fs.writeFileSync(timerPath, timerContent, 'utf8');
+        try {
+          run('systemctl daemon-reload');
+          run('systemctl reenable wg-key-renewal.timer');
+          run('systemctl restart wg-key-renewal.timer');
+          console.log(`[INFO] wg-key-renewal.timer updated to ${newSettings.keyRenewalTime}`);
+        } catch (e) {
+          console.error('[ERROR] Failed to restart systemd timer:', e.message);
+        }
+      }
+    }
+
+    // Audit log
+    try {
+      const admin = req.session && req.session.user ? req.session.user : 'unknown';
+      logAction(admin, 'update_settings', newSettings);
+    } catch (e) { }
+
+    res.json({ success: true, settings: newSettings });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Generate keys
-app.post('/api/generate-keys', (req, res) => {
+app.post('/api/generate-keys', async (req, res) => {
   try {
     const hasExistingKey = config.interface.privateKey && config.interface.privateKey.length > 0;
     const forceGenerate = req.body.force === true;
@@ -577,6 +664,7 @@ app.post('/api/generate-keys', (req, res) => {
       });
     }
 
+    const oldPrivateKey = config.interface.privateKey || '';
     const oldPublicKey = config.interface.publicKey || '';
     const newPrivateKey = run('wg genkey').trim();
     const newPublicKey = run(`echo "${newPrivateKey}" | wg pubkey`).trim();
@@ -584,6 +672,12 @@ app.post('/api/generate-keys', (req, res) => {
     config.interface.privateKey = newPrivateKey;
     config.interface.publicKey = newPublicKey;
     config.interface.keyCreationDate = new Date().toISOString();
+    
+    // Use global default if not set
+    if (!config.interface.keyExpiryDays) {
+      const currentSettings = loadGlobalSettings();
+      config.interface.keyExpiryDays = currentSettings.keyExpiryDays;
+    }
 
     const content = buildConfigFileContent();
     if (!fs.existsSync(CONFIG_DIR)) {
@@ -602,14 +696,67 @@ app.post('/api/generate-keys', (req, res) => {
 
     updateSharedConfig();
 
+    // audit log
+    try {
+      const admin = req.session && req.session.user ? req.session.user : 'unknown';
+      if (!hasExistingKey) {
+        logAction(admin, 'add_interface', {
+          interface: INTERFACE,
+          publicKey: newPublicKey,
+          address: config.interface.address,
+          listenPort: config.interface.listenPort,
+          dns: config.interface.dns,
+          mtu: config.interface.mtu,
+          table: config.interface.table,
+          preUp: config.interface.preUp,
+          postUp: config.interface.postUp,
+          preDown: config.interface.preDown,
+          postDown: config.interface.postDown,
+          keyExpiryDays: config.interface.keyExpiryDays
+        });
+      } else {
+        logAction(admin, 'change_key_pair', {
+          interface: INTERFACE,
+          old_private_key: oldPrivateKey,
+          new_private_key: newPrivateKey
+        });
+      }
+    } catch (e) { }
+
+    // Send new key to all peers
+    const peers = config.peers.map(peer => ({
+      publicKey: peer.publicKey,
+      endpoint: peer.endpoint
+    }));
+
+    // Send update-key request to all peers with endpoints
+    for (const peer of peers) {
+      if (peer.endpoint) {
+        const endpointParts = peer.endpoint.split(':');
+        if (endpointParts.length === 2) {
+          const peerIp = endpointParts[0];
+          const peerPort = endpointParts[1];
+          try {
+            await fetch(`http://${peerIp}:${peerPort}/api/update-key`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                oldPublicKey: oldPublicKey,
+                newPublicKey: newPublicKey
+              })
+            });
+          } catch (e) {
+            console.error(`Failed to notify peer ${peerIp}:${peerPort}:`, e.message);
+          }
+        }
+      }
+    }
+
     res.json({
       success: true,
       oldPublicKey: oldPublicKey,
       newPublicKey: newPublicKey,
-      peers: config.peers.map(peer => ({
-        publicKey: peer.publicKey,
-        endpoint: peer.endpoint
-      }))
+      peers: peers
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -620,6 +767,8 @@ app.post('/api/generate-keys', (req, res) => {
 // Configure interface
 app.post('/api/configure-interface', (req, res) => {
   try {
+    const isNew = !fs.existsSync(CONFIG_FILE);
+
     config.interface.address = req.body.address || '';
     config.interface.listenPort = req.body.listenPort || '51820';
     config.interface.dns = req.body.dns || '';
@@ -632,6 +781,9 @@ app.post('/api/configure-interface', (req, res) => {
 
     if (req.body.keyExpiryDays) {
       config.interface.keyExpiryDays = parseInt(req.body.keyExpiryDays) || 90;
+    } else if (!config.interface.keyExpiryDays) {
+      const currentSettings = loadGlobalSettings();
+      config.interface.keyExpiryDays = currentSettings.keyExpiryDays;
     }
 
     let savedContent = null;
@@ -641,6 +793,26 @@ app.post('/api/configure-interface', (req, res) => {
       } catch (error) {
         const status = error.statusCode || 500;
         return res.status(status).json({ success: false, error: error.message });
+      }
+      if (!isNew) {
+        // Audit log when editing existing interface
+        try {
+          const admin = req.session && req.session.user ? req.session.user : 'unknown';
+          logAction(admin, 'edit_interface', {
+            interface: INTERFACE,
+            publicKey: config.interface.publicKey,
+            address: config.interface.address,
+            listenPort: config.interface.listenPort,
+            dns: config.interface.dns,
+            mtu: config.interface.mtu,
+            table: config.interface.table,
+            preUp: config.interface.preUp,
+            postUp: config.interface.postUp,
+            preDown: config.interface.preDown,
+            postDown: config.interface.postDown,
+            keyExpiryDays: config.interface.keyExpiryDays
+          });
+        } catch (e) { }
       }
     }
 
@@ -689,7 +861,7 @@ app.post('/api/add-peer', (req, res) => {
     try {
       const admin = req.session && req.session.user ? req.session.user : 'unknown';
       logAction(admin, 'create_peer', { peer: config.peers[idx] });
-    } catch (e) {}
+    } catch (e) { }
     res.json({ success: true, peer, index: config.peers.length - 1 });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -726,9 +898,9 @@ app.put('/api/edit-peer/:index', (req, res) => {
 
       try {
         const admin = req.session && req.session.user ? req.session.user : 'unknown';
-        logAction(admin, 'edit_peer', { 
-          oldConfig: oldPeer, 
-          newConfig: peer 
+        logAction(admin, 'edit_peer', {
+          oldConfig: oldPeer,
+          newConfig: peer
         });
       } catch (e) {
         console.error('Audit log error:', e.message);
@@ -761,7 +933,7 @@ app.delete('/api/delete-peer/:index', (req, res) => {
       try {
         const admin = req.session && req.session.user ? req.session.user : 'unknown';
         logAction(admin, 'delete_peer', { peer: config.peers[idx] });
-      } catch (e) {}
+      } catch (e) { }
       res.json({ success: true });
     } else {
       res.status(404).json({ success: false, error: 'Peer not found' });
@@ -790,7 +962,7 @@ app.post('/api/enable-peer/:index', (req, res) => {
       try {
         const admin = req.session && req.session.user ? req.session.user : 'unknown';
         logAction(admin, 'enable_peer', { peer: config.peers[idx] });
-      } catch (e) {}
+      } catch (e) { }
       res.json({ success: true, peer: config.peers[idx] });
     } else {
       res.status(404).json({ success: false, error: 'Peer not found' });
@@ -819,11 +991,111 @@ app.post('/api/disable-peer/:index', (req, res) => {
       try {
         const admin = req.session && req.session.user ? req.session.user : 'unknown';
         logAction(admin, 'disable_peer', { peer: config.peers[idx] });
-      } catch (e) {}
+      } catch (e) { }
       res.json({ success: true, peer: config.peers[idx] });
     } else {
       res.status(404).json({ success: false, error: 'Peer not found' });
     }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Update peer key
+app.post('/api/update-key', (req, res) => {
+  try {
+    const { oldPublicKey, newPublicKey } = req.body;
+    if (!oldPublicKey || !newPublicKey) {
+      return res.status(400).json({ success: false, error: 'Missing oldPublicKey or newPublicKey' });
+    }
+
+    // Search for peer in all interface config files
+    const interfaces = listInterfaces();
+    let foundInterface = null;
+    let foundConfigFile = null;
+    let foundContent = null;
+    let foundLines = null;
+    let peerStartIndex = -1;
+    let peerEndIndex = -1;
+
+    for (const iface of interfaces) {
+      const configFile = path.join(CONFIG_DIR, `${iface.name}.conf`);
+      if (!fs.existsSync(configFile)) continue;
+
+      const content = fs.readFileSync(configFile, 'utf8');
+      const lines = content.split('\n');
+      const peerStarts = [];
+
+      // Find all peer sections
+      for (let i = 0; i < lines.length; i++) {
+        const raw = lines[i].trim();
+        const clean = raw.replace(/^#\s*/, '').trim();
+        if (clean === '[Peer]') {
+          peerStarts.push(i);
+        }
+      }
+
+      // Check each peer section for matching public key
+      for (let s = 0; s < peerStarts.length; s++) {
+        const start = peerStarts[s];
+        const end = (s + 1 < peerStarts.length) ? (peerStarts[s + 1] - 1) : (lines.length - 1);
+
+        for (let i = start; i <= end; i++) {
+          const clean = lines[i].replace(/^\s*#\s*/, '').trim();
+          const m = clean.match(/^PublicKey\s*=\s*(.+)\s*$/i);
+          if (m && m[1].trim() === oldPublicKey) {
+            foundInterface = iface.name;
+            foundConfigFile = configFile;
+            foundContent = content;
+            foundLines = lines;
+            peerStartIndex = start;
+            peerEndIndex = end;
+            break;
+          }
+        }
+        if (foundInterface) break;
+      }
+      if (foundInterface) break;
+    }
+
+    if (!foundInterface) {
+      return res.status(404).json({ success: false, error: 'Peer not found in any interface' });
+    }
+
+    // Update public key in the found peer section
+    for (let i = peerStartIndex; i <= peerEndIndex; i++) {
+      const clean = foundLines[i].replace(/^\s*#\s*/, '').trim();
+      const m = clean.match(/^PublicKey\s*=\s*(.+)\s*$/i);
+      if (m && m[1].trim() === oldPublicKey) {
+        foundLines[i] = foundLines[i].replace(oldPublicKey, newPublicKey);
+        break;
+      }
+    }
+
+    // Write updated config back to file
+    fs.writeFileSync(foundConfigFile, foundLines.join('\n'), { mode: 0o600 });
+
+    // Sync interface if running
+    try {
+      const status = run('wg show interfaces');
+      if (status.includes(foundInterface)) {
+        run(`bash -c "wg syncconf ${foundInterface} <(wg-quick strip ${foundInterface})"`);
+      }
+    } catch (e) {
+      // Interface not running
+    }
+
+    // audit log
+    try {
+      const admin = req.session && req.session.user ? req.session.user : 'unknown';
+      logAction(admin, 'update_key', {
+        interface: foundInterface,
+        old_public_key: oldPublicKey,
+        new_public_key: newPublicKey
+      });
+    } catch (e) { }
+
+    res.json({ success: true, interface: foundInterface });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -873,7 +1145,7 @@ app.post('/api/connect', (req, res) => {
     try {
       const admin = req.session && req.session.user ? req.session.user : 'unknown';
       logAction(admin, 'start_interface', { interface: INTERFACE });
-    } catch (e) {}
+    } catch (e) { }
 
     // Check if key is expired
     if (isKeyExpired()) {
@@ -914,7 +1186,7 @@ app.post('/api/disconnect', (req, res) => {
     try {
       const admin = req.session && req.session.user ? req.session.user : 'unknown';
       logAction(admin, 'stop_interface', { interface: INTERFACE });
-    } catch (e) {}
+    } catch (e) { }
 
     run(`wg-quick down ${INTERFACE}`);
     res.json({ success: true });
@@ -931,7 +1203,7 @@ app.post('/api/restart-vpn', (req, res) => {
       const admin = req.session && req.session.user ? req.session.user : 'unknown';
       logAction(admin, 'stop_interface', { interface: INTERFACE });
       logAction(admin, 'start_interface', { interface: INTERFACE });
-    } catch (e) {}
+    } catch (e) { }
 
     // Check if key is expired
     if (isKeyExpired()) {
@@ -1059,6 +1331,11 @@ app.get('/dashboard/peer/:id', requireAuth, (req, res) => {
   res.send(renderHtmlWithHostname(htmlPath));
 });
 
+app.get('/settings', requireAuth, (req, res) => {
+  const htmlPath = path.join(__dirname, '../frontend/settings.html');
+  res.send(renderHtmlWithHostname(htmlPath));
+});
+
 app.get('/dashboard/:id/peer/:peer_id', requireAuth, (req, res) => {
   const htmlPath = path.join(__dirname, '../frontend/peer_detail.html');
   res.send(renderHtmlWithHostname(htmlPath));
@@ -1145,9 +1422,9 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
 
     connection = await mysql.createConnection(dbConfig);
 
-    // Get device info to find enrolled device
+    // Get device info — include `interface` column to know which wg interface to use
     const [devices] = await connection.execute(
-      'SELECT allowed_ips, public_key, status FROM devices WHERE username = ? AND device_name = ?',
+      'SELECT allowed_ips, public_key, status, `interface` FROM devices WHERE username = ? AND device_name = ?',
       [username, deviceName]
     );
 
@@ -1157,14 +1434,14 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
       return res.status(403).json({ success: false, error: 'Device not enrolled' });
     }
 
-    now = Math.floor(Date.now() / 1000);
+    const now = Math.floor(Date.now() / 1000);
     if (devices[0].expire_date < now) {
-      let connection = await mysql.createConnection(dbConfig);
-      await connection.execute(
+      const c2 = await mysql.createConnection(dbConfig);
+      await c2.execute(
         'UPDATE devices SET status = 0 WHERE username = ? AND device_name = ?',
         [username, deviceName]
       );
-      await connection.end();
+      await c2.end();
       return res.status(403).json({ success: false, error: 'Device expired' });
     }
 
@@ -1175,13 +1452,13 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
     const device = devices[0];
     const allowedIPs = device.allowed_ips;
     const publicKey = device.public_key;
+    const targetIface = device.interface || 'wg2';
 
-    // Default interface for client connections is wg2
-    INTERFACE = 'wg2';
-    CONFIG_FILE = path.join(CONFIG_DIR, 'wg2.conf');
+    INTERFACE = targetIface;
+    CONFIG_FILE = path.join(CONFIG_DIR, `${targetIface}.conf`);
 
     if (!fs.existsSync(CONFIG_FILE)) {
-      throw new Error('Interface wg2 config not found on server');
+      throw new Error(`Interface ${targetIface} config not found on server`);
     }
 
     loadConfigFromFile();
@@ -1195,40 +1472,52 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
         peer.enabled = true;
         peer.name = `${username}_${deviceName}`;
         needSave = true;
-        console.log(`[INFO] Enabled device ${deviceName} for user ${username} on wg2`);
+        console.log(`[INFO] Enabled device ${deviceName} for user ${username} on ${targetIface}`);
       }
     } else {
-      // Create new peer
-      const newPeer = {
+      config.peers.push({
         name: `${username}_${deviceName}`,
-        publicKey: publicKey,
+        publicKey,
         presharedKey: '',
         endpoint: '',
-        allowedIPs: allowedIPs,
+        allowedIPs,
         persistentKeepalive: '25',
         enabled: true
-      };
-      config.peers.push(newPeer);
+      });
       needSave = true;
-      console.log(`[INFO] Created and enabled device ${deviceName} for user ${username} on wg2`);
+      console.log(`[INFO] Created and enabled device ${deviceName} for user ${username} on ${targetIface}`);
     }
 
     if (needSave) {
       saveConfigToFile();
-
       try {
         const status = run('wg show interfaces');
-        if (status.includes('wg2')) {
-          run('bash -c "wg syncconf wg2 <(wg-quick strip wg2)"');
+        if (status.includes(targetIface)) {
+          run(`bash -c "wg syncconf ${targetIface} <(wg-quick strip ${targetIface})"`);
         }
       } catch (e) {
-        console.error('Error syncing wg2:', e.message);
+        console.error(`Error syncing ${targetIface}:`, e.message);
+      }
+
+      // Schedule auto-disable after specified hours via systemd-run
+      // If a timer unit already exists for this peer, stop and reset it first
+      try {
+        const currentSettings = loadGlobalSettings();
+        const disableHours = currentSettings.peerDisableHours || 12;
+        const unitName = `wg-peer-expire-${username}-${deviceName}`;
+        const escapedKey = publicKey.replace(/"/g, '\\"');
+        try { run(`systemctl stop ${unitName}.service`); } catch (_) { /* unit may not exist */ }
+        try { run(`systemctl reset-failed ${unitName}.service`); } catch (_) { /* ignore */ }
+        run(`systemd-run --on-active=${disableHours}h --unit=${unitName} /usr/local/bin/wg_disable_peer.sh "${targetIface}" "${escapedKey}"`);
+        console.log(`[INFO] Scheduled peer disable in ${disableHours}h for ${username}/${deviceName} on ${targetIface}`);
+      } catch (e) {
+        console.error('systemd-run schedule error:', e.message);
       }
     }
 
     res.json({
       success: true,
-      allowedIPs: allowedIPs,
+      allowedIPs,
       serverPublicKey: config.interface.publicKey,
       serverEndpoint: '172.16.0.128:51001'
     });
@@ -1238,7 +1527,6 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   } finally {
     if (connection) await connection.end();
-
     INTERFACE = originalInterface;
     CONFIG_FILE = originalConfigFile;
     config = originalConfigObj;

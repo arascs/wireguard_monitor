@@ -1,0 +1,5 @@
+{
+  "keyExpiryDays": 90,
+  "peerDisableHours": 12,
+  "keyRenewalTime": "08:00"
+}

@@ -260,48 +260,6 @@
             background-color: rgba(134, 22, 24, 1);
         }
 
-        button.btn-decline {
-            background-color: #6c757d;
-        }
-
-        button.btn-decline:hover {
-            background-color: #5a6268;
-        }
-
-        button.btn-delete {
-            background-color: #dc3545;
-        }
-
-        button.btn-delete:hover {
-            background-color: #c82333;
-        }
-
-        /* added enable/disable/edit buttons */
-        button.btn-enable {
-            background-color: #28a745;
-        }
-
-        button.btn-enable:hover {
-            background-color: #218838;
-        }
-
-        button.btn-disable {
-            background-color: #ffc107;
-            color: #333;
-        }
-
-        button.btn-disable:hover {
-            background-color: #e0a800;
-        }
-
-        button.btn-edit-expire {
-            background-color: #17a2b8;
-        }
-
-        button.btn-edit-expire:hover {
-            background-color: #138496;
-        }
-
         .approve-form {
             margin-top: 10px;
             padding: 10px;
@@ -384,12 +342,14 @@
 
     <div class="sidebar">
         <div class="sidebar-menu">
-            <button class="sidebar-item" data-section="connections" data-path="/">Connections</button>
+            <button class="sidebar-item" data-section="connections" data-path="/">Interfaces</button>
             <button class="sidebar-item" data-section="users" data-path="/users">Identity</button>
             <button class="sidebar-item" data-section="devices" data-path="/devices">Devices</button>
             <button class="sidebar-item" data-section="applications" data-path="/applications">Applications</button>
             <button class="sidebar-item" data-section="access" data-path="/access-rules">Access rules</button>
-            <button class="sidebar-item" data-section="audit" data-path="/audit-log">Audit log</button>
+            <button class="sidebar-item" data-section="audit" data-path="/audit-log">Logging</button>
+            <button class="sidebar-item" data-section="backup" data-path="/backup">Backup & Restore</button>
+            <button class="sidebar-item" data-section="settings" data-path="/settings">Settings</button>
         </div>
     </div>
 
@@ -407,8 +367,10 @@
                     <tr>
                         <th>Username</th>
                         <th>Device</th>
+                        <th>Interface</th>
                         <th>Allowed IPs</th>
                         <th>Public Key</th>
+                        <th>Machine ID</th>
                         <th>Expire Date</th>
                         <th>Status</th>
                         <th>Actions</th>

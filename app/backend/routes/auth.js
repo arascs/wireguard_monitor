@@ -36,7 +36,7 @@ function createAuthRoutes({ jwt, JWT_SECRET, mysql, dbConfig }) {
       const token = jwt.sign(
         { username, id: users[0].id },
         JWT_SECRET,
-        { expiresIn: '1h' }
+        { expiresIn: '12h' }
       );
       console.log(`Login successful for user ${username}`);
       return res.json({ success: true, token });

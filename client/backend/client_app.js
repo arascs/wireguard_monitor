@@ -109,10 +109,10 @@ app.delete('/api/client/servers/:ip/:port', (req, res) => {
 
     const data = fs.readFileSync(VPN_SERVERS_FILE, 'utf8');
     let { servers } = JSON.parse(data);
-    
+
     servers = servers.filter(s => !(s.ip === ip && s.port === parseInt(port)));
     fs.writeFileSync(VPN_SERVERS_FILE, JSON.stringify({ servers }, null, 2));
-    
+
     res.json({ success: true, message: 'Server deleted' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -153,14 +153,22 @@ app.post('/api/client/enroll/:ip/:port', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Missing Authorization header' });
     }
 
+    // Read machine-id from local filesystem
+    let machineId = '';
+    try {
+      machineId = fs.readFileSync('/etc/machine-id', 'utf8').trim();
+    } catch (e) {
+      console.warn('Could not read /etc/machine-id:', e.message);
+    }
+
     const enrollUrl = `http://${ip}:${port}/api/enroll-device`;
     const r = await fetch(enrollUrl, {
       method: 'POST',
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
         'Authorization': authHeader
       },
-      body: JSON.stringify({ username, deviceName })
+      body: JSON.stringify({ username, deviceName, machineId })
     });
     const data = await r.json();
     res.status(r.status).json(data);
@@ -183,7 +191,7 @@ app.post('/api/client/check-enrollment/:ip/:port', async (req, res) => {
     const checkUrl = `http://${ip}:${port}/api/check-device-enroll`;
     const r = await fetch(checkUrl, {
       method: 'POST',
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
         'Authorization': authHeader
       },
@@ -211,7 +219,7 @@ app.post('/api/client/connect/:ip/:port', async (req, res) => {
     const checkUrl = `http://${ip}:${port}/api/check-device-enroll`;
     let r = await fetch(checkUrl, {
       method: 'POST',
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
         'Authorization': authHeader
       },
@@ -226,7 +234,7 @@ app.post('/api/client/connect/:ip/:port', async (req, res) => {
     const loginUrl = `http://${ip}:${port}/api/connect-vpn`;
     r = await fetch(loginUrl, {
       method: 'POST',
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
         'Authorization': authHeader
       },
@@ -274,41 +282,15 @@ app.post('/api/client/disconnect/:ip/:port', async (req, res) => {
     const disconnectUrl = `http://${ip}:${port}/api/disconnect-vpn`;
     const r = await fetch(disconnectUrl, {
       method: 'POST',
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
         'Authorization': authHeader
       },
       body: JSON.stringify({ deviceName })
     });
+    run("ip link delete wg_client");
     const data = await r.json();
     res.status(r.status).json(data);
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// 9. Get client identity
-app.get('/api/client/identity', (req, res) => {
-  try {
-    if (!fs.existsSync(CONFIG_DIR)) {
-      fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    }
-
-    if (!fs.existsSync(CLIENT_PRIVATE_KEY_FILE)) {
-      const privateKey = run('wg genkey').trim();
-      fs.writeFileSync(CLIENT_PRIVATE_KEY_FILE, privateKey, { mode: 0o600 });
-      const publicKey = run(`echo "${privateKey}" | wg pubkey`).trim();
-      fs.writeFileSync(CLIENT_PUBLIC_KEY_FILE, publicKey, { mode: 0o644 });
-    }
-
-    if (!fs.existsSync(CLIENT_PUBLIC_KEY_FILE)) {
-      const privateKey = fs.readFileSync(CLIENT_PRIVATE_KEY_FILE, 'utf8').trim();
-      const publicKey = run(`echo "${privateKey}" | wg pubkey`).trim();
-      fs.writeFileSync(CLIENT_PUBLIC_KEY_FILE, publicKey, { mode: 0o644 });
-    }
-
-    const publicKey = fs.readFileSync(CLIENT_PUBLIC_KEY_FILE, 'utf8').trim();
-    res.json({ success: true, publicKey });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -324,7 +306,68 @@ app.get('/api/client/device-name', (req, res) => {
   }
 });
 
-// 11. Check WireGuard client connection status for each server based on public keys
+// 10b. Get machine ID
+app.get('/api/client/machine-id', (req, res) => {
+  try {
+    const machineId = fs.readFileSync('/etc/machine-id', 'utf8').trim();
+    res.json({ success: true, machineId });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message, machineId: '' });
+  }
+});
+
+// 11. Update peer key (called by server when server key changes)
+app.post('/api/client/update-key', (req, res) => {
+  try {
+    const { oldPublicKey, newPublicKey } = req.body;
+    if (!oldPublicKey || !newPublicKey) {
+      return res.status(400).json({ success: false, error: 'Missing oldPublicKey or newPublicKey' });
+    }
+
+    const CLIENT_INTERFACE = 'wg_client';
+    const CLIENT_CONFIG_FILE = path.join(CONFIG_DIR, `${CLIENT_INTERFACE}.conf`);
+
+    if (!fs.existsSync(CLIENT_CONFIG_FILE)) {
+      return res.status(404).json({ success: false, error: 'Client config file not found' });
+    }
+
+    let content = fs.readFileSync(CLIENT_CONFIG_FILE, 'utf8');
+    const lines = content.split('\n');
+    let updated = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
+      const match = trimmed.match(/^PublicKey\s*=\s*(.+)$/i);
+      if (match && match[1].trim() === oldPublicKey) {
+        lines[i] = lines[i].replace(oldPublicKey, newPublicKey);
+        updated = true;
+        break;
+      }
+    }
+
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Peer with old public key not found' });
+    }
+
+    content = lines.join('\n');
+    fs.writeFileSync(CLIENT_CONFIG_FILE, content, { mode: 0o600 });
+
+    try {
+      const status = run('wg show interfaces');
+      if (status.includes(CLIENT_INTERFACE)) {
+        run(`bash -c "wg syncconf ${CLIENT_INTERFACE} <(wg-quick strip ${CLIENT_INTERFACE})"`);
+      }
+    } catch (e) {
+      console.error('Error syncing interface:', e.message);
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 12. Check WireGuard client connection status for each server based on public keys
 app.get('/api/client/connection-status', (req, res) => {
   try {
     const serversData = JSON.parse(fs.readFileSync(VPN_SERVERS_FILE, 'utf8'));
@@ -373,6 +416,73 @@ app.get('/api/client/connection-status', (req, res) => {
 
     res.json({ servers: status });
 
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 14. Update peer key in client config
+app.post('/api/client/update-peer-key', (req, res) => {
+  try {
+    const { serverIp, serverPort, newPublicKey } = req.body;
+    if (!serverIp || !serverPort || !newPublicKey) {
+      return res.status(400).json({ success: false, error: 'Missing serverIp, serverPort, or newPublicKey' });
+    }
+
+    const CLIENT_INTERFACE = 'wg_client';
+    const CLIENT_CONFIG_FILE = path.join(CONFIG_DIR, `${CLIENT_INTERFACE}.conf`);
+
+    if (!fs.existsSync(CLIENT_CONFIG_FILE)) {
+      return res.status(404).json({ success: false, error: 'Client config file not found' });
+    }
+
+    // Get server public key from VPN_servers.json
+    let serversData = { servers: [] };
+    if (fs.existsSync(VPN_SERVERS_FILE)) {
+      serversData = JSON.parse(fs.readFileSync(VPN_SERVERS_FILE, 'utf8'));
+    }
+
+    const server = serversData.servers.find(s => s.ip === serverIp && s.port === parseInt(serverPort));
+    if (!server || !server.publicKey) {
+      return res.status(404).json({ success: false, error: 'Server not found in VPN_servers.json' });
+    }
+
+    const oldPublicKey = server.publicKey;
+    let content = fs.readFileSync(CLIENT_CONFIG_FILE, 'utf8');
+    const lines = content.split('\n');
+    let updated = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
+      const match = trimmed.match(/^PublicKey\s*=\s*(.+)$/i);
+      if (match && match[1].trim() === oldPublicKey) {
+        lines[i] = lines[i].replace(oldPublicKey, newPublicKey);
+        updated = true;
+        break;
+      }
+    }
+
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Peer with server public key not found' });
+    }
+
+    content = lines.join('\n');
+    fs.writeFileSync(CLIENT_CONFIG_FILE, content, { mode: 0o600 });
+
+    // Update VPN_servers.json
+    server.publicKey = newPublicKey;
+    fs.writeFileSync(VPN_SERVERS_FILE, JSON.stringify(serversData, null, 2));
+
+    try {
+      const status = run('wg show interfaces');
+      if (status.includes(CLIENT_INTERFACE)) {
+        run(`bash -c "wg syncconf ${CLIENT_INTERFACE} <(wg-quick strip ${CLIENT_INTERFACE})"`);
+      }
+    } catch (e) {
+      console.error('Error syncing interface:', e.message);
+    }
+
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

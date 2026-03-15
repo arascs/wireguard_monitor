@@ -31,40 +31,6 @@ async function setInterface(interfaceName) {
 
 let currentInterfaceConfig = {};
 
-// fetch key expiration info and update banner
-async function checkKeyStatus() {
-    try {
-        const response = await fetch('/api/key-status');
-        const data = await response.json();
-        if (data.success) {
-            updateKeyStatusBanner(data);
-        }
-    } catch (error) {
-        console.error('Error checking key status:', error);
-    }
-}
-
-function updateKeyStatusBanner(statusData) {
-    const banner = document.getElementById('key-status-banner');
-    if (!banner) return;
-    if (!statusData.keyCreationDate) {
-        banner.className = 'key-status-banner no-key';
-        banner.innerHTML = 'Chưa có key. Vui lòng tạo key mới để sử dụng.';
-        return;
-    }
-    if (statusData.expired) {
-        banner.className = 'key-status-banner expired';
-        banner.innerHTML = 'Key expired. Generate new keys to continue using VPN';
-    } else if (statusData.remainingDays !== null) {
-        if (statusData.remainingDays <= 7) {
-            banner.className = 'key-status-banner warning';
-            banner.innerHTML = `Warning: Key expired after ${statusData.remainingDays} days. Generate new keys.`;
-        } else {
-            banner.className = 'key-status-banner valid';
-            banner.innerHTML = `Key expires in ${statusData.remainingDays} days.`;
-        }
-    }
-}
 
 async function loadInterfaceInfo() {
     try {
@@ -383,10 +349,6 @@ window.onload = async function() {
     }
     
     await loadInterfaceInfo();
-    // check key expiration banner
-    await checkKeyStatus();
-    // refresh key status periodically (5 minutes)
-    setInterval(checkKeyStatus, 5 * 60 * 1000);
     checkVPNStatus();
     await loadPeers();
     fetchStats();

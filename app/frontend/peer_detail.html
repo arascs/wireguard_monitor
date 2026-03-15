@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html>
 
 <head>
@@ -220,6 +220,22 @@
             border-radius: 5px;
         }
 
+        button {
+            cursor: pointer;
+            padding: 8px 15px;
+            border: none;
+            border-radius: 5px;
+            background-color: rgba(134, 22, 24, 0.8);
+            color: white;
+            transition: background-color 0.3s;
+            font-weight: 500;
+            font-size: 0.95rem;
+        }
+
+        button:hover {
+            background-color: rgba(134, 22, 24, 1);
+        }
+
         .filter-form button {
             padding: 8px 15px;
             background-color: rgba(134, 22, 24, 0.8);
@@ -266,6 +282,11 @@
             transition: background-color 0.2s, color 0.2s;
         }
 
+        .sidebar-item:hover {
+            background-color: rgba(134, 22, 24, 0.1);
+            color: rgba(134, 22, 24, 1);
+        }
+
         .sidebar-item.active {
             background-color: rgba(134, 22, 24, 0.1);
             color: rgba(134, 22, 24, 1);
@@ -288,12 +309,14 @@
 
     <div class="sidebar">
         <div class="sidebar-menu">
-            <button class="sidebar-item" data-section="connections" data-path="/">Connections</button>
+            <button class="sidebar-item" data-section="connections" data-path="/">Interfaces</button>
             <button class="sidebar-item" data-section="users" data-path="/users">Identity</button>
             <button class="sidebar-item" data-section="devices" data-path="/devices">Devices</button>
             <button class="sidebar-item" data-section="applications" data-path="/applications">Applications</button>
             <button class="sidebar-item" data-section="access" data-path="/access-rules">Access rules</button>
-            <button class="sidebar-item" data-section="audit" data-path="/audit-log">Audit log</button>
+            <button class="sidebar-item" data-section="audit" data-path="/audit-log">Logging</button>
+            <button class="sidebar-item" data-section="backup" data-path="/backup">Backup & Restore</button>
+            <button class="sidebar-item" data-section="settings" data-path="/settings">Settings</button>
         </div>
     </div>
 

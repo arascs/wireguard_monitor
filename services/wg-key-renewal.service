@@ -1,0 +1,10 @@
+[Unit]
+Description=WireGuard Key Auto-Renewal
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /usr/local/bin/wg_key_renewal.py
+StandardOutput=journal
+StandardError=journal

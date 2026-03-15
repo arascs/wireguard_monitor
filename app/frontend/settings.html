@@ -1,8 +1,8 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html>
 
 <head>
-    <title>WireGuard VPN Manager - Backup & Restore</title>
+    <title>WireGuard VPN Manager - Settings</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
@@ -36,47 +36,9 @@
             box-sizing: border-box;
         }
 
-        /* navbar button group */
-        .nav-buttons {
-            display: flex;
-            gap: 10px;
-            margin-right: 20px;
-        }
-
-        .nav-btn {
-            text-decoration: none;
-            padding: 8px 15px;
-            border-radius: 5px;
-            background-color: rgba(134, 22, 24, 0.8);
-            color: white;
-            transition: background-color 0.3s;
-            font-weight: 500;
-        }
-
-        .nav-btn:hover,
-        .nav-btn.active {
-            background-color: rgba(134, 22, 24, 1);
-        }
-
         .navbar h1 {
             margin: 0;
             font-weight: 700;
-        }
-
-        h1 {
-            font-size: 2rem;
-            font-weight: 700;
-        }
-
-        h2 {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: rgba(134, 22, 24, 1);
-        }
-
-        p {
-            font-size: 1rem;
-            margin: 0.5rem 0;
         }
 
         .hostname-display {
@@ -93,8 +55,29 @@
             gap: 6px;
         }
 
-        .hostname-display strong {
-            font-weight: 700;
+        .nav-buttons {
+            display: flex;
+            gap: 10px;
+            margin-right: 20px;
+        }
+
+        .nav-btn {
+            text-decoration: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            border: none;
+            cursor: pointer;
+            background-color: rgba(134, 22, 24, 0.8);
+            color: white;
+            transition: background-color 0.3s;
+            font-weight: 500;
+            font-size: 0.95rem;
+            font-family: inherit;
+        }
+
+        .nav-btn:hover,
+        .nav-btn.active {
+            background-color: rgba(134, 22, 24, 1);
         }
 
         .sidebar {
@@ -110,12 +93,6 @@
             display: flex;
             flex-direction: column;
             gap: 10px;
-        }
-
-        .sidebar-title {
-            font-weight: 600;
-            margin-bottom: 5px;
-            color: rgba(134, 22, 24, 1);
         }
 
         .sidebar-menu {
@@ -137,52 +114,86 @@
             transition: background-color 0.2s, color 0.2s;
         }
 
+        .sidebar-item:not(.active):hover {
+            background-color: rgba(134, 22, 24, 0.05);
+        }
+
         .sidebar-item.active {
             background-color: rgba(134, 22, 24, 0.1);
             color: rgba(134, 22, 24, 1);
         }
 
-        .simple-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 10px;
-            background-color: white;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        .settings-container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            max-width: 600px;
+            margin-top: 20px;
         }
 
-        .simple-table th,
-        .simple-table td {
-            padding: 8px 10px;
-            border-bottom: 1px solid #eee;
-            font-size: 0.9rem;
-            text-align: left;
+        .settings-container h2 {
+            margin-top: 0;
+            color: rgba(134, 22, 24, 1);
         }
 
-        .simple-table th {
-            background-color: #fafafa;
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
             font-weight: 600;
+            margin-bottom: 8px;
+            color: #444;
         }
 
-        .simple-table tbody tr:nth-child(even) {
-            background-color: #fcfcfc;
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 1rem;
+            box-sizing: border-box;
+            background-color: #fafafa;
+            transition: border-color 0.3s;
         }
 
-        button {
-            cursor: pointer;
-            padding: 6px 12px;
-            border: none;
-            border-radius: 4px;
-            background-color: rgba(134, 22, 24, 0.8);
-            color: white;
-            transition: background-color 0.3s;
-            font-weight: 500;
+        .form-group input:focus {
+            outline: none;
+            border-color: rgba(134, 22, 24, 0.6);
+            background-color: white;
+        }
+
+        .form-text {
+            display: block;
             font-size: 0.85rem;
+            color: #777;
+            margin-top: 5px;
         }
 
-        button:hover {
+        button.save-btn {
+            background-color: rgba(134, 22, 24, 0.9);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        button.save-btn:hover {
             background-color: rgba(134, 22, 24, 1);
         }
 
+        button.save-btn:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        /* modal */
         .modal {
             display: none;
             position: fixed;
@@ -194,24 +205,41 @@
             background-color: rgba(0, 0, 0, 0.5);
         }
 
-        .modal-content {
-            background-color: white;
-            margin: 10% auto;
-            padding: 30px;
-            border: 1px solid #888;
+        .change-password-form {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 25px;
             border-radius: 5px;
-            width: 500px;
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
         }
 
-        .modal-content h2,
-        .modal-content h3 {
-            margin-top: 0;
+        .change-password-form input {
+            display: block;
+            margin: 10px 0;
+            padding: 10px;
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 1rem;
+        }
+        
+        .change-password-form button {
+            cursor: pointer;
+            padding: 8px 15px;
+            border: none;
+            border-radius: 5px;
+            background-color: rgba(134, 22, 24, 0.8);
+            color: white;
+            margin-right: 5px;
         }
     </style>
 </head>
 
-<body data-current="backup">
+<body data-current="settings">
     <div class="navbar">
         <h1>WireGuard VPN Manager</h1>
         <div class="nav-buttons">
@@ -231,33 +259,41 @@
             <button class="sidebar-item" data-section="access" data-path="/access-rules">Access rules</button>
             <button class="sidebar-item" data-section="audit" data-path="/audit-log">Logging</button>
             <button class="sidebar-item" data-section="backup" data-path="/backup">Backup & Restore</button>
-            <button class="sidebar-item" data-section="settings" data-path="/settings">Settings</button>
+            <button class="sidebar-item active" data-section="settings" data-path="/settings">Settings</button>
         </div>
     </div>
 
     <div id="main-content">
-        <h2 class="section-title">Backup & Restore</h2>
-        <div style="margin-bottom:15px;">
-            <button id="btn-create-db">Create DB backup</button>
-            <button id="btn-create-wg">Create WG config backup</button>
-            <button id="btn-create-full">Create full backup</button>
+        <div class="settings-container">
+            <h2>Global Settings</h2>
+            <form id="settings-form">
+                <div class="form-group">
+                    <label for="keyExpiryDays">Interface Key Expiry (Days)</label>
+                    <input type="number" id="keyExpiryDays" min="1" max="3650" required>
+                    <span class="form-text">Default number of days before a WireGuard interface key expires and is gracefully auto-renewed.</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="peerDisableHours">Peer Disable Timeout (Hours)</label>
+                    <input type="number" id="peerDisableHours" min="1" max="168" required>
+                    <span class="form-text">Amount of time a peer connection is allowed to remain active before being automatically disabled.</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="keyRenewalTime">Key Auto-Renewal Check Time</label>
+                    <input type="time" id="keyRenewalTime" required>
+                    <span class="form-text">Daily time (HH:MM) when the system checks for expired keys and renews them via systemd timer.</span>
+                </div>
+
+                <div style="text-align: right;">
+                    <button type="submit" class="save-btn" id="save-settings-btn">Save Settings</button>
+                </div>
+            </form>
         </div>
-        <table class="simple-table" id="backups-table">
-            <thead>
-                <tr>
-                    <th>Filename</th>
-                    <th>Size</th>
-                    <th>Created</th>
-                    <th>Type</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody id="backups-body"></tbody>
-        </table>
     </div>
 
     <div id="change-password-modal" class="modal">
-        <div class="modal-content">
+        <div class="change-password-form">
             <h3>Change Password</h3>
             <form id="change-password-form">
                 <input type="password" id="current-password" placeholder="Current Password" required>
@@ -266,11 +302,12 @@
                 <button type="submit">Change</button>
                 <button type="button" id="cancel-change">Cancel</button>
             </form>
-            <p id="change-error" class="error"></p>
+            <p id="change-error" style="color:red;"></p>
         </div>
     </div>
+
     <script src="/js/layout.js"></script>
-    <script src="/js/backup.js"></script>
+    <script src="/js/settings.js"></script>
 </body>
 
 </html>

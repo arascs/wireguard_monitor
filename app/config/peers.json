@@ -16,6 +16,11 @@
             "id": "0",
             "name": "openVPN_server",
             "IP_VPN": "10.0.0.2"
+        },
+        {   
+            "id": "1",
+            "name": "hungnlq_peerB",
+            "IP_VPN": "10.0.0.4"
         }
     ]
 }

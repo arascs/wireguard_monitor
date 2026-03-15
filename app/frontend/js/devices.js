@@ -14,18 +14,20 @@ async function loadApprovedDevices() {
       const tr = document.createElement('tr');
       let actions = '';
       if (device.status === 1) {
-        actions += `<button class="btn-disable" onclick="disableDevice(${device.id})">Disable</button>`;
+        actions += `<button class="btn-disable" title="Disable" onclick="disableDevice(${device.id})"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM5.354 4.646a.5.5 0 1 0-.708.708L7.293 8l-2.647 2.646a.5.5 0 0 0 .708.708L8 8.707l2.646 2.647a.5.5 0 0 0 .708-.708L8.707 8l2.647-2.646a.5.5 0 0 0-.708-.708L8 7.293 5.354 4.646z"/></svg></button>`;
       } else {
-        actions += `<button class="btn-enable" onclick="enableDevice(${device.id})">Enable</button>`;
+        actions += `<button class="btn-enable" title="Enable" onclick="enableDevice(${device.id})"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M10.97 4.97a.235.235 0 0 0-.02.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-1.071-1.05z"/></svg></button>`;
       }
-      actions += `<button class="btn-edit-expire" onclick="promptEditExpire(${device.id}, ${device.expire_date || 'null'})">Edit Expire</button>`;
-      actions += `<button class="btn-delete" onclick="deleteDevice(${device.id})">Delete</button>`;
+      actions += `<button class="btn-edit-expire" title="Edit Expire" onclick="promptEditExpire(${device.id}, ${device.expire_date || 'null'})"><svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg></button>`;
+      actions += `<button class="btn-delete" title="Delete" onclick="deleteDevice(${device.id})"><svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/></svg></button>`;
 
       tr.innerHTML = `
         <td>${device.username}</td>
         <td>${device.device_name}</td>
+        <td>${device.interface || ''}</td>
         <td>${device.allowed_ips || ''}</td>
         <td>${device.public_key || ''}</td>
+        <td>${device.machine_id || ''}</td>
         <td>${expireDateStr}</td>
         <td>${statusText}</td>
         <td>${actions}</td>
@@ -63,6 +65,7 @@ async function loadRequests() {
           <div class="device-info">
             <h3>${request.device_name || 'Unknown Device'}</h3>
             <p><strong>Username:</strong> ${request.username}</p>
+            <p><strong>Machine ID:</strong> ${request.machine_id || '<em>N/A</em>'}</p>
             <p><strong>Status:</strong> ${request.status}</p>
           </div>
           <div class="device-status">Waiting for approval</div>
@@ -72,11 +75,12 @@ async function loadRequests() {
           <button class="btn-decline" onclick="declineDevice(${request.id})">Decline</button>
         </div>
         <div class="approve-form" id="approve-form-${request.id}" style="display: none;">
+          <input type="text" id="interface-${request.id}" placeholder="Interface (e.g., wg2)" required>
           <input type="text" id="allowedips-${request.id}" placeholder="Allowed IPs (e.g., 10.0.0.2/32)" required>
           <input type="date" id="expiredate-${request.id}" placeholder="Expire Date (optional)">
           <div style="display: flex; gap: 10px;">
             <button onclick="approveDevice(${request.id})">Confirm Approve</button>
-            <button style="background-color: #6c757d;" onclick="cancelApprove(${request.id})">Cancel</button>
+            <button onclick="cancelApprove(${request.id})">Cancel</button>
           </div>
         </div>
       `;
@@ -98,14 +102,20 @@ function cancelApprove(id) {
   const form = document.getElementById(`approve-form-${id}`);
   if (form) {
     form.style.display = 'none';
+    document.getElementById(`interface-${id}`).value = '';
     document.getElementById(`allowedips-${id}`).value = '';
     document.getElementById(`expiredate-${id}`).value = '';
   }
 }
 
 async function approveDevice(id) {
+  const interface = document.getElementById(`interface-${id}`)?.value || '';
   const allowedIPs = document.getElementById(`allowedips-${id}`)?.value || '';
   const expireDate = document.getElementById(`expiredate-${id}`)?.value || '';
+  if (!interface) {
+    alert('Please enter Interface');
+    return;
+  }
   if (!allowedIPs) {
     alert('Please enter Allowed IPs');
     return;
@@ -115,7 +125,7 @@ async function approveDevice(id) {
     const res = await fetch('/api/devices/approve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, allowedIPs, expireDate })
+      body: JSON.stringify({ id, interface, allowedIPs, expireDate })
     });
     const data = await res.json();
     if (data.success) {

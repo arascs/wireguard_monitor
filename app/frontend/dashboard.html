@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html>
 
 <head>
@@ -103,39 +103,6 @@
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
         }
 
-        /* key status banner copied from config page */
-        .key-status-banner {
-            padding: 15px;
-            margin: 20px 0;
-            border-radius: 8px;
-            font-weight: bold;
-            text-align: center;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-        }
-
-        .key-status-banner.valid {
-            background-color: #e8f5e9;
-            border: 1px solid #4caf50;
-            color: #2e7d32;
-        }
-
-        .key-status-banner.warning {
-            background-color: #fff3e0;
-            border: 1px solid #ff9800;
-            color: #e65100;
-        }
-
-        .key-status-banner.expired {
-            background-color: #ffebee;
-            border: 1px solid #f44336;
-            color: #c62828;
-        }
-
-        .key-status-banner.no-key {
-            background-color: #e3f2fd;
-            border: 1px solid #2196f3;
-            color: #1565c0;
-        }
 
         .interface-overview h2,
         .peers-section h2,
@@ -161,6 +128,22 @@
             padding: 5px;
             border: 1px solid #ccc;
             border-radius: 2px;
+        }
+
+        button {
+            cursor: pointer;
+            padding: 8px 15px;
+            border: none;
+            border-radius: 5px;
+            background-color: rgba(134, 22, 24, 0.8);
+            color: white;
+            transition: background-color 0.3s;
+            font-weight: 500;
+            font-size: 0.95rem;
+        }
+
+        button:hover {
+            background-color: rgba(134, 22, 24, 1);
         }
 
         .filter-form button {
@@ -224,6 +207,11 @@
             font-weight: 500;
             cursor: pointer;
             transition: background-color 0.2s, color 0.2s;
+        }
+
+        .sidebar-item:hover {
+            background-color: rgba(134, 22, 24, 0.1);
+            color: rgba(134, 22, 24, 1);
         }
 
         .sidebar-item.active {
@@ -366,15 +354,16 @@
     </div>
 
     <!-- sidebar menu shown on every page -->
-    <div id="key-status-banner" class="key-status-banner"></div>
     <div class="sidebar">
         <div class="sidebar-menu">
-            <button class="sidebar-item" data-section="connections" data-path="/">Connections</button>
+            <button class="sidebar-item" data-section="connections" data-path="/">Interfaces</button>
             <button class="sidebar-item" data-section="users" data-path="/users">Identity</button>
             <button class="sidebar-item" data-section="devices" data-path="/devices">Devices</button>
             <button class="sidebar-item" data-section="applications" data-path="/applications">Applications</button>
             <button class="sidebar-item" data-section="access" data-path="/access-rules">Access rules</button>
-            <button class="sidebar-item" data-section="audit" data-path="/audit-log">Audit log</button>
+            <button class="sidebar-item" data-section="audit" data-path="/audit-log">Logging</button>
+            <button class="sidebar-item" data-section="backup" data-path="/backup">Backup & Restore</button>
+            <button class="sidebar-item" data-section="settings" data-path="/settings">Settings</button>
         </div>
     </div>
 

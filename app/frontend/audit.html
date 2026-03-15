@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html>
 
 <head>
@@ -239,6 +239,100 @@
             background-color: #e0e0e0;
             font-weight: 600;
         }
+
+        /* â”€â”€ Filter panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+        .filter-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .btn-filter-toggle {
+            background: none;
+            border: 1px solid rgba(134, 22, 24, 0.6);
+            color: rgba(134, 22, 24, 1);
+            padding: 6px 14px;
+            border-radius: 5px;
+            font-size: 0.88rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-filter-toggle:hover {
+            background: rgba(134, 22, 24, 0.07);
+        }
+
+        .filter-panel {
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 14px 18px;
+            margin-bottom: 14px;
+            display: none;
+            flex-wrap: wrap;
+            gap: 14px;
+            align-items: flex-end;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+
+        .filter-panel.open {
+            display: flex;
+        }
+
+        .filter-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 160px;
+        }
+
+        .filter-field label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .filter-field input {
+            padding: 6px 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 0.88rem;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+            background: #fafafa;
+        }
+
+        .filter-field input:focus {
+            border-color: rgba(134, 22, 24, 0.55);
+            background: #fff;
+        }
+
+        .filter-actions {
+            display: flex;
+            gap: 8px;
+            align-items: flex-end;
+        }
+
+        .btn-filter-reset {
+            background: none;
+            border: 1px solid #bbb;
+            color: #555;
+            padding: 6px 14px;
+            border-radius: 5px;
+            font-size: 0.88rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-filter-reset:hover {
+            background: #f0f0f0;
+        }
     </style>
 </head>
 
@@ -255,22 +349,89 @@
 
     <div class="sidebar">
         <div class="sidebar-menu">
-            <button class="sidebar-item" data-section="connections" data-path="/">Connections</button>
+            <button class="sidebar-item" data-section="connections" data-path="/">Interfaces</button>
             <button class="sidebar-item" data-section="users" data-path="/users">Identity</button>
             <button class="sidebar-item" data-section="devices" data-path="/devices">Devices</button>
             <button class="sidebar-item" data-section="applications" data-path="/applications">Applications</button>
             <button class="sidebar-item" data-section="access" data-path="/access-rules">Access rules</button>
-            <button class="sidebar-item" data-section="audit" data-path="/audit-log">Audit log</button>
+            <button class="sidebar-item" data-section="audit" data-path="/audit-log">Logging</button>
+            <button class="sidebar-item" data-section="backup" data-path="/backup">Backup &amp; Restore</button>
+            <button class="sidebar-item" data-section="settings" data-path="/settings">Settings</button>
         </div>
     </div>
 
     <div id="main-content">
-        <div
-            style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px;">
-            <button id="tab-audit" class="tab-btn active">Audit log</button>
-            <button id="tab-sessions" class="tab-btn">Session log</button>
+        <!-- Tab bar -->
+        <div style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px;">
+            <button id="tab-audit" class="tab-btn active">Admin actions</button>
+            <button id="tab-sessions" class="tab-btn">Peer sessions</button>
         </div>
-        <h2 class="section-title" id="section-title">Audit log</h2>
+
+        <h2 class="section-title" id="section-title">Admin actions</h2>
+
+        <!-- Filter toggle toolbar -->
+        <div class="filter-toolbar">
+            <button class="btn-filter-toggle" id="btn-toggle-filter">&#x25BC; Filter</button>
+        </div>
+
+        <!-- â”€â”€ Audit Log filters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+        <div class="filter-panel" id="audit-filter-panel">
+            <div class="filter-field">
+                <label>Timestamp from</label>
+                <input type="datetime-local" id="audit-filter-ts-from">
+            </div>
+            <div class="filter-field">
+                <label>Timestamp to</label>
+                <input type="datetime-local" id="audit-filter-ts-to">
+            </div>
+            <div class="filter-field">
+                <label>Admin</label>
+                <input type="text" id="audit-filter-admin" placeholder="Search adminâ€¦">
+            </div>
+            <div class="filter-field">
+                <label>Action</label>
+                <input type="text" id="audit-filter-action" placeholder="Search actionâ€¦">
+            </div>
+            <div class="filter-actions">
+                <button class="btn-filter-reset" id="audit-filter-reset">Reset</button>
+            </div>
+        </div>
+
+        <!-- â”€â”€ Session Log filters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+        <div class="filter-panel" id="session-filter-panel">
+            <div class="filter-field">
+                <label>Start time from</label>
+                <input type="datetime-local" id="sess-filter-start-from">
+            </div>
+            <div class="filter-field">
+                <label>Start time to</label>
+                <input type="datetime-local" id="sess-filter-start-to">
+            </div>
+            <div class="filter-field">
+                <label>End time from</label>
+                <input type="datetime-local" id="sess-filter-end-from">
+            </div>
+            <div class="filter-field">
+                <label>End time to</label>
+                <input type="datetime-local" id="sess-filter-end-to">
+            </div>
+            <div class="filter-field">
+                <label>Peer IP</label>
+                <input type="text" id="sess-filter-peer-ip" placeholder="Search peer IPâ€¦">
+            </div>
+            <div class="filter-field">
+                <label>Peer Name</label>
+                <input type="text" id="sess-filter-peer-name" placeholder="Search peer nameâ€¦">
+            </div>
+            <div class="filter-field">
+                <label>App</label>
+                <input type="text" id="sess-filter-app" placeholder="Search appâ€¦">
+            </div>
+            <div class="filter-actions">
+                <button class="btn-filter-reset" id="sess-filter-reset">Reset</button>
+            </div>
+        </div>
+
         <table class="simple-table" id="log-table">
             <thead>
                 <tr id="log-header-row">
