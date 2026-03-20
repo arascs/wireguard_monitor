@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const LOG_FILE = path.join(__dirname, '../audit_log.json');
+const SECURITY_FILE = path.join(__dirname, '../endpoint_events.json');
 
 function logAction(admin, action, details) {
   const entry = {
@@ -42,4 +43,27 @@ function getLogs() {
   return [];
 }
 
-module.exports = { logAction, getLogs };
+function getSecurityEvents() {
+  try {
+    if (fs.existsSync(SECURITY_FILE)) {
+      const data = fs.readFileSync(SECURITY_FILE, 'utf8');
+      if (!data) return [];
+      // Parse JSONL format (each line is a JSON object)
+      const lines = data.trim().split('\n');
+      const events = lines.map(line => {
+        try {
+          return JSON.parse(line);
+        } catch (e) {
+          console.error('[SECURITY] failed to parse line:', e.message);
+          return null;
+        }
+      }).filter(e => e !== null);
+      return events;
+    }
+  } catch (e) {
+    console.error('[SECURITY] failed to read security events file', e.message);
+  }
+  return [];
+}
+
+module.exports = { logAction, getLogs, getSecurityEvents };

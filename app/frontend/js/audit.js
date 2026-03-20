@@ -1,7 +1,8 @@
 // ── Shared state ──────────────────────────────────────────────
-let currentTab = 'audit'; // 'audit' | 'sessions'
+let currentTab = 'audit'; // 'audit' | 'sessions' | 'security'
 let auditData = [];       // raw audit log entries
 let sessionData = [];     // raw session log entries
+let securityData = [];    // raw security event entries
 
 // ── Filter helpers ────────────────────────────────────────────
 function toMs(datetimeLocalValue) {
@@ -109,6 +110,46 @@ function renderSessionRows() {
   });
 }
 
+// ── Render security rows with current filters ──────────────────
+function renderSecurityRows() {
+  const tbody = document.getElementById('log-body');
+  if (!tbody) return;
+
+  const tsFrom  = toMs(document.getElementById('security-filter-ts-from')?.value);
+  const tsTo    = toMs(document.getElementById('security-filter-ts-to')?.value);
+  const eventQ  = document.getElementById('security-filter-event')?.value;
+  const ifaceQ  = document.getElementById('security-filter-interface')?.value;
+  const peerQ   = document.getElementById('security-filter-peer-name')?.value;
+
+  tbody.innerHTML = '';
+
+  (securityData).forEach((entry, idx) => {
+    const ts = new Date(entry.timestamp).getTime();
+    if (tsFrom !== null && ts < tsFrom) return;
+    if (tsTo   !== null && ts > tsTo)   return;
+    if (!containsCI(entry.event_name, eventQ)) return;
+    if (!containsCI(entry.details?.interface, ifaceQ)) return;
+    if (!containsCI(entry.details?.peer_name, peerQ)) return;
+
+    const dateStr = new Date(entry.timestamp).toLocaleString();
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${dateStr}</td>
+      <td>${entry.event_name}</td>
+      <td><button data-idx="${idx}" class="btn-view-details">View</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  tbody.querySelectorAll('.btn-view-details').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = btn.getAttribute('data-idx');
+      const entry = securityData[idx];
+      if (entry) alert(JSON.stringify(entry.details, null, 2));
+    });
+  });
+}
+
 // ── Fetch + set headers + render ──────────────────────────────
 async function loadAuditLogs() {
   const tbody = document.getElementById('log-body');
@@ -116,12 +157,15 @@ async function loadAuditLogs() {
   tbody.innerHTML = '';
 
   const headerRow = document.getElementById('log-header-row');
+  const securityHeader = document.getElementById('security-header-row');
   headerRow.innerHTML = `
     <th>Timestamp</th>
     <th>Admin</th>
     <th>Action</th>
     <th>Details</th>
   `;
+  headerRow.style.display = '';
+  securityHeader.style.display = 'none';
 
   try {
     const res = await fetch('/api/audit-logs', { credentials: 'same-origin' });
@@ -143,6 +187,7 @@ async function loadSessionLogs() {
   tbody.innerHTML = '';
 
   const headerRow = document.getElementById('log-header-row');
+  const securityHeader = document.getElementById('security-header-row');
   headerRow.innerHTML = `
     <th>Start Time</th>
     <th>End Time</th>
@@ -151,6 +196,8 @@ async function loadSessionLogs() {
     <th>App</th>
     <th>Details</th>
   `;
+  headerRow.style.display = '';
+  securityHeader.style.display = 'none';
 
   try {
     const res = await fetch('/api/session-logs', { credentials: 'same-origin' });
@@ -166,31 +213,67 @@ async function loadSessionLogs() {
   }
 }
 
+// ── Fetch + set headers + render security ──────────────────────
+async function loadSecurityLogs() {
+  const tbody = document.getElementById('log-body');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  const headerRow = document.getElementById('log-header-row');
+  const securityHeader = document.getElementById('security-header-row');
+  headerRow.style.display = 'none';
+  securityHeader.style.display = '';
+
+  try {
+    const res = await fetch('/api/security-events', { credentials: 'same-origin' });
+    let data;
+    try { data = await res.json(); }
+    catch (e) { alert('Failed to load security events: ' + e.message); return; }
+    if (!data.success) { alert(data.error || 'Cannot load security events'); return; }
+
+    securityData = data.events || [];
+    renderSecurityRows();
+  } catch (e) {
+    alert(e.message || 'Error loading security events');
+  }
+}
+
 // ── Tab switch ────────────────────────────────────────────────
 function switchTo(type) {
   currentTab = type;
   const btnAudit    = document.getElementById('tab-audit');
   const btnSess     = document.getElementById('tab-sessions');
+  const btnSec      = document.getElementById('tab-security');
   const title       = document.getElementById('section-title');
   const auditPanel  = document.getElementById('audit-filter-panel');
   const sessPanel   = document.getElementById('session-filter-panel');
+  const secPanel    = document.getElementById('security-filter-panel');
 
   // reset toggle arrow to collapsed when switching tabs
   const toggleBtn = document.getElementById('btn-toggle-filter');
   if (toggleBtn) toggleBtn.textContent = '\u25BC Filter';
   auditPanel?.classList.remove('open');
   sessPanel?.classList.remove('open');
+  secPanel?.classList.remove('open');
 
   if (type === 'audit') {
     btnAudit.classList.add('active');
     btnSess.classList.remove('active');
+    btnSec.classList.remove('active');
     title.textContent = 'Admin actions';
     loadAuditLogs();
-  } else {
+  } else if (type === 'sessions') {
     btnAudit.classList.remove('active');
     btnSess.classList.add('active');
+    btnSec.classList.remove('active');
     title.textContent = 'Peer sessions';
     loadSessionLogs();
+  } else if (type === 'security') {
+    btnAudit.classList.remove('active');
+    btnSess.classList.remove('active');
+    btnSec.classList.add('active');
+    title.textContent = 'Security events';
+    loadSecurityLogs();
   }
 }
 
@@ -198,18 +281,21 @@ function switchTo(type) {
 document.addEventListener('DOMContentLoaded', () => {
   const btnAudit   = document.getElementById('tab-audit');
   const btnSess    = document.getElementById('tab-sessions');
+  const btnSec     = document.getElementById('tab-security');
   const toggleBtn  = document.getElementById('btn-toggle-filter');
   const auditPanel = document.getElementById('audit-filter-panel');
   const sessPanel  = document.getElementById('session-filter-panel');
+  const secPanel   = document.getElementById('security-filter-panel');
 
   // Tab buttons
   if (btnAudit) btnAudit.addEventListener('click', () => switchTo('audit'));
   if (btnSess)  btnSess.addEventListener('click',  () => switchTo('sessions'));
+  if (btnSec)   btnSec.addEventListener('click',   () => switchTo('security'));
 
   // Filter toggle
   if (toggleBtn) {
     toggleBtn.addEventListener('click', () => {
-      const panel = currentTab === 'audit' ? auditPanel : sessPanel;
+      const panel = currentTab === 'audit' ? auditPanel : currentTab === 'sessions' ? sessPanel : secPanel;
       if (!panel) return;
       const isOpen = panel.classList.toggle('open');
       toggleBtn.textContent = (isOpen ? '\u25B2' : '\u25BC') + ' Filter';
@@ -238,6 +324,17 @@ document.addEventListener('DOMContentLoaded', () => {
      'sess-filter-peer-ip', 'sess-filter-peer-name', 'sess-filter-app']
       .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     renderSessionRows();
+  });
+
+  // ── Security filter inputs ──
+  ['security-filter-ts-from', 'security-filter-ts-to', 'security-filter-event', 'security-filter-interface', 'security-filter-peer-name'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', renderSecurityRows);
+  });
+
+  document.getElementById('security-filter-reset')?.addEventListener('click', () => {
+    ['security-filter-ts-from', 'security-filter-ts-to', 'security-filter-event', 'security-filter-interface', 'security-filter-peer-name']
+      .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    renderSecurityRows();
   });
 
   // Initial load

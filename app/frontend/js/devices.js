@@ -41,6 +41,23 @@ async function loadApprovedDevices() {
 
 async function loadRequests() {
   try {
+    // Fetch Client interfaces for the dropdown
+    let clientInterfaces = [];
+    try {
+      const ifaceRes = await fetch('/api/interfaces/client');
+      const ifaceData = await ifaceRes.json();
+      if (ifaceData.success) {
+        clientInterfaces = ifaceData.interfaces || [];
+      }
+    } catch (e) {
+      console.warn('Could not fetch client interfaces:', e.message);
+    }
+
+    // Build select options HTML
+    const optionsHtml = clientInterfaces.length > 0
+      ? clientInterfaces.map(i => `<option value="${i.name}">${i.name}</option>`).join('')
+      : '<option value="">-- No Client interfaces --</option>';
+
     const res = await fetch('/api/enrollment-requests');
     const data = await res.json();
     if (!data.success) {
@@ -75,7 +92,10 @@ async function loadRequests() {
           <button class="btn-decline" onclick="declineDevice(${request.id})">Decline</button>
         </div>
         <div class="approve-form" id="approve-form-${request.id}" style="display: none;">
-          <input type="text" id="interface-${request.id}" placeholder="Interface (e.g., wg2)" required>
+          <label style="display:block;margin-bottom:4px;font-size:0.9rem;">Interface (Client type):</label>
+          <select id="interface-${request.id}" style="width:100%;padding:8px;margin-bottom:10px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;font-size:0.9rem;">
+            ${optionsHtml}
+          </select>
           <input type="text" id="allowedips-${request.id}" placeholder="Allowed IPs (e.g., 10.0.0.2/32)" required>
           <input type="date" id="expiredate-${request.id}" placeholder="Expire Date (optional)">
           <div style="display: flex; gap: 10px;">
@@ -102,18 +122,19 @@ function cancelApprove(id) {
   const form = document.getElementById(`approve-form-${id}`);
   if (form) {
     form.style.display = 'none';
-    document.getElementById(`interface-${id}`).value = '';
+    const ifaceSelect = document.getElementById(`interface-${id}`);
+    if (ifaceSelect) ifaceSelect.selectedIndex = 0;
     document.getElementById(`allowedips-${id}`).value = '';
     document.getElementById(`expiredate-${id}`).value = '';
   }
 }
 
 async function approveDevice(id) {
-  const interface = document.getElementById(`interface-${id}`)?.value || '';
+  const selectedInterface = document.getElementById(`interface-${id}`)?.value || '';
   const allowedIPs = document.getElementById(`allowedips-${id}`)?.value || '';
   const expireDate = document.getElementById(`expiredate-${id}`)?.value || '';
-  if (!interface) {
-    alert('Please enter Interface');
+  if (!selectedInterface) {
+    alert('Please select an Interface');
     return;
   }
   if (!allowedIPs) {
@@ -125,7 +146,7 @@ async function approveDevice(id) {
     const res = await fetch('/api/devices/approve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, interface, allowedIPs, expireDate })
+      body: JSON.stringify({ id, interface: selectedInterface, allowedIPs, expireDate })
     });
     const data = await res.json();
     if (data.success) {

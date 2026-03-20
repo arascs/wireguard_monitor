@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Dashboard – WireGuard VPN Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            margin: 0;
+            padding: 70px 20px 20px 220px;
+            background-color: #f0f0f0;
+            color: #333;
+            font-size: 15px;
+            line-height: 1.5;
+        }
+
+        /* ── Navbar ── */
+        .navbar {
+            background-color: rgba(134, 22, 24, 0.9);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            z-index: 1000;
+            box-sizing: border-box;
+        }
+
+        .navbar h1 {
+            margin: 0;
+            font-weight: 700;
+            font-size: 2rem;
+        }
+
+        .hostname-display {
+            color: white;
+            font-size: 0.85rem;
+            margin-right: 10px;
+            padding: 6px 14px;
+            font-weight: 500;
+            background-color: rgba(255, 255, 255, .15);
+            border: 1px solid rgba(255, 255, 255, .3);
+            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .nav-buttons {
+            display: flex;
+            gap: 10px;
+            margin-right: 20px;
+        }
+
+        .nav-btn {
+            text-decoration: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            background-color: rgba(134, 22, 24, .8);
+            color: white;
+            transition: background-color .3s;
+            font-weight: 500;
+            font-size: .9rem;
+            border: none;
+            cursor: pointer;
+        }
+
+        .nav-btn:hover {
+            background-color: rgba(134, 22, 24, 1);
+        }
+
+        /* ── Sidebar ── */
+        .sidebar {
+            position: fixed;
+            top: 60px;
+            left: 0;
+            bottom: 0;
+            width: 200px;
+            background-color: #fff;
+            box-shadow: 2px 0 8px rgba(0, 0, 0, .08);
+            padding: 15px 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .sidebar-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .sidebar-item {
+            border: none;
+            border-radius: 5px;
+            padding: 8px 10px;
+            text-align: left;
+            background-color: transparent;
+            color: #333;
+            font-size: .95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color .2s, color .2s;
+        }
+
+        .sidebar-item:hover,
+        .sidebar-item.active {
+            background-color: rgba(134, 22, 24, .1);
+            color: rgba(134, 22, 24, 1);
+        }
+
+        /* ── Page layout ── */
+        .page-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin: 0 0 18px;
+            color: rgba(134, 22, 24, 1);
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+
+        /* ── Card ── */
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 22px 24px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, .07);
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: rgba(134, 22, 24, 1);
+            margin: 0 0 16px;
+        }
+
+        .card-subtitle {
+            font-size: .85rem;
+            color: #888;
+            margin: -10px 0 14px;
+            font-weight: 400;
+        }
+
+        /* ── Traffic chart ── */
+        #traffic-chart {
+            height: 280px;
+        }
+
+        #traffic-empty {
+            color: #888;
+            font-size: .9rem;
+            text-align: center;
+            padding: 50px 0;
+            display: none;
+        }
+
+        /* ── Active device / site tables ── */
+        .stat-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .stat-badge {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: rgba(134, 22, 24, 1);
+        }
+
+        .stat-label {
+            font-size: .85rem;
+            color: #666;
+        }
+
+        .peer-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .peer-table th,
+        .peer-table td {
+            text-align: left;
+            padding: 8px 10px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: .88rem;
+        }
+
+        .peer-table th {
+            color: #888;
+            font-weight: 500;
+            background: #fafafa;
+        }
+
+        .peer-table tbody tr:hover {
+            background: #fafafa;
+        }
+
+        .empty-msg {
+            color: #aaa;
+            font-size: .9rem;
+            text-align: center;
+            padding: 24px 0;
+        }
+
+        /* ── Terminate button ── */
+        .btn-terminate {
+            padding: 4px 12px;
+            border: none;
+            border-radius: 4px;
+            background: rgba(220, 53, 69, .85);
+            color: white;
+            font-size: .8rem;
+            cursor: pointer;
+            transition: background .2s;
+        }
+
+        .btn-terminate:hover {
+            background: rgba(220, 53, 69, 1);
+        }
+    </style>
+</head>
+
+<body data-current="main-dashboard">
+    <div class="navbar">
+        <h1>WireGuard VPN Manager</h1>
+        <div class="nav-buttons">
+            <span class="hostname-display"><strong>{{HOSTNAME}}</strong></span>
+            <a href="/main-dashboard" class="nav-btn">Home</a>
+        </div>
+    </div>
+
+    <div class="sidebar">
+        <div class="sidebar-menu">
+            <button class="sidebar-item" data-section="main-dashboard" data-path="/">Dashboard</button>
+            <button class="sidebar-item" data-section="connections" data-path="/interfaces">Interfaces</button>
+            <button class="sidebar-item" data-section="users" data-path="/users">Identity</button>
+            <button class="sidebar-item" data-section="devices" data-path="/devices">Devices</button>
+            <button class="sidebar-item" data-section="applications" data-path="/applications">Applications</button>
+            <button class="sidebar-item" data-section="access_rules" data-path="/access-rules">Access rules</button>
+            <button class="sidebar-item" data-section="audit" data-path="/audit-log">Logging</button>
+            <button class="sidebar-item" data-section="backup" data-path="/backup">Backup &amp; Restore</button>
+            <button class="sidebar-item" data-section="settings" data-path="/settings">Settings</button>
+        </div>
+    </div>
+
+    <div class="dashboard-grid">
+        <!-- 1. Total Traffic -->
+        <div class="card">
+            <div class="card-title">Total Traffic</div>
+            <div class="card-subtitle">Total traffic over the last 7 days (collected daily at 22:00)</div>
+            <div id="traffic-chart"></div>
+            <div id="traffic-empty">No data available. Run collect-traffic to save the first snapshot.</div>
+        </div>
+
+        <!-- 2. Active Devices -->
+        <div class="card">
+            <div class="card-title">Active Devices</div>
+            <div class="stat-header">
+                <span class="stat-badge" id="devices-count">–</span>
+                <span class="stat-label">connected devices / total</span>
+            </div>
+            <div id="devices-table-wrap">
+                <div class="empty-msg">Loading...</div>
+            </div>
+        </div>
+
+        <!-- 3. Active Sites -->
+        <div class="card">
+            <div class="card-title">Active Sites</div>
+            <div class="stat-header">
+                <span class="stat-badge" id="sites-count">–</span>
+                <span class="stat-label">connected sites / total</span>
+            </div>
+            <div id="sites-table-wrap">
+                <div class="empty-msg">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/layout.js"></script>
+    <script>
+        // ── Sidebar navigation ────────────────────────────────────────────────
+        document.querySelectorAll('.sidebar-item').forEach(btn => {
+            btn.addEventListener('click', () => {
+                window.location.href = btn.dataset.path;
+            });
+        });
+
+        // ── Helpers ──────────────────────────────────────────────────────────
+        function fmtBytes(b) {
+            if (!b) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+            const i = Math.floor(Math.log(b) / Math.log(k));
+            return (b / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
+        }
+
+        function timeAgo(epochSec) {
+            const diff = Math.floor(Date.now() / 1000) - epochSec;
+            if (diff < 60) return diff + 's ago';
+            if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+            return Math.floor(diff / 3600) + 'h ago';
+        }
+
+        // ── Traffic chart ─────────────────────────────────────────────────────
+        async function loadTraffic() {
+            try {
+                const res = await fetch('/api/main-dashboard/traffic');
+                const json = await res.json();
+                if (!json.success || !json.data || json.data.length === 0) {
+                    document.getElementById('traffic-chart').style.display = 'none';
+                    document.getElementById('traffic-empty').style.display = 'block';
+                    return;
+                }
+                const data = json.data;
+                const dates = data.map(d => d.date);
+                const rxVals = data.map(d => d.rx);
+                const txVals = data.map(d => d.tx);
+
+                const chart = echarts.init(document.getElementById('traffic-chart'));
+                chart.setOption({
+                    tooltip: {
+                        trigger: 'axis',
+                        formatter: params => {
+                            let s = params[0].axisValue + '<br>';
+                            params.forEach(p => { s += p.marker + p.seriesName + ': ' + fmtBytes(p.value) + '<br>'; });
+                            return s;
+                        }
+                    },
+                    legend: { data: ['RX', 'TX'], bottom: 0 },
+                    grid: { top: 16, bottom: 40, left: 80, right: 20 },
+                    xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 11 } },
+                    yAxis: {
+                        type: 'value',
+                        axisLabel: {
+                            formatter: v => fmtBytes(v),
+                            fontSize: 11
+                        }
+                    },
+                    series: [
+                        {
+                            name: 'RX', type: 'bar', data: rxVals,
+                            itemStyle: { color: '#4e79a7' }, barMaxWidth: 40
+                        },
+                        {
+                            name: 'TX', type: 'bar', data: txVals,
+                            itemStyle: { color: '#e15759' }, barMaxWidth: 40
+                        }
+                    ]
+                });
+                window.addEventListener('resize', () => chart.resize());
+            } catch (e) {
+                console.error('loadTraffic error', e);
+            }
+        }
+
+        // ── Peer tables ───────────────────────────────────────────────────────
+        function buildPeerTable(peers) {
+            if (!peers || peers.length === 0) {
+                return '<div class="empty-msg">No active peers.</div>';
+            }
+            let html = '<table class="peer-table"><thead><tr>'
+                + '<th>Name</th><th>Interface</th><th>Handshake</th><th></th>'
+                + '</tr></thead><tbody>';
+            peers.forEach(p => {
+                html += `<tr>
+                    <td>${escHtml(p.name)}</td>
+                    <td>${escHtml(p.interfaceName)}</td>
+                    <td>${p.lastHandshake ? timeAgo(p.lastHandshake) : '–'}</td>
+                    <td><button class="btn-terminate"
+                        data-iface="${escHtml(p.interfaceName)}"
+                        data-idx="${p.peerIndex}">Terminate</button></td>
+                </tr>`;
+            });
+            html += '</tbody></table>';
+            return html;
+        }
+
+        function escHtml(s) {
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        async function loadDevices() {
+            try {
+                const res = await fetch('/api/main-dashboard/active-devices');
+                const json = await res.json();
+                if (!json.success) return;
+                document.getElementById('devices-count').textContent =
+                    json.active.length + ' / ' + json.totalDevices;
+                const wrap = document.getElementById('devices-table-wrap');
+                wrap.innerHTML = buildPeerTable(json.active);
+                attachTerminate(wrap, 'devices');
+            } catch (e) { console.error('loadDevices error', e); }
+        }
+
+        async function loadSites() {
+            try {
+                const res = await fetch('/api/main-dashboard/active-sites');
+                const json = await res.json();
+                if (!json.success) return;
+                document.getElementById('sites-count').textContent =
+                    json.active.length + ' / ' + json.totalSites;
+                const wrap = document.getElementById('sites-table-wrap');
+                wrap.innerHTML = buildPeerTable(json.active);
+                attachTerminate(wrap, 'sites');
+            } catch (e) { console.error('loadSites error', e); }
+        }
+
+        function attachTerminate(container, section) {
+            container.querySelectorAll('.btn-terminate').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const iface = btn.dataset.iface;
+                    const idx = btn.dataset.idx;
+                    if (!confirm(`Terminate peer #${idx} on interface ${iface}?`)) return;
+                    btn.disabled = true;
+                    btn.textContent = '…';
+                    try {
+                        const r = await fetch('/api/main-dashboard/disable-peer', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ interfaceName: iface, peerIndex: parseInt(idx) })
+                        });
+                        const j = await r.json();
+                        if (j.success) {
+                            // Reload the relevant panel
+                            if (section === 'devices') loadDevices();
+                            else loadSites();
+                        } else {
+                            alert('Error: ' + (j.error || 'unknown'));
+                            btn.disabled = false;
+                            btn.textContent = 'Terminate';
+                        }
+                    } catch (e) {
+                        alert('Request error: ' + e.message);
+                        btn.disabled = false;
+                        btn.textContent = 'Terminate';
+                    }
+                });
+            });
+        }
+
+        // ── Init ──────────────────────────────────────────────────────────────
+        loadTraffic();
+        loadDevices();
+        loadSites();
+    </script>
+</body>
+
+</html>

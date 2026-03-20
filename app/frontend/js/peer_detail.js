@@ -296,7 +296,7 @@ async function loadPeerConnections(interfaceId, peerId) {
                         <td style="padding: 10px; border: 1px solid #861618;">${formatDuration(session.duration_sec)}</td>
                         <td style="padding: 10px; border: 1px solid #861618;">${formatBytes(session.bytes || 0)}</td>
                         <td style="padding: 10px; border: 1px solid #861618; text-align: center;">
-                            <button onclick="toggleConnectionDetails(${index})" style="padding: 5px 10px; cursor: pointer; border: 1px solid #861618; background: #fff;">View Details</button>
+                            <button onclick="toggleConnectionDetails(${index})" style="padding: 5px 10px; cursor: pointer; border: 1px solid #861618; background: #fff; color: #861618;">View Details</button>
                         </td>
                     </tr>
                     <tr id="detail-${index}" style="display: none;">

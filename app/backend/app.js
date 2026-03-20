@@ -16,9 +16,10 @@ const createAccessRuleRoutes = require('./routes/accessRules');
 const createAuthRoutes = require('./routes/auth');
 const createSessionLogRoutes = require('./routes/sessionLogs');
 const createBackupRoutes = require('./routes/backups');
+const mainDashboardRoutes = require('./routes/main_dashboard');
 const { HOSTNAME } = require('./config');
 const mysql = require('mysql2/promise');
-const { logAction, getLogs } = require('./auditLogger');
+const { logAction, getLogs, getSecurityEvents } = require('./auditLogger');
 
 const dbConfig = {
   host: 'localhost',
@@ -208,7 +209,8 @@ function loadConfigFromFile() {
           preDown: '',
           postDown: '',
           keyCreationDate: null,
-          keyExpiryDays: loadGlobalSettings().keyExpiryDays
+          keyExpiryDays: loadGlobalSettings().keyExpiryDays,
+          type: ''
         },
         peers: []
       };
@@ -237,7 +239,8 @@ function loadConfigFromFile() {
         preDown: '',
         postDown: '',
         keyCreationDate: null,
-        keyExpiryDays: loadGlobalSettings().keyExpiryDays
+        keyExpiryDays: loadGlobalSettings().keyExpiryDays,
+        type: ''
       },
       peers: []
     };
@@ -304,6 +307,10 @@ function loadConfigFromFile() {
           }
           if (lowerKey === 'key expiry days' && section === 'interface') {
             config.interface.keyExpiryDays = parseInt(value) || loadGlobalSettings().keyExpiryDays;
+            continue;
+          }
+          if (lowerKey === 'type' && section === 'interface') {
+            config.interface.type = value;
             continue;
           }
         }
@@ -384,7 +391,7 @@ function getActiveInterfaces() {
 }
 
 function parseInterfaceSummary(filePath) {
-  const summary = { publicKey: '', address: '' };
+  const summary = { publicKey: '', address: '', type: '' };
   try {
     if (!fs.existsSync(filePath)) {
       return summary;
@@ -397,7 +404,13 @@ function parseInterfaceSummary(filePath) {
       if (!line) {
         continue;
       }
+      // Parse # Type = ... comment
       if (line.startsWith('#')) {
+        const commentContent = line.substring(1).trim();
+        if (commentContent.toLowerCase().startsWith('type =')) {
+          const eqIdx = commentContent.indexOf('=');
+          summary.type = commentContent.substring(eqIdx + 1).trim();
+        }
         continue;
       }
       if (line === '[Interface]') {
@@ -445,13 +458,40 @@ function listInterfaces() {
       name: interfaceName,
       publicKey: summary.publicKey,
       address: summary.address,
+      type: summary.type || '',
       status: activeSet.has(interfaceName) ? 'connected' : 'disconnected'
     };
   });
 }
 
 function buildConfigFileContent() {
-  let content = '[Interface]\n';
+  let content = '';
+
+  let typeToWrite = config.interface.type;
+  if (!typeToWrite && fs.existsSync(CONFIG_FILE)) {
+    try {
+      const currentContent = fs.readFileSync(CONFIG_FILE, 'utf8');
+      const lines = currentContent.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.toLowerCase().startsWith('# type =')) {
+          const parts = trimmed.split('=');
+          if (parts.length > 1) {
+            typeToWrite = parts.slice(1).join('=').trim();
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      // Nếu có lỗi đọc file, tiếp tục mà không lưu type
+    }
+  }
+
+  if (typeToWrite) {
+    content += `# Type = ${typeToWrite}\n`;
+  }
+
+  content += '[Interface]\n';
 
   if (config.interface.keyCreationDate) {
     content += `# Key Creation = ${config.interface.keyCreationDate}\n`;
@@ -530,6 +570,31 @@ app.get('/api/interface', (req, res) => {
   res.json({ interface: INTERFACE });
 });
 
+// Get last 50 log lines for a specific interface from /var/log/wg_systemd.log
+app.get('/api/interface-log/:interfaceName', (req, res) => {
+  try {
+    const interfaceName = req.params.interfaceName.replace(/[^a-zA-Z0-9_\-]/g, '');
+    if (!interfaceName) {
+      return res.status(400).json({ success: false, error: 'Invalid interface name' });
+    }
+    const LOG_FILE = '/var/log/wg_systemd.log';
+    let lines;
+    try {
+      // grep lines matching the interface name, then take last 50
+      lines = execSync(
+        `grep -F "${interfaceName}" "${LOG_FILE}" | tail -n 50`,
+        { encoding: 'utf8' }
+      );
+    } catch (e) {
+      // grep returns exit code 1 if no matches — treat as empty
+      lines = '';
+    }
+    res.json({ success: true, log: lines });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Get key status
 app.get('/api/key-status', (req, res) => {
   const expired = isKeyExpired();
@@ -549,6 +614,66 @@ app.get('/api/interfaces', (req, res) => {
   try {
     const interfaces = listInterfaces();
     res.json({ success: true, interfaces });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// List only Client-type interfaces (for device approve dropdown)
+app.get('/api/interfaces/client', (req, res) => {
+  try {
+    const interfaces = listInterfaces().filter(i => i.type === 'Client');
+    res.json({ success: true, interfaces });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Add a new interface (create conf file with Type comment + generate keys)
+app.post('/api/add-interface', async (req, res) => {
+  try {
+    const { name, type, address, listenPort, dns, mtu, preUp, postUp, preDown, postDown } = req.body;
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'Interface name is required' });
+    }
+    const interfaceType = (type === 'Site' || type === 'Client') ? type : 'Client';
+    const confFile = path.join(CONFIG_DIR, `${name}.conf`);
+    if (fs.existsSync(confFile)) {
+      return res.status(409).json({ success: false, error: 'Interface already exists' });
+    }
+
+    // Generate keys
+    const privateKey = run('wg genkey').trim();
+    const publicKey = run(`echo "${privateKey}" | wg pubkey`).trim();
+
+    // Build conf content — Type comment is the very first line
+    let content = `# Type = ${interfaceType}\n`;
+    content += '[Interface]\n';
+    content += `# Key Creation = ${new Date().toISOString()}\n`;
+    const settings = loadGlobalSettings();
+    content += `# Key Expiry Days = ${settings.keyExpiryDays}\n`;
+    content += `PrivateKey = ${privateKey}\n`;
+    if (address) content += `Address = ${address}\n`;
+    if (listenPort) content += `ListenPort = ${listenPort}\n`;
+    if (dns) content += `DNS = ${dns}\n`;
+    if (mtu) content += `MTU = ${mtu}\n`;
+    if (preUp) content += `PreUp = ${preUp}\n`;
+    if (postUp) content += `PostUp = ${postUp}\n`;
+    if (preDown) content += `PreDown = ${preDown}\n`;
+    if (postDown) content += `PostDown = ${postDown}\n`;
+
+    if (!fs.existsSync(CONFIG_DIR)) {
+      fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    }
+    fs.writeFileSync(confFile, content, { mode: 0o600 });
+
+    // Audit log
+    try {
+      const admin = req.session && req.session.user ? req.session.user : 'unknown';
+      logAction(admin, 'add_interface', { interface: name, type: interfaceType, publicKey, address });
+    } catch (e) { }
+
+    res.json({ success: true, name, type: interfaceType, publicKey });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -672,7 +797,7 @@ app.post('/api/generate-keys', async (req, res) => {
     config.interface.privateKey = newPrivateKey;
     config.interface.publicKey = newPublicKey;
     config.interface.keyCreationDate = new Date().toISOString();
-    
+
     // Use global default if not set
     if (!config.interface.keyExpiryDays) {
       const currentSettings = loadGlobalSettings();
@@ -768,6 +893,8 @@ app.post('/api/generate-keys', async (req, res) => {
 app.post('/api/configure-interface', (req, res) => {
   try {
     const isNew = !fs.existsSync(CONFIG_FILE);
+    // ✅ Bảo toàn type hiện tại (vì có thể đã load từ file trước đó)
+    const existingType = config.interface.type;
 
     config.interface.address = req.body.address || '';
     config.interface.listenPort = req.body.listenPort || '51820';
@@ -778,6 +905,11 @@ app.post('/api/configure-interface', (req, res) => {
     config.interface.postUp = req.body.postUp || '';
     config.interface.preDown = req.body.preDown || '';
     config.interface.postDown = req.body.postDown || '';
+
+    // ✅ Khôi phục type sau khi cập nhật các field khác
+    if (existingType) {
+      config.interface.type = existingType;
+    }
 
     if (req.body.keyExpiryDays) {
       config.interface.keyExpiryDays = parseInt(req.body.keyExpiryDays) || 90;
@@ -1195,39 +1327,6 @@ app.post('/api/disconnect', (req, res) => {
   }
 });
 
-// Restart VPN
-app.post('/api/restart-vpn', (req, res) => {
-  try {
-    // audit stop and start interface
-    try {
-      const admin = req.session && req.session.user ? req.session.user : 'unknown';
-      logAction(admin, 'stop_interface', { interface: INTERFACE });
-      logAction(admin, 'start_interface', { interface: INTERFACE });
-    } catch (e) { }
-
-    // Check if key is expired
-    if (isKeyExpired()) {
-      return res.status(403).json({
-        success: false,
-        error: 'Key has expired. Cannot restart VPN. Please generate new keys first.'
-      });
-    }
-
-    if (!fs.existsSync(CONFIG_FILE)) {
-      return res.status(404).json({
-        success: false,
-        error: 'Config file not found. Save configuration first.'
-      });
-    }
-
-    run(`wg-quick down ${INTERFACE}`);
-    run(`wg-quick up ${INTERFACE}`);
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
 // audit logs retrieval
 app.get('/api/audit-logs', requireAuth, (req, res) => {
   try {
@@ -1235,6 +1334,16 @@ app.get('/api/audit-logs', requireAuth, (req, res) => {
     res.json({ success: true, logs });
   } catch (e) {
     res.status(500).json({ success: false, error: 'cannot read audit logs' });
+  }
+});
+
+// security events retrieval
+app.get('/api/security-events', requireAuth, (req, res) => {
+  try {
+    const events = getSecurityEvents();
+    res.json({ success: true, events });
+  } catch (e) {
+    res.status(500).json({ success: false, error: 'cannot read security events' });
   }
 });
 
@@ -1311,10 +1420,14 @@ function renderHtmlWithHostname(filePath) {
 }
 
 app.get('/', requireAuth, (req, res) => {
-  const htmlPath = path.join(FRONTEND_DIR, 'index.html');
+  const htmlPath = path.join(FRONTEND_DIR, 'main_dashboard.html');
   res.send(renderHtmlWithHostname(htmlPath));
 });
 
+app.get('/interfaces', requireAuth, (req, res) => {
+  const htmlPath = path.join(__dirname, '../frontend/interfaces.html');
+  res.send(renderHtmlWithHostname(htmlPath));
+});
 
 app.get('/dashboard', requireAuth, (req, res) => {
   const htmlPath = path.join(__dirname, '../frontend/dashboard.html');
@@ -1333,6 +1446,11 @@ app.get('/dashboard/peer/:id', requireAuth, (req, res) => {
 
 app.get('/settings', requireAuth, (req, res) => {
   const htmlPath = path.join(__dirname, '../frontend/settings.html');
+  res.send(renderHtmlWithHostname(htmlPath));
+});
+
+app.get('/main-dashboard', requireAuth, (req, res) => {
+  const htmlPath = path.join(FRONTEND_DIR, 'main_dashboard.html');
   res.send(renderHtmlWithHostname(htmlPath));
 });
 
@@ -1362,6 +1480,7 @@ app.get('/access-rules', requireAuth, (req, res) => {
 });
 
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/main-dashboard', mainDashboardRoutes);
 
 app.use('/api', createAuthRoutes({ jwt, JWT_SECRET, mysql, dbConfig }));
 

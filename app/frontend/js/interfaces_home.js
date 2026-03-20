@@ -15,8 +15,14 @@ function renderInterfaces(items) {
         const statusClass = iface.status === 'connected' ? 'connected' : 'disconnected';
         const publicKey = iface.publicKey || 'Chưa có';
         const address = iface.address || 'Chưa cấu hình';
+        const typeLabel = iface.type ? iface.type : '';
+        const typeBadgeColor = iface.type === 'Client' ? '#1a73e8' : (iface.type === 'Site' ? '#388e3c' : '#888');
+        const typeBadge = typeLabel
+            ? `<span style="display:inline-block;padding:2px 10px;border-radius:12px;background:${typeBadgeColor};color:#fff;font-size:0.78rem;font-weight:600;margin-bottom:6px;">${typeLabel}</span>`
+            : '';
         card.innerHTML = `
             <h3>${iface.name}</h3>
+            ${typeBadge}
             <p><strong>Public Key:</strong> ${publicKey}</p>
             <p><strong>Address:</strong> ${address}</p>
             <p class="interface-status ${statusClass}">Status: ${iface.status === 'connected' ? 'Up' : 'Down'}</p>
@@ -89,6 +95,7 @@ async function submitAddInterfaceForm(e) {
         alert('Interface name is required');
         return;
     }
+    const type = document.getElementById('new-interface-type').value;
     // optional fields
     const address = document.getElementById('new-interface-address').value.trim();
     const listenPort = document.getElementById('new-interface-listenPort').value.trim();
@@ -100,35 +107,26 @@ async function submitAddInterfaceForm(e) {
     const postDown = document.getElementById('new-interface-postDown').value.trim();
 
     try {
-        // set interface on server
-        await fetch('/api/interface', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ interface: name })
-        });
+        const payload = { name, type };
+        if (address) payload.address = address;
+        if (listenPort) payload.listenPort = listenPort;
+        if (dns) payload.dns = dns;
+        if (mtu) payload.mtu = mtu;
+        if (preUp) payload.preUp = preUp;
+        if (postUp) payload.postUp = postUp;
+        if (preDown) payload.preDown = preDown;
+        if (postDown) payload.postDown = postDown;
 
-        // send configuration
-        const configPayload = { saveToFile: true };
-        if (address) configPayload.address = address;
-        if (listenPort) configPayload.listenPort = listenPort;
-        if (dns) configPayload.dns = dns;
-        if (mtu) configPayload.mtu = mtu;
-        if (preUp) configPayload.preUp = preUp;
-        if (postUp) configPayload.postUp = postUp;
-        if (preDown) configPayload.preDown = preDown;
-        if (postDown) configPayload.postDown = postDown;
-        await fetch('/api/configure-interface', {
+        const response = await fetch('/api/add-interface', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(configPayload)
+            body: JSON.stringify(payload)
         });
-
-        // automatically generate keys for new interface
-        await fetch('/api/generate-keys', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ force: false })
-        });
+        const data = await response.json();
+        if (!data.success) {
+            alert('Error: ' + (data.error || 'Cannot create interface'));
+            return;
+        }
 
         hideAddInterfaceModal();
         // after creation redirect to dashboard for new interface

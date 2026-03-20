@@ -442,6 +442,11 @@ function setupInterfaceControls() {
     document.getElementById('start-stop-btn').addEventListener('click', toggleVpn);
     document.getElementById('edit-interface-btn').addEventListener('click', openEditInterfaceModal);
     document.getElementById('cancel-edit-if').addEventListener('click', closeEditInterfaceModal);
+
+    // log viewer button
+    document.getElementById('view-log-btn').addEventListener('click', openLogModal);
+    document.getElementById('log-close-btn').addEventListener('click', closeLogModal);
+    document.getElementById('log-backdrop').addEventListener('click', closeLogModal);
     document.getElementById('edit-interface-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const updated = {
@@ -597,3 +602,55 @@ function setupPeerModals() {
             alert(e.message);
         }
     })};
+
+// ─── Log viewer modal ────────────────────────────────────────────
+async function openLogModal() {
+    const modal = document.getElementById('log-modal');
+    const backdrop = document.getElementById('log-backdrop');
+    const content = document.getElementById('log-content');
+    const title = document.getElementById('log-modal-title');
+
+    // Determine the current interface name from the URL
+    const interfaceName = getInterfaceIdFromUrl() || iface;
+
+    title.textContent = `Log: ${interfaceName}`;
+    content.innerHTML = '<span class="log-empty">Loading log entries...</span>';
+
+    // Show modal and backdrop
+    modal.style.display = 'flex';
+    backdrop.style.display = 'block';
+
+    try {
+        const res = await fetch(`/api/interface-log/${encodeURIComponent(interfaceName)}`);
+        const data = await res.json();
+
+        if (!data.success) {
+            content.innerHTML = `<span style="color:#ff6b6b;">Error: ${data.error || 'Unknown error'}</span>`;
+            return;
+        }
+
+        const logText = (data.log || '').trim();
+        if (!logText) {
+            content.innerHTML = '<span class="log-empty">No log entries found for this interface.</span>';
+        } else {
+            // Render each line with subtle coloring
+            const lines = logText.split('\n');
+            content.innerHTML = lines.map(line => {
+                let color = '#c8d0e0';
+                if (/error|fail|warn/i.test(line)) color = '#ff8080';
+                else if (/success|up|start/i.test(line)) color = '#7ec8a0';
+                const escaped = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                return `<div style="color:${color};">${escaped}</div>`;
+            }).join('');
+            // Scroll to bottom so most recent entries are visible
+            content.scrollTop = content.scrollHeight;
+        }
+    } catch (err) {
+        content.innerHTML = `<span style="color:#ff6b6b;">Failed to fetch log: ${err.message}</span>`;
+    }
+}
+
+function closeLogModal() {
+    document.getElementById('log-modal').style.display = 'none';
+    document.getElementById('log-backdrop').style.display = 'none';
+}

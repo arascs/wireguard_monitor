@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html>
 
 <head>
@@ -349,7 +349,8 @@
 
     <div class="sidebar">
         <div class="sidebar-menu">
-            <button class="sidebar-item" data-section="connections" data-path="/">Interfaces</button>
+            <button class="sidebar-item" data-section="main-dashboard" data-path="/">Dashboard</button>
+            <button class="sidebar-item" data-section="connections" data-path="/interfaces">Interfaces</button>
             <button class="sidebar-item" data-section="users" data-path="/users">Identity</button>
             <button class="sidebar-item" data-section="devices" data-path="/devices">Devices</button>
             <button class="sidebar-item" data-section="applications" data-path="/applications">Applications</button>
@@ -362,9 +363,11 @@
 
     <div id="main-content">
         <!-- Tab bar -->
-        <div style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px;">
+        <div
+            style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px;">
             <button id="tab-audit" class="tab-btn active">Admin actions</button>
             <button id="tab-sessions" class="tab-btn">Peer sessions</button>
+            <button id="tab-security" class="tab-btn">Security events</button>
         </div>
 
         <h2 class="section-title" id="section-title">Admin actions</h2>
@@ -432,12 +435,44 @@
             </div>
         </div>
 
+        <!-- â”€â”€ Security Events filters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+        <div class="filter-panel" id="security-filter-panel">
+            <div class="filter-field">
+                <label>Timestamp from</label>
+                <input type="datetime-local" id="security-filter-ts-from">
+            </div>
+            <div class="filter-field">
+                <label>Timestamp to</label>
+                <input type="datetime-local" id="security-filter-ts-to">
+            </div>
+            <div class="filter-field">
+                <label>Event</label>
+                <input type="text" id="security-filter-event" placeholder="Search eventâ€¦">
+            </div>
+            <div class="filter-field">
+                <label>Interface</label>
+                <input type="text" id="security-filter-interface" placeholder="Search interfaceâ€¦">
+            </div>
+            <div class="filter-field">
+                <label>Peer Name</label>
+                <input type="text" id="security-filter-peer-name" placeholder="Search peer nameâ€¦">
+            </div>
+            <div class="filter-actions">
+                <button class="btn-filter-reset" id="security-filter-reset">Reset</button>
+            </div>
+        </div>
+
         <table class="simple-table" id="log-table">
             <thead>
                 <tr id="log-header-row">
                     <th>Timestamp</th>
                     <th>Admin</th>
                     <th>Action</th>
+                    <th>Details</th>
+                </tr>
+                <tr id="security-header-row" style="display: none;">
+                    <th>Timestamp</th>
+                    <th>Event</th>
                     <th>Details</th>
                 </tr>
             </thead>

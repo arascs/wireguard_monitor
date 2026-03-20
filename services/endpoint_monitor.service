@@ -1,0 +1,10 @@
+[Unit]
+Description=WireGuard Endpoint Monitor
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/endpoint_monitor
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

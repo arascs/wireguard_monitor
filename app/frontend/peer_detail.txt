@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Peer Details - WireGuard Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 70px 20px 20px 220px;
+            /* space for sidebar */
+            background-color: #f0f0f0;
+            color: #333;
+        }
+
+        .navbar {
+            background-color: rgba(134, 22, 24, 0.9);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            z-index: 1000;
+            box-sizing: border-box;
+        }
+
+        .navbar h1 {
+            margin: 0;
+            font-weight: 700;
+        }
+
+        .hostname-display {
+            color: white;
+            font-size: 0.85rem;
+            margin-right: 10px;
+            padding: 6px 14px;
+            font-weight: 500;
+            background-color: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .nav-buttons {
+            display: flex;
+            gap: 10px;
+            margin-right: 20px;
+        }
+
+        .nav-btn {
+            text-decoration: none;
+            padding: 8px 15px;
+            border-radius: 8px;
+            background-color: rgba(134, 22, 24, 0.8);
+            color: white;
+            transition: background-color 0.3s;
+            font-weight: 500;
+        }
+
+        .nav-btn:hover {
+            background-color: rgba(134, 22, 24, 1);
+        }
+
+        .nav-btn.active {
+            background-color: rgba(134, 22, 24, 1);
+        }
+
+        .peer-detail-container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 5px;
+            border: none;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .peer-header {
+            border-bottom: 2px solid rgba(134, 22, 24, 0.5);
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+
+        .peer-name {
+            font-size: 1.8em;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: rgba(134, 22, 24, 1);
+        }
+
+        .peer-status {
+            display: inline-block;
+            padding: 6px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+            border: 1px solid rgba(134, 22, 24, 0.5);
+        }
+
+        .detail-section {
+            margin-bottom: 30px;
+        }
+
+        .detail-section h3 {
+            border-bottom: 1px solid rgba(134, 22, 24, 0.5);
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+            color: rgba(134, 22, 24, 1);
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .detail-item {
+            padding: 15px;
+            border-radius: 5px;
+            border: none;
+            background-color: #fafafa;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+
+        .detail-item strong {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            color: #555;
+        }
+
+        .detail-item span {
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 0.95em;
+        }
+
+        .detail-item .value {
+            font-weight: bold;
+        }
+
+        .throughput-section {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            border: none;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .throughput-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .throughput-item {
+            text-align: center;
+            padding: 15px;
+            border-radius: 5px;
+            border: none;
+            background-color: #fafafa;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+
+        .throughput-item strong {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+        }
+
+        .throughput-item .value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: rgba(134, 22, 24, 1);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+        }
+
+        .error {
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border: none;
+            background-color: #ffebee;
+            color: #dc3545;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+
+        .filter-form {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .filter-form label {
+            font-weight: bold;
+        }
+
+        .filter-form input {
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+
+        button {
+            cursor: pointer;
+            padding: 8px 15px;
+            border: none;
+            border-radius: 5px;
+            background-color: rgba(134, 22, 24, 0.8);
+            color: white;
+            transition: background-color 0.3s;
+            font-weight: 500;
+            font-size: 0.95rem;
+        }
+
+        button:hover {
+            background-color: rgba(134, 22, 24, 1);
+        }
+
+        .filter-form button {
+            padding: 8px 15px;
+            background-color: rgba(134, 22, 24, 0.8);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            font-weight: 500;
+        }
+
+        /* sidebar styles */
+        .sidebar {
+            position: fixed;
+            top: 60px;
+            left: 0;
+            bottom: 0;
+            width: 200px;
+            background-color: #ffffff;
+            box-shadow: 2px 0 8px rgba(0, 0, 0, 0.08);
+            padding: 15px 10px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .sidebar-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .sidebar-item {
+            border: none;
+            border-radius: 5px;
+            padding: 8px 10px;
+            text-align: left;
+            background-color: transparent;
+            color: #333;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s, color 0.2s;
+        }
+
+        .sidebar-item:hover {
+            background-color: rgba(134, 22, 24, 0.1);
+            color: rgba(134, 22, 24, 1);
+        }
+
+        .sidebar-item.active {
+            background-color: rgba(134, 22, 24, 0.1);
+            color: rgba(134, 22, 24, 1);
+        }
+
+        .filter-form button:hover {
+            background-color: rgba(134, 22, 24, 1);
+        }
+    </style>
+</head>
+
+<body data-current="connections">
+    <div class="navbar">
+        <h1>WireGuard VPN Manager</h1>
+        <div class="nav-buttons">
+            <span class="hostname-display"><span></span><strong>{{HOSTNAME}}</strong></span>
+            <a href="/" class="nav-btn">Home</a>
+        </div>
+    </div>
+
+    <div class="sidebar">
+        <div class="sidebar-menu">
+            <button class="sidebar-item" data-section="main-dashboard" data-path="/">Dashboard</button>
+            <button class="sidebar-item" data-section="connections" data-path="/interfaces">Interfaces</button>
+            <button class="sidebar-item" data-section="users" data-path="/users">Identity</button>
+            <button class="sidebar-item" data-section="devices" data-path="/devices">Devices</button>
+            <button class="sidebar-item" data-section="applications" data-path="/applications">Applications</button>
+            <button class="sidebar-item" data-section="access" data-path="/access-rules">Access rules</button>
+            <button class="sidebar-item" data-section="audit" data-path="/audit-log">Logging</button>
+            <button class="sidebar-item" data-section="backup" data-path="/backup">Backup & Restore</button>
+            <button class="sidebar-item" data-section="settings" data-path="/settings">Settings</button>
+        </div>
+    </div>
+
+    <div class="peer-detail-container">
+        <div style="text-align:right; margin-bottom:10px;">
+            <button id="edit-peer-btn"
+                style="padding:8px 15px; background-color:rgba(134,22,24,0.8); color:white; border:none; border-radius:5px;">Edit
+                Peer</button>
+        </div>
+        <div id="peer-detail-content" class="loading">Loading peer details...</div>
+    </div>
+
+    <!-- edit peer modal -->
+    <div id="edit-peer-modal"
+        style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:25px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.15);z-index:2000;max-width:500px;width:100%;">
+        <h3>Edit Peer</h3>
+        <form id="edit-peer-form">
+            <div style="margin-bottom:10px;"><label>Name:</label><input type="text" id="edit-peer-name"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>Public Key:</label><input type="text" id="edit-peer-publicKey"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>Endpoint:</label><input type="text" id="edit-peer-endpoint"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>Allowed IPs:</label><input type="text" id="edit-peer-allowedIPs"
+                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+            <div style="margin-bottom:10px;"><label>Persistent Keepalive:</label><input type="text"
+                    id="edit-peer-keepalive" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;">
+            </div>
+            <div style="text-align:right;">
+                <button type="button" id="cancel-edit-peer" style="margin-right:10px;">Cancel</button>
+                <button type="submit">Save</button>
+            </div>
+        </form>
+    </div>
+
+    <script src="/js/layout.js"></script>
+    <script src="/js/peer_detail.js"></script>
+</body>
+
+</html>
