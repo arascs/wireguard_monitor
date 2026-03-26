@@ -2,7 +2,7 @@
 <html>
 
 <head>
-    <title>WireGuard VPN Manager - Backup & Restore</title>
+    <title>WireGuard VPN Manager - Backup &amp; Restore</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
@@ -183,6 +183,25 @@
             background-color: rgba(134, 22, 24, 1);
         }
 
+        /* Preview icon button */
+        .btn-preview {
+            background-color: rgba(30, 100, 200, 0.8);
+            padding: 6px 9px;
+            font-size: 0.9rem;
+            line-height: 1;
+        }
+
+        .btn-preview:hover {
+            background-color: rgba(20, 80, 170, 1);
+        }
+
+        .btn-actions {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        /* ── Change-password modal ── */
         .modal {
             display: none;
             position: fixed;
@@ -208,6 +227,236 @@
         .modal-content h3 {
             margin-top: 0;
         }
+
+        /* ── Snapshot preview modal ── */
+        #snapshot-modal {
+            display: none;
+            position: fixed;
+            z-index: 3000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.55);
+            align-items: center;
+            justify-content: center;
+        }
+
+        #snapshot-modal.open {
+            display: flex;
+        }
+
+        .snapshot-box {
+            background: #fff;
+            border-radius: 10px;
+            width: 820px;
+            max-width: 95vw;
+            max-height: 88vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25);
+            overflow: hidden;
+        }
+
+        .snapshot-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 22px;
+            border-bottom: 1px solid #eee;
+            background: rgba(134, 22, 24, 0.04);
+            flex-shrink: 0;
+        }
+
+        .snapshot-header h2 {
+            margin: 0;
+            font-size: 1.1rem;
+            color: rgba(134, 22, 24, 1);
+        }
+
+        .snapshot-meta {
+            font-size: 0.8rem;
+            color: #888;
+            margin-top: 3px;
+        }
+
+        .snapshot-close {
+            background: none;
+            border: none;
+            font-size: 1.3rem;
+            color: #666;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            line-height: 1;
+            transition: background 0.2s;
+        }
+
+        .snapshot-close:hover {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .snapshot-body {
+            overflow-y: auto;
+            padding: 20px 22px;
+            flex: 1;
+        }
+
+        /* Section heading inside snapshot */
+        .sn-section-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #222;
+            margin: 22px 0 10px 0;
+            padding-bottom: 5px;
+            border-bottom: 2px solid rgba(134, 22, 24, 0.2);
+        }
+
+        .sn-section-title:first-child {
+            margin-top: 0;
+        }
+
+        /* Interface / table name label */
+        .sn-item-label {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: rgba(134, 22, 24, 0.85);
+            margin: 14px 0 6px 0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .sn-item-label .badge {
+            font-size: 0.72rem;
+            font-weight: 500;
+            padding: 2px 7px;
+            border-radius: 20px;
+            color: white;
+        }
+
+        .badge-connected {
+            background: #22a06b;
+        }
+
+        .badge-disconnected {
+            background: #999;
+        }
+
+        .badge-site {
+            background: #0052cc;
+        }
+
+        .badge-client {
+            background: #6554c0;
+        }
+
+        /* Scrollable card */
+        .sn-card {
+            background: #f8f9fb;
+            border: 1px solid #e4e6ea;
+            border-radius: 7px;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-bottom: 4px;
+        }
+
+        .sn-card:empty::after {
+            content: 'No data';
+            display: block;
+            padding: 12px 14px;
+            color: #bbb;
+            font-size: 0.85rem;
+        }
+
+        /* Peer row inside card */
+        .peer-row {
+            display: flex;
+            flex-direction: column;
+            padding: 10px 14px;
+            border-bottom: 1px solid #e8eaed;
+            font-size: 0.82rem;
+        }
+
+        .peer-row:last-child {
+            border-bottom: none;
+        }
+
+        .peer-row .peer-name {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 3px;
+        }
+
+        .peer-row .peer-detail {
+            color: #555;
+            line-height: 1.5;
+        }
+
+        .peer-row .peer-key {
+            font-family: monospace;
+            font-size: 0.76rem;
+            color: #888;
+            word-break: break-all;
+        }
+
+        .peer-disabled {
+            opacity: 0.55;
+        }
+
+        /* DB table rows */
+        .db-table-wrap {
+            overflow-x: auto;
+        }
+
+        .db-table {
+            width: max-content;
+            min-width: 100%;
+            border-collapse: collapse;
+            font-size: 0.78rem;
+        }
+
+        .db-table th {
+            background: #eff1f5;
+            padding: 6px 10px;
+            text-align: left;
+            font-weight: 600;
+            white-space: nowrap;
+            border-bottom: 1px solid #dde;
+        }
+
+        .db-table td {
+            padding: 5px 10px;
+            border-bottom: 1px solid #eee;
+            white-space: nowrap;
+            max-width: 220px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #444;
+        }
+
+        .db-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .db-table tr:nth-child(even) td {
+            background: #f5f6f9;
+        }
+
+        .sn-empty-msg {
+            color: #aaa;
+            font-size: 0.85rem;
+            padding: 10px 0 4px 0;
+        }
+
+        /* Loading spinner */
+        .sn-loading {
+            text-align: center;
+            padding: 40px 0;
+            color: #999;
+            font-size: 0.95rem;
+        }
     </style>
 </head>
 
@@ -231,13 +480,13 @@
             <button class="sidebar-item" data-section="applications" data-path="/applications">Applications</button>
             <button class="sidebar-item" data-section="access" data-path="/access-rules">Access rules</button>
             <button class="sidebar-item" data-section="audit" data-path="/audit-log">Logging</button>
-            <button class="sidebar-item" data-section="backup" data-path="/backup">Backup & Restore</button>
+            <button class="sidebar-item" data-section="backup" data-path="/backup">Backup &amp; Restore</button>
             <button class="sidebar-item" data-section="settings" data-path="/settings">Settings</button>
         </div>
     </div>
 
     <div id="main-content">
-        <h2 class="section-title">Backup & Restore</h2>
+        <h2 class="section-title">Backup &amp; Restore</h2>
         <div style="margin-bottom:15px;">
             <button id="btn-create-db">Create DB backup</button>
             <button id="btn-create-wg">Create WG config backup</button>
@@ -257,6 +506,7 @@
         </table>
     </div>
 
+    <!-- Change password modal -->
     <div id="change-password-modal" class="modal">
         <div class="modal-content">
             <h3>Change Password</h3>
@@ -270,6 +520,23 @@
             <p id="change-error" class="error"></p>
         </div>
     </div>
+
+    <!-- Snapshot preview modal -->
+    <div id="snapshot-modal">
+        <div class="snapshot-box">
+            <div class="snapshot-header">
+                <div>
+                    <h2>Snapshot Preview</h2>
+                    <div class="snapshot-meta" id="snapshot-meta-info"></div>
+                </div>
+                <button class="snapshot-close" id="snapshot-close-btn" title="Close">✕</button>
+            </div>
+            <div class="snapshot-body" id="snapshot-body">
+                <div class="sn-loading">Loading snapshot…</div>
+            </div>
+        </div>
+    </div>
+
     <script src="/js/layout.js"></script>
     <script src="/js/backup.js"></script>
 </body>

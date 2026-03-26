@@ -1,0 +1,17 @@
+[Unit]
+Description=WireGuard Handshake Monitor
+After=network.target
+
+[Service]
+ExecStart=/bin/sh -c "\
+tcpdump -i ens37 -n -tttt -l 'udp dst port 51000 and udp[8] = 1' \
+| tee -a /etc/wireguard/logs/wgA/handshake.log \
+| python3 /etc/wireguard/scripts/handler.py \
+"
+Restart=always
+RestartSec=3
+
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

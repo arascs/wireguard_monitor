@@ -204,6 +204,15 @@ router.post('/disable-peer', (req, res) => {
             }
         } catch (_) { /* ignore sync errors */ }
 
+        // Audit log
+        try {
+            const { logAction } = require('../auditLogger');
+            const admin = req.session && req.session.user ? req.session.user : 'unknown';
+            logAction(admin, 'disable_peer', { interface: interfaceName, peerIndex });
+        } catch (e) {
+            console.error('main-dashboard disable-peer audit error:', e.message);
+        }
+
         res.json({ success: true });
     } catch (error) {
         console.error('disable-peer error:', error);

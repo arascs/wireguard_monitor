@@ -1420,7 +1420,7 @@ function renderHtmlWithHostname(filePath) {
 }
 
 app.get('/', requireAuth, (req, res) => {
-  const htmlPath = path.join(FRONTEND_DIR, 'main_dashboard.html');
+  const htmlPath = path.join(FRONTEND_DIR, 'index.html');
   res.send(renderHtmlWithHostname(htmlPath));
 });
 
@@ -1446,11 +1446,6 @@ app.get('/dashboard/peer/:id', requireAuth, (req, res) => {
 
 app.get('/settings', requireAuth, (req, res) => {
   const htmlPath = path.join(__dirname, '../frontend/settings.html');
-  res.send(renderHtmlWithHostname(htmlPath));
-});
-
-app.get('/main-dashboard', requireAuth, (req, res) => {
-  const htmlPath = path.join(FRONTEND_DIR, 'main_dashboard.html');
   res.send(renderHtmlWithHostname(htmlPath));
 });
 

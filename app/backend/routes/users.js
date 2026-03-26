@@ -215,7 +215,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       connection = await mysql.createConnection(dbConfig);
       // include status so frontend can know whether a device is enabled or disabled
       const [rows] = await connection.execute(
-        'SELECT id, device_name, username, interface, allowed_ips, public_key, machine_id, expire_date, status FROM devices ORDER BY id DESC'
+        'SELECT id, device_name, username, allowed_ips, public_key, expire_date, status FROM devices ORDER BY id DESC'
       );
       res.json({ success: true, devices: rows });
     } catch (error) {
@@ -229,8 +229,8 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
   });
 
   router.post('/devices/approve', requireAuth, async (req, res) => {
-    const { id, interface, allowedIPs, expireDate } = req.body || {};
-    if (!id || !interface || !allowedIPs) {
+    const { id, allowedIPs, expireDate } = req.body || {};
+    if (!id || !allowedIPs) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
 
@@ -240,7 +240,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
       // Get enrollment request info
       const [reqs] = await connection.execute(
-        'SELECT device_name, username, machine_id FROM device_enrollment_requests WHERE id = ?',
+        'SELECT device_name, username FROM device_enrollment_requests WHERE id = ?',
         [id]
       );
 
@@ -251,7 +251,6 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       const reqItem = reqs[0];
       const deviceName = reqItem.device_name;
       const username = reqItem.username;
-      const machineId = reqItem.machine_id || null;
 
       // Generate key pair
       const privateKey = run('wg genkey').trim();
@@ -269,8 +268,8 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
       // Insert into approved devices table
       await connection.execute(
-        'INSERT INTO devices (device_name, username, interface, allowed_ips, private_key, public_key, machine_id, expire_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [deviceName, username, interface, allowedIPs, privateKeyHash, publicKey, machineId, expireEpoch, 1]
+        'INSERT INTO devices (device_name, username, allowed_ips, private_key, public_key, expire_date, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [deviceName, username, allowedIPs, privateKeyHash, publicKey, expireEpoch, 1]
       );
 
       // audit
@@ -279,7 +278,6 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
         logAction(admin, 'device_approve', {
           device_name: deviceName,
           user: username,
-          interface: interface,
           allowed_ips: allowedIPs,
           public_key: publicKey,
           expire_date: expireEpoch
@@ -292,8 +290,8 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
         [id]
       );
 
-      // Add peer to interface (disabled by default)
-      const CONFIG_FILE = path.join(CONFIG_DIR, `${interface}.conf`);
+      // Add peer to wg2 interface (disabled by default)
+      const CONFIG_FILE = path.join(CONFIG_DIR, 'wg2.conf');
       if (fs.existsSync(CONFIG_FILE)) {
         let configContent = fs.readFileSync(CONFIG_FILE, 'utf8');
 
@@ -378,7 +376,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
     try {
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        'SELECT id, device_name, username, machine_id, status FROM device_enrollment_requests ORDER BY id DESC'
+        'SELECT id, device_name, username, status FROM device_enrollment_requests ORDER BY id DESC'
       );
       res.json({ success: true, requests: rows });
     } catch (error) {
@@ -431,7 +429,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
   // Enroll device (client endpoint)
   router.post('/enroll-device', authenticateToken, async (req, res) => {
-    const { deviceName, machineId } = req.body || {};
+    const { deviceName } = req.body || {};
     const username = req.user.username;
     if (!deviceName) {
       return res.status(400).json({ success: false, error: 'Missing deviceName' });
@@ -453,8 +451,8 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
       // Create enrollment request in separate table
       await connection.execute(
-        'INSERT INTO device_enrollment_requests (device_name, username, machine_id, status) VALUES (?, ?, ?, "pending")',
-        [deviceName, username, machineId || null]
+        'INSERT INTO device_enrollment_requests (device_name, username, status) VALUES (?, ?, "pending")',
+        [deviceName, username]
       );
 
       res.json({ success: true, message: 'Enrollment request submitted' });
@@ -619,78 +617,6 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       res.json({ success: true, expire_date: expireEpoch });
     } catch (error) {
       console.error('Error updating expire date:', error);
-      res.status(500).json({ success: false, error: 'Internal server error' });
-    } finally {
-      if (connection) {
-        await connection.end();
-      }
-    }
-  });
-
-  router.get('/get-pubkey-for-client', authenticateToken, async (req, res) => {
-    const { device_name } = req.query;
-    const username = req.user.username;
-    if (!device_name) {
-      return res.status(400).json({ success: false, error: 'Missing device_name' });
-    }
-
-    let connection;
-    try {
-      connection = await mysql.createConnection(dbConfig);
-      const [devices] = await connection.execute(
-        'SELECT interface FROM devices WHERE username = ? AND device_name = ?',
-        [username, device_name]
-      );
-
-      if (devices.length === 0) {
-        return res.status(404).json({ success: false, error: 'Device not found' });
-      }
-
-      const interfaceName = devices[0].interface;
-      if (!interfaceName) {
-        return res.status(404).json({ success: false, error: 'Interface not found for device' });
-      }
-
-      const configFile = path.join(CONFIG_DIR, `${interfaceName}.conf`);
-      if (!fs.existsSync(configFile)) {
-        return res.status(404).json({ success: false, error: 'Interface config file not found' });
-      }
-
-      const content = fs.readFileSync(configFile, 'utf8');
-      const lines = content.split('\n');
-      let publicKey = '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('[Interface]')) {
-          continue;
-        }
-        if (trimmed.startsWith('[Peer]')) {
-          break;
-        }
-        const match = trimmed.match(/^PublicKey\s*=\s*(.+)$/i);
-        if (match) {
-          publicKey = match[1].trim();
-          break;
-        }
-        const privateKeyMatch = trimmed.match(/^PrivateKey\s*=\s*(.+)$/i);
-        if (privateKeyMatch && !publicKey) {
-          try {
-            publicKey = run(`echo "${privateKeyMatch[1].trim()}" | wg pubkey`).trim();
-            break;
-          } catch (e) {
-            console.error('Error generating public key:', e.message);
-          }
-        }
-      }
-
-      if (!publicKey) {
-        return res.status(404).json({ success: false, error: 'Public key not found' });
-      }
-
-      res.json({ success: true, publicKey, interface: interfaceName });
-    } catch (error) {
-      console.error('Error getting public key:', error);
       res.status(500).json({ success: false, error: 'Internal server error' });
     } finally {
       if (connection) {

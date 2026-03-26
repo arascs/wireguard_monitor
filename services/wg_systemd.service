@@ -1,0 +1,10 @@
+[Unit]
+Description=WireGuard systemd logger
+
+[Service]
+ExecStart=/bin/sh -c 'journalctl -f | grep wireguard >> /var/log/wg_systemd.log'
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

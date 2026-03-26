@@ -1,18 +1,27 @@
 {
     "wgA": [
         {
-            "id": "0",
+            "id": "1",
             "name": "peer B",
             "public_key": "FTqG0S9bkJDfMGKftEBtf4OLpPlVJ/JJvk6LW9Um3hg=",
             "IP_VPN": "10.10.10.2",
             "endpoint": "172.16.0.2:51820"
         },
         {
-            "id": "1",
+            "id": "0",
             "name": "peer C",
             "public_key": "tPNS+/2+WaqfF49ZQiaorIGWIruhZCbnmXlwODc54nA=",
             "IP_VPN": "10.10.10.3",
             "endpoint": "172.16.0.3:51000"
+        }
+    ],
+    "wg2": [
+        {
+            "id": "0",
+            "name": "hungnlq_peerB",
+            "public_key": "fDEi5fpHBmpn9FYtbOTkYZIJg+sx7aYLQSOnIY97xyg=",
+            "IP_VPN": "10.0.0.4",
+            "endpoint": ""
         }
     ]
 }

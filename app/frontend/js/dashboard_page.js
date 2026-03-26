@@ -36,12 +36,12 @@ async function loadInterfaceInfo() {
     try {
         const response = await fetch('/api/config');
         const data = await response.json();
-        
+
         if (data.success && data.config) {
             const ifaceObj = data.config.interface;
             currentInterfaceConfig = ifaceObj || {};
             const interfaceInfo = document.getElementById('interface-info');
-            
+
             interfaceInfo.innerHTML = `
                 <div class="interface-info-grid">
                     <div class="info-item">
@@ -91,14 +91,14 @@ async function loadPeers() {
         const url = interfaceId ? `/api/dashboard/peers?interface=${encodeURIComponent(interfaceId)}` : '/api/dashboard/peers';
         const response = await fetch(url);
         const data = await response.json();
-        
+
         const peersContainer = document.getElementById('peers-container');
-        
+
         if (!Array.isArray(data)) {
             peersContainer.innerHTML = '<div class="error">Error loading peers: Invalid response</div>';
             return;
         }
-        
+
         if (data.length === 0) {
             peersContainer.innerHTML = '<p>No peers configured.</p>';
             return;
@@ -107,16 +107,16 @@ async function loadPeers() {
         // Calculate active/inactive
         const nowSec = Math.floor(Date.now() / 1000);
         let activeCount = 0;
-        
+
         // Xử lý dữ liệu từng peer
         const processedPeers = data.map(peer => {
             // Backend phải trả về 'handshake' là Unix timestamp (int)
             const lastHandshake = parseInt(peer.handshake || 0);
             const diff = nowSec - lastHandshake;
-            
+
             // Active nếu handshake > 0 VÀ cách đây < 180 giây
             let calculatedStatus = 'inactive';
-            
+
             // treat disabled flag coming from backend
             if (peer.isDisabled) {
                 calculatedStatus = 'disabled';
@@ -129,8 +129,8 @@ async function loadPeers() {
             let timeAgo = "Never";
             if (lastHandshake > 0) {
                 if (diff < 60) timeAgo = `${diff}s ago`;
-                else if (diff < 3600) timeAgo = `${Math.floor(diff/60)}m ${diff%60}s ago`;
-                else if (diff < 86400) timeAgo = `${Math.floor(diff/3600)}h ago`;
+                else if (diff < 3600) timeAgo = `${Math.floor(diff / 60)}m ${diff % 60}s ago`;
+                else if (diff < 86400) timeAgo = `${Math.floor(diff / 3600)}h ago`;
                 else timeAgo = new Date(lastHandshake * 1000).toLocaleString();
             }
 
@@ -148,7 +148,7 @@ async function loadPeers() {
 
         peersContainer.innerHTML = '<div class="peers-grid"></div>';
         const peersGrid = peersContainer.querySelector('.peers-grid');
-        
+
         processedPeers.forEach((peer, index) => {
             const peerCard = document.createElement('div');
             peerCard.className = `peer-card ${peer.calculatedStatus}`;
@@ -167,7 +167,7 @@ async function loadPeers() {
             const actionsHtml = `
                 <div style="margin-top:12px; display:flex; gap:6px; flex-wrap:wrap;">
                     <button class="peer-action-btn" data-action="delete" data-index="${peer.id}" style="flex:1;">Delete</button>
-                    <button class="peer-action-btn" data-action="${disabled?'enable':'disable'}" data-index="${peer.id}" style="flex:1;">${disabled?'Enable':'Disable'}</button>
+                    <button class="peer-action-btn" data-action="${disabled ? 'enable' : 'disable'}" data-index="${peer.id}" style="flex:1;">${disabled ? 'Enable' : 'Disable'}</button>
                 </div>`;
 
             peerCard.innerHTML = `
@@ -208,7 +208,7 @@ const txSpeedChart = echarts.init(document.getElementById('txSpeedChart'));
 const rxDropRateChart = echarts.init(document.getElementById('rxDropRateChart'));
 const txDropRateChart = echarts.init(document.getElementById('txDropRateChart'));
 
-let statsHistory = []; 
+let statsHistory = [];
 
 async function fetchStats(startTs = null, endTs = null) {
     try {
@@ -217,18 +217,18 @@ async function fetchStats(startTs = null, endTs = null) {
         if (startTs) params.push(`start=${startTs}`);
         if (endTs) params.push(`end=${endTs}`);
         if (params.length) url += '?' + params.join('&');
-        
+
         const res = await fetch(url);
         if (!res.ok) throw new Error("API Error");
-        
+
         const data = await res.json();
-        
+
         if (Array.isArray(data)) {
-            statsHistory = data; 
+            statsHistory = data;
         } else {
             statsHistory = [data];
         }
-        
+
         updateCharts();
     } catch (e) {
         console.error("Failed to fetch stats:", e);
@@ -239,21 +239,21 @@ async function fetchStats(startTs = null, endTs = null) {
 function calculateMetricRate(data, metricKey) {
     // 1. Lọc ra các bản ghi có chứa metricKey (để tránh việc so sánh với timestamp của file khác)
     const filteredData = data.filter(item => item[metricKey] !== undefined && item[metricKey] !== null);
-    
+
     const times = [];
     const rates = [];
 
     for (let i = 1; i < filteredData.length; i++) {
         const curr = filteredData[i];
-        const prev = filteredData[i-1];
-        
+        const prev = filteredData[i - 1];
+
         // Tính khoảng cách thời gian giữa 2 lần ghi CÙNG LOẠI metric
         const timeDiff = (curr.timestamp - prev.timestamp) / 1000;
 
         if (timeDiff > 0) {
             const valDiff = Math.max(0, curr[metricKey] - prev[metricKey]);
             const rate = valDiff / timeDiff;
-            
+
             times.push(new Date(curr.timestamp).toLocaleTimeString());
             rates.push(rate);
         }
@@ -337,31 +337,31 @@ function updateCharts() {
     });
 }
 
-window.onload = async function() {
+window.onload = async function () {
     const interfaceId = getInterfaceIdFromUrl();
     if (interfaceId) {
         const success = await setInterface(interfaceId);
         if (!success) {
-            document.getElementById('interface-info').innerHTML = 
+            document.getElementById('interface-info').innerHTML =
                 '<div class="error">Error setting interface: ' + interfaceId + '</div>';
             return;
         }
     }
-    
+
     await loadInterfaceInfo();
     checkVPNStatus();
     await loadPeers();
     fetchStats();
-    
-    setInterval(loadPeers, 30000); 
-    setInterval(fetchStats, 60000); 
+
+    setInterval(loadPeers, 30000);
+    setInterval(fetchStats, 60000);
 
     setupInterfaceControls();
     setupPeerModals();
 
     // sidebar activation (reuse layout code)
     initSidebar();
-    
+
     // Filter logic
     document.getElementById('applyFilter').addEventListener('click', () => {
         const startDate = document.getElementById('startDate').value;
@@ -374,7 +374,7 @@ window.onload = async function() {
         const endTs = endDate ? Math.floor(new Date(endDate + 'T23:59:59').getTime() / 1000) : null;
         fetchStats(startTs, endTs);
     });
-    
+
     document.getElementById('clearFilter').addEventListener('click', () => {
         document.getElementById('startDate').value = '';
         document.getElementById('endDate').value = '';
@@ -427,11 +427,11 @@ function updateVpnButton(isConnected) {
 async function toggleVpn() {
     const btn = document.getElementById('start-stop-btn');
     if (btn.textContent === 'Start') {
-        const r = await fetch('/api/connect', {method:'POST'});
+        const r = await fetch('/api/connect', { method: 'POST' });
         const d = await r.json();
         if (d.success) checkVPNStatus();
     } else {
-        const r = await fetch('/api/disconnect', {method:'POST'});
+        const r = await fetch('/api/disconnect', { method: 'POST' });
         const d = await r.json();
         if (d.success) checkVPNStatus();
     }
@@ -462,7 +462,7 @@ function setupInterfaceControls() {
         };
         try {
             const res = await fetch('/api/configure-interface', {
-                method:'POST', headers:{'Content-Type':'application/json'},
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updated)
             });
             const data = await res.json();
@@ -474,7 +474,7 @@ function setupInterfaceControls() {
             } else {
                 alert('Error: ' + data.error);
             }
-        } catch(err){ alert(err.message); }
+        } catch (err) { alert(err.message); }
     });
 
     // generate new key pair from edit modal
@@ -557,8 +557,8 @@ function setupPeerModals() {
         };
         try {
             const res = await fetch('/api/add-peer', {
-                method:'POST', headers:{'Content-Type':'application/json'},
-                body:JSON.stringify(peer)
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(peer)
             });
             const data = await res.json();
             if (data.success) {
@@ -567,7 +567,7 @@ function setupPeerModals() {
             } else {
                 alert('Error: ' + data.error);
             }
-        } catch(err){ alert(err.message); }
+        } catch (err) { alert(err.message); }
     });
 
     // delegate action buttons
@@ -596,12 +596,13 @@ function setupPeerModals() {
                 await fetch('/api/save-config', { method: 'POST' });
                 await loadPeers();
             } else {
-                alert('Error: '+d.error);
+                alert('Error: ' + d.error);
             }
-        } catch(e) {
+        } catch (e) {
             alert(e.message);
         }
-    })};
+    })
+};
 
 // ─── Log viewer modal ────────────────────────────────────────────
 async function openLogModal() {
@@ -637,9 +638,9 @@ async function openLogModal() {
             const lines = logText.split('\n');
             content.innerHTML = lines.map(line => {
                 let color = '#c8d0e0';
-                if (/error|fail|warn/i.test(line)) color = '#ff8080';
-                else if (/success|up|start/i.test(line)) color = '#7ec8a0';
-                const escaped = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                if (/Invalid|fail|warn|unallowed|giving up/i.test(line)) color = '#ff8080';
+                else if (/success|start/i.test(line)) color = '#7ec8a0';
+                const escaped = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
                 return `<div style="color:${color};">${escaped}</div>`;
             }).join('');
             // Scroll to bottom so most recent entries are visible

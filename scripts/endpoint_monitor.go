@@ -55,7 +55,7 @@ func loadConfig(path string) (Config, error) {
 
 func writeLog(event Event) {
 
-	f, err := os.OpenFile("../endpoint_events.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile("/root/wireguard_monitor/wireguard_monitor/app/endpoint_events.json", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Println(err)
 		return
@@ -70,7 +70,7 @@ func writeLog(event Event) {
 
 func main() {
 
-	configFile := "../app/config/peers.json"
+	configFile := "/root/wireguard_monitor/wireguard_monitor/app/config/peers.json"
 
 	cfg, err := loadConfig(configFile)
 	if err != nil {
