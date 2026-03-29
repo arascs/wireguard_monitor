@@ -1,2 +1,0 @@
-{"timestamp":"2026-03-16T23:45:36+07:00","event_name":"peer_endpoint_change","details":{"interface":"wgA","peer_name":"peer B","public_key":"FTqG0S9bkJDfMGKftEBtf4OLpPlVJ/JJvk6LW9Um3hg=","old_endpoint":"172.16.0.2:51820","new_endpoint":"8.8.8.8:51820"}}
-{"timestamp":"2026-03-16T23:45:52+07:00","event_name":"peer_endpoint_change","details":{"interface":"wgA","peer_name":"peer B","public_key":"FTqG0S9bkJDfMGKftEBtf4OLpPlVJ/JJvk6LW9Um3hg=","old_endpoint":"8.8.8.8:51820","new_endpoint":"172.16.0.2:51820"}}

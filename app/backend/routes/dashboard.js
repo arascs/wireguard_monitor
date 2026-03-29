@@ -542,9 +542,9 @@ router.get('/:interface/peer/:peerId/stats', (req, res) => {
 });
 
 // Fetch peer connections from JSON file
-router.get('/:interface/peer/:peerId/connections', (req, res) => {
+router.get('/:interface/peer/:peerName/connections', (req, res) => {
     const interfaceName = req.params.interface;
-    const peerId = req.params.peerId;
+    const peerName = req.params.peerName;
     const STATUS_FILE = '/dev/shm/vpn_live_status.json';
     
     try {
@@ -559,9 +559,9 @@ router.get('/:interface/peer/:peerId/connections', (req, res) => {
         const fileContent = fs.readFileSync(STATUS_FILE, 'utf-8');
         const data = JSON.parse(fileContent);
         
-        // Filter sessions by interface and peer_id
+        // Filter sessions by interface and peer_name
         const filteredSessions = data.sessions.filter(session => {
-            return session.interface === interfaceName && session.peer_id === peerId;
+            return session.interface === interfaceName && session.peer_name === peerName;
         });
         
         res.json({

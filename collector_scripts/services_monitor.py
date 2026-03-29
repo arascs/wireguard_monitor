@@ -1,22 +1,29 @@
 #!/usr/bin/env python3
 import time
-import json
 import subprocess
 import os
 import logging
 import xml.etree.ElementTree as ET
 import shutil
+import json
 from datetime import datetime
+import pymysql
+import ipaddress
 
-# --- CẤU HÌNH ---
-INTERVAL = 5  
-CONF_DIR = "/root/wireguard_monitor/wireguard_monitor/app/config"
+INTERVAL = 5
 LOG_FILE = "/var/log/vpn_monitor.log"
-STATUS_FILE = "/dev/shm/vpn_live_status.json" 
+STATUS_FILE = "/dev/shm/vpn_live_status.json"
 HISTORY_DIR = "/var/log/vpn_history"
 
-# Tự động tìm đường dẫn của lệnh conntrack
 CONNTRACK_CMD = shutil.which("conntrack") or "conntrack"
+
+DB_CONFIG = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': 'root',
+    'database': 'wg_monitor',
+    'cursorclass': pymysql.cursors.DictCursor
+}
 
 logging.basicConfig(
     filename=LOG_FILE,
@@ -27,7 +34,7 @@ logging.basicConfig(
 
 class VPNMonitor:
     def __init__(self):
-        self.peers_map = {}
+        self.peers_list = []
         self.resources_map = {}
         self.sessions = {}
         self.last_load_time = 0
@@ -37,52 +44,81 @@ class VPNMonitor:
 
     def load_config(self):
         try:
-            p_path = f"{CONF_DIR}/peers.json"
-            r_path = f"{CONF_DIR}/resources.json"
+            conn = pymysql.connect(**DB_CONFIG)
+            cursor = conn.cursor()
 
-            p_mtime = os.stat(p_path).st_mtime
-            r_mtime = os.stat(r_path).st_mtime
+            new_peers_list = []
 
-            if p_mtime <= self.last_load_time and r_mtime <= self.last_load_time:
-                return
+            cursor.execute("SELECT id, site_name, site_allowedIPs, interface FROM sites")
+            sites = cursor.fetchall()
+            for site in sites:
+                raw_ips = site['site_allowedIPs'].split(',')
+                for item in raw_ips:
+                    item = item.strip()
+                    if not item: continue
+                    try:
+                        network = ipaddress.ip_network(item, strict=False)
+                        new_peers_list.append({
+                            'network': network,
+                            'id': str(site.get('id', '')),
+                            'name': site['site_name'],
+                            'interface': site.get('interface', 'unknown')
+                        })
+                    except ValueError: continue
 
-            with open(p_path, 'r') as f:
-                data = json.load(f)
-                new_peers = {}
-                for iface_name, peer_list in data.items():
-                    for peer in peer_list:
-                        new_peers[peer['IP_VPN'].strip()] = {
-                            'id': str(peer['id']),
-                            'name': peer['name'],
-                            'interface': iface_name
-                        }
-                self.peers_map = new_peers
+            cursor.execute("SELECT id, device_name, username, allowed_ips, interface FROM devices")
+            devices = cursor.fetchall()
+            for dev in devices:
+                raw_ips = dev['allowed_ips'].split(',')
+                combined_name = f"{dev['username']}_{dev['device_name']}"
+                for item in raw_ips:
+                    item = item.strip()
+                    if not item: continue
+                    try:
+                        network = ipaddress.ip_network(item, strict=False)
+                        new_peers_list.append({
+                            'network': network,
+                            'id': str(dev.get('id', '')),
+                            'name': combined_name,
+                            'interface': dev.get('interface', 'unknown')
+                        })
+                    except ValueError: continue
 
-            with open(r_path, 'r') as f:
-                r_data = json.load(f)
-                new_res = {}
-                for r in r_data.get('resources',[]):
-                    target_ip = r.get('IP') or r.get('IP_VPN')
-                    key = f"{str(target_ip).strip()}:{str(r['port']).strip()}"
-                    new_res[key] = r['name']
-                self.resources_map = new_res
+            self.peers_list = new_peers_list
 
+            cursor.execute("SELECT name, ip, port FROM applications")
+            apps = cursor.fetchall()
+            new_res = {}
+            for app in apps:
+                key = f"{str(app['ip']).strip()}:{str(app['port']).strip()}"
+                new_res[key] = app['name']
+            self.resources_map = new_res
+
+            cursor.close()
+            conn.close()
             self.last_load_time = time.time()
-            logging.info(f"Config reloaded -> Peers loaded: {list(self.peers_map.keys())}")
-            logging.info(f"Config reloaded -> Resources loaded: {list(self.resources_map.keys())}")
+            logging.info(f"Config reloaded. Peers: {len(self.peers_list)}, Resources: {len(self.resources_map)}")
 
         except Exception as e:
             logging.error(f"Failed to load config: {e}")
+
+    def find_peer(self, ip_str):
+        try:
+            addr = ipaddress.ip_address(ip_str)
+            for peer in self.peers_list:
+                if addr in peer['network']:
+                    return peer
+        except ValueError:
+            pass
+        return None
 
     def get_conntrack_table(self):
         try:
             output = subprocess.check_output([CONNTRACK_CMD, "-L", "-o", "xml"],
                 stderr=subprocess.DEVNULL
             ).decode("utf-8", errors="ignore")
-
             start = output.find("<conntrack>")
             if start == -1: return None
-            
             return ET.fromstring(output[start:])
         except Exception as e:
             logging.error(f"Conntrack fetch error: {e}")
@@ -128,35 +164,24 @@ class VPNMonitor:
                 flows = root.findall('flow')
                 for flow in flows:
                     try:
-                        meta = flow.find('meta')
-                        if meta is None: continue
+                        meta_tags = flow.findall('meta')
+                        if not meta_tags: continue
 
-                        l3 = meta.find('layer3')
-                        l4 = meta.find('layer4')
-
+                        l3 = meta_tags[0].find('layer3')
+                        l4 = meta_tags[0].find('layer4')
                         if l3 is None or l4 is None: continue
                         if l3.get('protoname') != 'ipv4': continue
 
-                        # Bắt buộc .strip() để xóa các khoảng trắng rác từ file XML
-                        src_node = l3.find('src')
-                        dst_node = l3.find('dst')
-                        sport_node = l4.find('sport')
-                        dport_node = l4.find('dport')
-
-                        if None in (src_node, dst_node, sport_node, dport_node):
-                            continue
-
-                        src_ip = src_node.text.strip()
-                        dst_ip = dst_node.text.strip()
-                        sport = sport_node.text.strip()
-                        dport = dport_node.text.strip()
+                        src_ip = l3.find('src').text.strip()
+                        dst_ip = l3.find('dst').text.strip()
+                        sport = l4.find('sport').text.strip()
+                        dport = l4.find('dport').text.strip()
 
                         protocol = l4.get('protoname')
                         if protocol: protocol = protocol.strip().lower()
                         if protocol not in['tcp', 'udp']: continue
 
-                        # --- KIỂM TRA KHỚP (MATCHING) ---
-                        peer_info = self.peers_map.get(src_ip)
+                        peer_info = self.find_peer(src_ip)
                         if not peer_info: continue
 
                         res_key = f"{dst_ip}:{dport}"
@@ -170,14 +195,13 @@ class VPNMonitor:
                         direction2_packets, direction2_bytes = 0, 0
                         total_bytes = 0
 
-                        meta_tags = flow.findall('meta')
                         if len(meta_tags) >= 1:
                             counters1 = meta_tags[0].find('counters')
                             if counters1 is not None:
                                 p1 = counters1.find('packets')
                                 b1 = counters1.find('bytes')
                                 if p1 is not None: direction1_packets = int(p1.text)
-                                if b1 is not None: 
+                                if b1 is not None:
                                     direction1_bytes = int(b1.text)
                                     total_bytes += direction1_bytes
 
@@ -187,7 +211,7 @@ class VPNMonitor:
                                 p2 = counters2.find('packets')
                                 b2 = counters2.find('bytes')
                                 if p2 is not None: direction2_packets = int(p2.text)
-                                if b2 is not None: 
+                                if b2 is not None:
                                     direction2_bytes = int(b2.text)
                                     total_bytes += direction2_bytes
 
@@ -213,7 +237,7 @@ class VPNMonitor:
                             self.sessions[session_key]['direction1'] = {'packets': direction1_packets, 'bytes': direction1_bytes}
                             self.sessions[session_key]['direction2'] = {'packets': direction2_packets, 'bytes': direction2_bytes}
 
-                    except AttributeError:
+                    except (AttributeError, ValueError):
                         continue
 
             active_keys = list(self.sessions.keys())

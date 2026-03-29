@@ -112,6 +112,7 @@ async function loadPeerPage() {
 
         // Dựng khung và điền dữ liệu 
         renderSkeleton(peerRes);
+        currentPeerName = peerRes.name || null;
         
         // Khởi tạo chart và nạp dữ liệu stats đã lấy được
         initChartFrames();
@@ -121,7 +122,7 @@ async function loadPeerPage() {
         }
 
         // Tải nốt phần connections
-        loadPeerConnections(interfaceId, peerId);
+        loadPeerConnections(interfaceId, currentPeerName);
 
     } catch (error) {
         console.error("Error loading peer page:", error);
@@ -230,9 +231,13 @@ function updatePeerCharts() {
 }
 
 // Load peer connections from JSON file
-async function loadPeerConnections(interfaceId, peerId) {
+async function loadPeerConnections(interfaceId, peerName) {
     try {
-        const url = `/api/dashboard/${encodeURIComponent(interfaceId)}/peer/${peerId}/connections`;
+        if (!peerName) {
+            console.warn('Peer name is not available for connections request');
+            return;
+        }
+        const url = `/api/dashboard/${encodeURIComponent(interfaceId)}/peer/${encodeURIComponent(peerName)}/connections`;
         console.log('Fetching connections from:', url);
         const response = await fetch(url);
         
@@ -346,6 +351,7 @@ function toggleConnectionDetails(index) {
 // Peer Charts Logic
 let peerStatsHistory = [];
 let peerRxSpeedChart, peerTxSpeedChart;
+let currentPeerName = null;
 
 async function fetchPeerStats(interfaceId, peerId, startTs = null, endTs = null) {
     try {
@@ -506,7 +512,9 @@ function initPeerDetail() {
         const { interfaceId, peerId } = getIdsFromUrl();
         if (interfaceId && peerId !== null) {
             refreshPeerDataOnly();
-            loadPeerConnections(interfaceId, peerId);
+            if (currentPeerName) {
+                loadPeerConnections(interfaceId, currentPeerName);
+            }
             fetchPeerStatsData(interfaceId, peerId).then(data => {
                 peerStatsHistory = data;
                 updatePeerCharts();

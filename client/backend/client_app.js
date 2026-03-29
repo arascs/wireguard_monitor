@@ -26,8 +26,32 @@ function run(cmd) {
   }
 }
 
+// Ensure client keypair exists locally. The server only needs the public key.
+function ensureClientKeypair() {
+  let privateKey = '';
+  if (fs.existsSync(CLIENT_PRIVATE_KEY_FILE)) {
+    privateKey = fs.readFileSync(CLIENT_PRIVATE_KEY_FILE, 'utf8').trim();
+  }
+
+  if (!privateKey) {
+    privateKey = run('wg genkey').trim();
+    fs.writeFileSync(CLIENT_PRIVATE_KEY_FILE, privateKey, { mode: 0o600 });
+  }
+
+  const publicKey = run(`echo "${privateKey}" | wg pubkey`).trim();
+
+  // Optional: persist public key for troubleshooting/inspection.
+  try {
+    fs.writeFileSync(CLIENT_PUBLIC_KEY_FILE, publicKey, { mode: 0o600 });
+  } catch (e) {
+    // ignore write errors; public key is still computed above
+  }
+
+  return { privateKey, publicKey };
+}
+
 // Helper to configure WireGuard interface from login response
-function configureClientInterface({ allowedIPs, serverPublicKey, serverEndpoint }) {
+function configureClientInterface({ allowedIPs, serverPublicKey, serverEndpoint, serverAllowedIPs }) {
   const CLIENT_INTERFACE = 'wg_client';
   const CLIENT_CONFIG_FILE = path.join(CONFIG_DIR, `${CLIENT_INTERFACE}.conf`);
   const privateKey = fs.readFileSync(CLIENT_PRIVATE_KEY_FILE, 'utf8').trim();
@@ -40,7 +64,7 @@ ListenPort = 51000
 
 [Peer]
 PublicKey = ${serverPublicKey}
-AllowedIPs = 0.0.0.0/0
+AllowedIPs = ${serverAllowedIPs}
 Endpoint = ${endpoint}
 PersistentKeepalive = 25
 `;
@@ -161,6 +185,8 @@ app.post('/api/client/enroll/:ip/:port', async (req, res) => {
       console.warn('Could not read /etc/machine-id:', e.message);
     }
 
+    const { publicKey } = ensureClientKeypair();
+
     const enrollUrl = `http://${ip}:${port}/api/enroll-device`;
     const r = await fetch(enrollUrl, {
       method: 'POST',
@@ -168,7 +194,7 @@ app.post('/api/client/enroll/:ip/:port', async (req, res) => {
         'Content-Type': 'application/json',
         'Authorization': authHeader
       },
-      body: JSON.stringify({ username, deviceName, machineId })
+      body: JSON.stringify({ username, deviceName, machineId, publicKey })
     });
     const data = await r.json();
     res.status(r.status).json(data);
@@ -247,7 +273,8 @@ app.post('/api/client/connect/:ip/:port', async (req, res) => {
     configureClientInterface({
       allowedIPs: data.allowedIPs,
       serverPublicKey: data.serverPublicKey,
-      serverEndpoint: data.serverEndpoint || `${ip}:51820`
+      serverEndpoint: data.serverEndpoint || `${ip}:51820`,
+      serverAllowedIPs: data.serverAllowedIPs
     });
 
     // 7d. Save server public key to VPN_servers.json
@@ -385,7 +412,7 @@ app.get('/api/client/connection-status', (req, res) => {
       const parts = line.trim().split(/\s+/);
 
       if (parts.length >= 8) {
-        const publicKey = parts[0];          // ✔ đúng field
+        const publicKey = parts[0];        
         const handshake = parseInt(parts[4], 10);
 
         if (!isNaN(handshake)) {

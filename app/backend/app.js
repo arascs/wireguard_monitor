@@ -16,7 +16,7 @@ const createAccessRuleRoutes = require('./routes/accessRules');
 const createAuthRoutes = require('./routes/auth');
 const createSessionLogRoutes = require('./routes/sessionLogs');
 const createBackupRoutes = require('./routes/backups');
-const mainDashboardRoutes = require('./routes/main_dashboard');
+const createMainDashboardRoutes = require('./routes/main_dashboard');
 const { HOSTNAME } = require('./config');
 const mysql = require('mysql2/promise');
 const { logAction, getLogs, getSecurityEvents } = require('./auditLogger');
@@ -104,7 +104,12 @@ let config = {
 
 
 app.use(express.json());
-app.use(session({ secret: 'wireguard-secret-key', resave: false, saveUninitialized: false }));
+app.use(session({
+  secret: 'wireguard-secret-key',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { maxAge: 3600000 }
+}));
 
 function run(cmd) {
   try {
@@ -309,7 +314,7 @@ function loadConfigFromFile() {
             config.interface.keyExpiryDays = parseInt(value) || loadGlobalSettings().keyExpiryDays;
             continue;
           }
-          if (lowerKey === 'type' && section === 'interface') {
+          if (lowerKey === 'type' && (section === 'interface' || section === null)) {
             config.interface.type = value;
             continue;
           }
@@ -956,9 +961,8 @@ app.post('/api/configure-interface', (req, res) => {
 });
 
 // Add peer
-app.post('/api/add-peer', (req, res) => {
+app.post('/api/add-peer', async (req, res) => {
   try {
-    // Check if key is expired
     if (isKeyExpired()) {
       return res.status(403).json({
         success: false,
@@ -966,11 +970,19 @@ app.post('/api/add-peer', (req, res) => {
       });
     }
 
-    // Check if interface is configured
     if (!config.interface.privateKey || !config.interface.address) {
       return res.status(400).json({
         success: false,
         error: 'Interface not configured. Please configure interface first.'
+      });
+    }
+
+    const ifaceType = config.interface.type || '';
+
+    if (ifaceType === 'Client') {
+      return res.status(400).json({
+        success: false,
+        error: 'Peer type Client can only be added by approving devices.'
       });
     }
 
@@ -990,9 +1002,36 @@ app.post('/api/add-peer', (req, res) => {
 
     config.peers.push(peer);
     updateSharedConfig();
+
+    try {
+      saveConfigToFile();
+    } catch (saveErr) {
+      return res.status(saveErr.statusCode || 500).json({ success: false, error: saveErr.message });
+    }
+
+    if (ifaceType === 'Site') {
+      try {
+        const conn = await mysql.createConnection(dbConfig);
+        await conn.execute(
+          'INSERT INTO sites (site_name, site_endpoint, site_pubkey, site_allowedIPs, site_persistent_keepalive, `interface`) VALUES (?, ?, ?, ?, ?, ?)',
+          [
+            peer.name,
+            peer.endpoint,
+            peer.publicKey,
+            peer.allowedIPs,
+            peer.persistentKeepalive ? parseInt(peer.persistentKeepalive) : null,
+            INTERFACE
+          ]
+        );
+        await conn.end();
+      } catch (dbErr) {
+        console.error('Error saving site to DB:', dbErr.message);
+      }
+    }
+
     try {
       const admin = req.session && req.session.user ? req.session.user : 'unknown';
-      logAction(admin, 'create_peer', { peer: config.peers[idx] });
+      logAction(admin, 'create_peer', { peer });
     } catch (e) { }
     res.json({ success: true, peer, index: config.peers.length - 1 });
   } catch (error) {
@@ -1048,7 +1087,7 @@ app.put('/api/edit-peer/:index', (req, res) => {
 });
 
 // Delete peer
-app.delete('/api/delete-peer/:index', (req, res) => {
+app.delete('/api/delete-peer/:index', async (req, res) => {
   try {
     // Check if key is expired
     if (isKeyExpired()) {
@@ -1060,11 +1099,24 @@ app.delete('/api/delete-peer/:index', (req, res) => {
 
     const idx = parseInt(req.params.index);
     if (idx >= 0 && idx < config.peers.length) {
+      const peer = config.peers[idx];
+      const publicKey = peer.publicKey;
       config.peers.splice(idx, 1);
       updateSharedConfig();
+
+      if (publicKey) {
+        try {
+          const conn = await mysql.createConnection(dbConfig);
+          await conn.execute('DELETE FROM sites WHERE site_pubkey = ?', [publicKey]);
+          await conn.end();
+        } catch (dbErr) {
+          console.error('Error deleting site from DB:', dbErr.message);
+        }
+      }
+
       try {
         const admin = req.session && req.session.user ? req.session.user : 'unknown';
-        logAction(admin, 'delete_peer', { peer: config.peers[idx] });
+        logAction(admin, 'delete_peer', { peer });
       } catch (e) { }
       res.json({ success: true });
     } else {
@@ -1076,7 +1128,8 @@ app.delete('/api/delete-peer/:index', (req, res) => {
 });
 
 // Enable peer
-app.post('/api/enable-peer/:index', (req, res) => {
+app.post('/api/enable-peer/:index', async (req, res) => {
+  let connection;
   try {
     // Check if key is expired
     if (isKeyExpired()) {
@@ -1088,6 +1141,18 @@ app.post('/api/enable-peer/:index', (req, res) => {
 
     const idx = parseInt(req.params.index);
     if (idx >= 0 && idx < config.peers.length) {
+      const peer = config.peers[idx];
+      if (config.interface.type && config.interface.type.toLowerCase() === 'client' && peer.publicKey) {
+        connection = await mysql.createConnection(dbConfig);
+        const [rows] = await connection.execute(
+          'SELECT status FROM devices WHERE public_key = ? LIMIT 1',
+          [peer.publicKey]
+        );
+        if (rows.length > 0 && parseInt(rows[0].status, 10) === 0) {
+          return res.status(403).json({ success: false, error: 'Device disabled' });
+        }
+      }
+
       config.peers[idx].enabled = true;
       updateSharedConfig();
       // audit log
@@ -1101,6 +1166,10 @@ app.post('/api/enable-peer/:index', (req, res) => {
     }
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
+  } finally {
+    if (connection) {
+      try { await connection.end(); } catch (e) { }
+    }
   }
 });
 
@@ -1354,6 +1423,9 @@ app.use('/api', createSessionLogRoutes({ requireAuth, HISTORY_DIR }));
 // backup APIs
 app.use('/api', createBackupRoutes({ requireAuth, BACKUP_DIR, CONFIG_DIR, dbConfig }));
 
+// Get hostname API for frontend navbar
+app.get('/api/hostname', (req, res) => res.json({ success: true, hostname: HOSTNAME }));
+
 // Get VPN status
 app.get('/api/vpn-status', (req, res) => {
   try {
@@ -1475,7 +1547,7 @@ app.get('/access-rules', requireAuth, (req, res) => {
 });
 
 app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/main-dashboard', mainDashboardRoutes);
+app.use('/api/main-dashboard', createMainDashboardRoutes({ mysql, dbConfig }));
 
 app.use('/api', createAuthRoutes({ jwt, JWT_SECRET, mysql, dbConfig }));
 
@@ -1536,9 +1608,8 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
 
     connection = await mysql.createConnection(dbConfig);
 
-    // Get device info — include `interface` column to know which wg interface to use
     const [devices] = await connection.execute(
-      'SELECT allowed_ips, public_key, status, `interface` FROM devices WHERE username = ? AND device_name = ?',
+      'SELECT allowed_ips, public_key, status, expire_date, `interface` FROM devices WHERE username = ? AND device_name = ?',
       [username, deviceName]
     );
 
@@ -1548,8 +1619,15 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
       return res.status(403).json({ success: false, error: 'Device not enrolled' });
     }
 
+    const deviceRow = devices[0];
+    const deviceStatus = parseInt(deviceRow.status, 10);
+    if (deviceStatus === 0) {
+      return res.status(403).json({ success: false, error: 'Device disabled' });
+    }
+
     const now = Math.floor(Date.now() / 1000);
-    if (devices[0].expire_date < now) {
+    const expireDate = deviceRow.expire_date ? parseInt(deviceRow.expire_date, 10) : null;
+    if (expireDate !== null && expireDate < now) {
       const c2 = await mysql.createConnection(dbConfig);
       await c2.execute(
         'UPDATE devices SET status = 0 WHERE username = ? AND device_name = ?',
@@ -1557,10 +1635,6 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
       );
       await c2.end();
       return res.status(403).json({ success: false, error: 'Device expired' });
-    }
-
-    if (devices[0].status === 0) {
-      return res.status(403).json({ success: false, error: 'Device disabled' });
     }
 
     const device = devices[0];
@@ -1620,6 +1694,8 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
         const disableHours = currentSettings.peerDisableHours || 12;
         const unitName = `wg-peer-expire-${username}-${deviceName}`;
         const escapedKey = publicKey.replace(/"/g, '\\"');
+
+        try { run(`systemctl stop ${unitName}.timer`); } catch (_) { /* unit may not exist */ }
         try { run(`systemctl stop ${unitName}.service`); } catch (_) { /* unit may not exist */ }
         try { run(`systemctl reset-failed ${unitName}.service`); } catch (_) { /* ignore */ }
         run(`systemd-run --on-active=${disableHours}h --unit=${unitName} /usr/local/bin/wg_disable_peer.sh "${targetIface}" "${escapedKey}"`);
@@ -1633,7 +1709,8 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
       success: true,
       allowedIPs,
       serverPublicKey: config.interface.publicKey,
-      serverEndpoint: '172.16.0.128:51001'
+      serverEndpoint: '172.16.0.128:51001',
+      serverAllowedIPs: '10.0.0.1/32, 192.168.220.0/24'
     });
 
   } catch (error) {

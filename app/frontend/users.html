@@ -6,175 +6,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
     <style>
-        body {
-            font-family: 'Roboto', sans-serif;
-            max-width: none;
-            margin: 0;
-            padding: 70px 20px 20px 220px;
-            background-color: #f0f0f0;
-            color: #333;
-            font-size: 16px;
-            line-height: 1.6;
-        }
-
-        h1 {
-            font-size: 2rem;
-            font-weight: 700;
-        }
-
-        h2 {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: rgba(134, 22, 24, 1);
-        }
-
-        p {
-            font-size: 1rem;
-            margin: 0.5rem 0;
-        }
-
-        .navbar {
-            background-color: rgba(134, 22, 24, 0.9);
-            color: white;
-            padding: 10px 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            z-index: 1000;
-            box-sizing: border-box;
-        }
-
-        .navbar h1 {
-            margin: 0;
-            font-weight: 700;
-        }
-
-        .hostname-display {
-            color: white;
-            font-size: 0.85rem;
-            margin-right: 10px;
-            padding: 6px 14px;
-            font-weight: 500;
-            background-color: rgba(255, 255, 255, 0.15);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 6px;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .nav-buttons {
-            display: flex;
-            gap: 10px;
-            margin-right: 20px;
-        }
-
-        .nav-btn {
-            text-decoration: none;
-            padding: 8px 15px;
-            border-radius: 5px;
-            background-color: rgba(134, 22, 24, 0.8);
-            color: white;
-            transition: background-color 0.3s;
-            font-weight: 500;
-        }
-
-        .nav-btn:hover,
-        .nav-btn.active {
-            background-color: rgba(134, 22, 24, 1);
-        }
-
-        .sidebar {
-            position: fixed;
-            top: 60px;
-            left: 0;
-            bottom: 0;
-            width: 200px;
-            background-color: #ffffff;
-            box-shadow: 2px 0 8px rgba(0, 0, 0, 0.08);
-            padding: 15px 10px;
-            box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .sidebar-title {
-            font-weight: 600;
-            margin-bottom: 5px;
-            color: rgba(134, 22, 24, 1);
-        }
-
-        .sidebar-menu {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .sidebar-item {
-            border: none;
-            border-radius: 5px;
-            padding: 8px 10px;
-            text-align: left;
-            background-color: transparent;
-            color: #333;
-            font-size: 0.95rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background-color 0.2s, color 0.2s;
-        }
-
-        .sidebar-item.active {
-            background-color: rgba(134, 22, 24, 0.1);
-            color: rgba(134, 22, 24, 1);
-        }
-
-        .change-password-form {
-            display: none;
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: white;
-            padding: 25px;
-            border-radius: 5px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-        }
-
-        .change-password-form input,
-        .change-password-form textarea {
-            display: block;
-            margin: 10px 0;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            font-size: 1rem;
-        }
-
-        button {
-            cursor: pointer;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            background-color: rgba(134, 22, 24, 0.8);
-            color: white;
-            transition: background-color 0.3s;
-            font-weight: 500;
-            font-size: 1rem;
-        }
-
-        button:hover {
-            background-color: rgba(134, 22, 24, 1);
-        }
-
         .section-title {
             color: rgba(134, 22, 24, 1);
             margin-top: 10px;
@@ -225,6 +58,23 @@
             background-color: #fcfcfc;
         }
 
+        button {
+            cursor: pointer;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            background-color: rgba(134, 22, 24, 0.8);
+            color: white;
+            transition: background-color 0.3s;
+            font-weight: 500;
+            font-size: 0.9rem;
+            font-family: inherit;
+        }
+
+        button:hover {
+            background-color: rgba(134, 22, 24, 1);
+        }
+
         .btn-delete {
             padding: 6px 12px;
             background-color: #dc3545;
@@ -238,29 +88,6 @@
 </head>
 
 <body data-current="users">
-    <div class="navbar">
-        <h1>WireGuard VPN Manager</h1>
-        <div class="nav-buttons">
-            <span class="hostname-display"><span></span><strong>{{HOSTNAME}}</strong></span>
-            <a href="/" class="nav-btn">Home</a>
-            <button id="change-password-btn" class="nav-btn">Change Password</button>
-            <button id="logout-btn" class="nav-btn">Logout</button>
-        </div>
-    </div>
-
-    <div class="sidebar">
-        <div class="sidebar-menu">
-            <button class="sidebar-item" data-section="main-dashboard" data-path="/">Dashboard</button>
-            <button class="sidebar-item" data-section="connections" data-path="/interfaces">Interfaces</button>
-            <button class="sidebar-item" data-section="users" data-path="/users">Identity</button>
-            <button class="sidebar-item" data-section="devices" data-path="/devices">Devices</button>
-            <button class="sidebar-item" data-section="applications" data-path="/applications">Applications</button>
-            <button class="sidebar-item" data-section="access" data-path="/access-rules">Access rules</button>
-            <button class="sidebar-item" data-section="audit" data-path="/audit-log">Logging</button>
-            <button class="sidebar-item" data-section="backup" data-path="/backup">Backup & Restore</button>
-            <button class="sidebar-item" data-section="settings" data-path="/settings">Settings</button>
-        </div>
-    </div>
 
     <div id="main-content">
         <h2 class="section-title">Identity</h2>
@@ -294,20 +121,8 @@
         </table>
     </div>
 
-    <div id="change-password-modal" class="change-password-form">
-        <h3>Change Password</h3>
-        <form id="change-password-form">
-            <input type="password" id="current-password" placeholder="Current Password" required>
-            <input type="password" id="new-password" placeholder="New Password" required>
-            <input type="password" id="confirm-password" placeholder="Confirm New Password" required>
-            <button type="submit">Change</button>
-            <button type="button" id="cancel-change">Cancel</button>
-        </form>
-        <p id="change-error" class="error"></p>
-    </div>
-
-    <script src="js/layout.js"></script>
-    <script src="js/users.js"></script>
+    <script src="/js/navbar.js"></script>
+    <script src="/js/users.js"></script>
 </body>
 
 </html>

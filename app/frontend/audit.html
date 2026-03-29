@@ -6,140 +6,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
     <style>
-        body {
-            font-family: 'Roboto', sans-serif;
-            max-width: none;
-            margin: 0;
-            padding: 70px 20px 20px 220px;
-            background-color: #f0f0f0;
-            color: #333;
-            font-size: 16px;
-            line-height: 1.6;
-        }
-
-        .navbar {
-            background-color: rgba(134, 22, 24, 0.9);
-            color: white;
-            padding: 10px 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            z-index: 1000;
-            box-sizing: border-box;
-        }
-
-        /* navbar button group */
-        .nav-buttons {
-            display: flex;
-            gap: 10px;
-            margin-right: 20px;
-        }
-
-        .nav-btn {
-            text-decoration: none;
-            padding: 8px 15px;
-            border-radius: 5px;
-            background-color: rgba(134, 22, 24, 0.8);
-            color: white;
-            transition: background-color 0.3s;
-            font-weight: 500;
-        }
-
-        .nav-btn:hover,
-        .nav-btn.active {
-            background-color: rgba(134, 22, 24, 1);
-        }
-
-        .navbar h1 {
-            margin: 0;
-            font-weight: 700;
-        }
-
-        h1 {
-            font-size: 2rem;
-            font-weight: 700;
-        }
-
         h2 {
             font-size: 1.5rem;
             font-weight: 600;
             color: rgba(134, 22, 24, 1);
-        }
-
-        p {
-            font-size: 1rem;
-            margin: 0.5rem 0;
-        }
-
-        .hostname-display {
-            color: white;
-            font-size: 0.85rem;
-            margin-right: 10px;
-            padding: 6px 14px;
-            font-weight: 500;
-            background-color: rgba(255, 255, 255, 0.15);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 6px;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .hostname-display strong {
-            font-weight: 700;
-        }
-
-        .sidebar {
-            position: fixed;
-            top: 60px;
-            left: 0;
-            bottom: 0;
-            width: 200px;
-            background-color: #ffffff;
-            box-shadow: 2px 0 8px rgba(0, 0, 0, 0.08);
-            padding: 15px 10px;
-            box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .sidebar-item {
-            border: none;
-            border-radius: 5px;
-            padding: 8px 10px;
-            text-align: left;
-            background-color: transparent;
-            color: #333;
-            font-size: 0.95rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background-color 0.2s, color 0.2s;
-        }
-
-        .sidebar-item.active {
-            background-color: rgba(134, 22, 24, 0.1);
-            color: rgba(134, 22, 24, 1);
-        }
-
-        .sidebar-title {
-            font-weight: 600;
-            margin-bottom: 5px;
-            color: rgba(134, 22, 24, 1);
-        }
-
-        .sidebar-menu {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
         }
 
         .simple-table {
@@ -177,45 +49,72 @@
             transition: background-color 0.3s;
             font-weight: 500;
             font-size: 0.85rem;
+            font-family: inherit;
         }
 
         button:hover {
             background-color: rgba(134, 22, 24, 1);
         }
 
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 2000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-        }
-
+        /* ── Detail modal ── */
         .modal-content {
-            background-color: white;
-            margin: 10% auto;
-            padding: 30px;
-            border: 1px solid #888;
-            border-radius: 5px;
-            width: 500px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+            width: 520px;
+            padding: 28px 32px;
         }
 
-        .modal-content h2,
         .modal-content h3 {
-            margin-top: 0;
+            margin: 0 0 18px;
+            color: rgba(134, 22, 24, 1);
+            font-size: 1.1rem;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
         }
 
-        /* tabs for audit/session (reusing device styles) */
+        .modal-close {
+            position: absolute;
+            top: 14px;
+            right: 18px;
+            background: none;
+            border: none;
+            font-size: 1.3rem;
+            color: #888;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+
+        .modal-close:hover {
+            color: #333;
+            background: none;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 140px 1fr;
+            gap: 8px 12px;
+            font-size: 0.9rem;
+        }
+
+        .detail-label {
+            font-weight: 600;
+            color: #555;
+            text-transform: capitalize;
+            padding-top: 2px;
+        }
+
+        .detail-value {
+            color: #222;
+            word-break: break-all;
+        }
+
+        /* ── Tabs ── */
         .tab-btn {
             background: none;
             border: none;
             padding: 10px 20px;
             cursor: pointer;
             transition: color 0.2s, border-color 0.2s;
+            font-family: inherit;
         }
 
         .tab-btn.active {
@@ -234,13 +133,7 @@
             background: none;
         }
 
-        /* old log-tabs rules kept for compatibility */
-        #log-tabs .log-tab.active {
-            background-color: #e0e0e0;
-            font-weight: 600;
-        }
-
-        /* â”€â”€ Filter panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+        /* ── Filter panel ── */
         .filter-toolbar {
             display: flex;
             align-items: center;
@@ -286,6 +179,7 @@
             flex-direction: column;
             gap: 4px;
             min-width: 160px;
+            position: relative;
         }
 
         .filter-field label {
@@ -296,7 +190,8 @@
             letter-spacing: 0.04em;
         }
 
-        .filter-field input {
+        .filter-field input,
+        .filter-field select {
             padding: 6px 10px;
             border: 1px solid #ccc;
             border-radius: 5px;
@@ -307,9 +202,46 @@
             background: #fafafa;
         }
 
-        .filter-field input:focus {
+        .filter-field input:focus,
+        .filter-field select:focus {
             border-color: rgba(134, 22, 24, 0.55);
             background: #fff;
+        }
+
+        /* Combo dropdown */
+        .combo-wrap {
+            position: relative;
+        }
+
+        .combo-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-top: none;
+            border-radius: 0 0 5px 5px;
+            max-height: 108px;
+            overflow-y: auto;
+            z-index: 500;
+            display: none;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08);
+        }
+
+        .combo-dropdown.open {
+            display: block;
+        }
+
+        .combo-option {
+            padding: 6px 10px;
+            font-size: 0.88rem;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .combo-option:hover {
+            background: rgba(134, 22, 24, 0.08);
         }
 
         .filter-actions {
@@ -333,33 +265,61 @@
         .btn-filter-reset:hover {
             background: #f0f0f0;
         }
+
+        /* ── Pagination ── */
+        .pagination-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+
+        .pagination-bar select {
+            padding: 5px 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-family: inherit;
+            background: #fafafa;
+            cursor: pointer;
+        }
+
+        .pagination-bar span {
+            font-size: 0.85rem;
+            color: #555;
+        }
+
+        .page-btn {
+            background: none;
+            border: 1px solid #ccc;
+            color: #444;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            min-width: 32px;
+        }
+
+        .page-btn:hover {
+            background: rgba(134, 22, 24, 0.07);
+            border-color: rgba(134, 22, 24, 0.4);
+            color: rgba(134, 22, 24, 1);
+        }
+
+        .page-btn.active {
+            background: rgba(134, 22, 24, 0.85);
+            color: white;
+            border-color: transparent;
+        }
+
+        .page-btn:disabled {
+            opacity: 0.35;
+            cursor: default;
+        }
     </style>
 </head>
 
 <body data-current="audit">
-    <div class="navbar">
-        <h1>WireGuard VPN Manager</h1>
-        <div class="nav-buttons">
-            <span class="hostname-display"><span></span><strong>{{HOSTNAME}}</strong></span>
-            <a href="/" class="nav-btn">Home</a>
-            <button id="change-password-btn" class="nav-btn">Change Password</button>
-            <button id="logout-btn" class="nav-btn">Logout</button>
-        </div>
-    </div>
-
-    <div class="sidebar">
-        <div class="sidebar-menu">
-            <button class="sidebar-item" data-section="main-dashboard" data-path="/">Dashboard</button>
-            <button class="sidebar-item" data-section="connections" data-path="/interfaces">Interfaces</button>
-            <button class="sidebar-item" data-section="users" data-path="/users">Identity</button>
-            <button class="sidebar-item" data-section="devices" data-path="/devices">Devices</button>
-            <button class="sidebar-item" data-section="applications" data-path="/applications">Applications</button>
-            <button class="sidebar-item" data-section="access" data-path="/access-rules">Access rules</button>
-            <button class="sidebar-item" data-section="audit" data-path="/audit-log">Logging</button>
-            <button class="sidebar-item" data-section="backup" data-path="/backup">Backup &amp; Restore</button>
-            <button class="sidebar-item" data-section="settings" data-path="/settings">Settings</button>
-        </div>
-    </div>
 
     <div id="main-content">
         <!-- Tab bar -->
@@ -377,7 +337,7 @@
             <button class="btn-filter-toggle" id="btn-toggle-filter">&#x25BC; Filter</button>
         </div>
 
-        <!-- â”€â”€ Audit Log filters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+        <!-- Audit Log filters -->
         <div class="filter-panel" id="audit-filter-panel">
             <div class="filter-field">
                 <label>Timestamp from</label>
@@ -389,18 +349,36 @@
             </div>
             <div class="filter-field">
                 <label>Admin</label>
-                <input type="text" id="audit-filter-admin" placeholder="Search adminâ€¦">
+                <input type="text" id="audit-filter-admin" placeholder="Search admin…">
             </div>
             <div class="filter-field">
                 <label>Action</label>
-                <input type="text" id="audit-filter-action" placeholder="Search actionâ€¦">
+                <div class="combo-wrap">
+                    <input type="text" id="audit-filter-action" placeholder="Search action…" autocomplete="off">
+                    <div class="combo-dropdown" id="audit-action-dropdown">
+                        <div class="combo-option" data-value="">— All —</div>
+                        <div class="combo-option" data-value="add_interface">add_interface</div>
+                        <div class="combo-option" data-value="delete_interface">delete_interface</div>
+                        <div class="combo-option" data-value="start_interface">start_interface</div>
+                        <div class="combo-option" data-value="stop_interface">stop_interface</div>
+                        <div class="combo-option" data-value="edit_interface">edit_interface</div>
+                        <div class="combo-option" data-value="create_peer">create_peer</div>
+                        <div class="combo-option" data-value="delete_peer">delete_peer</div>
+                        <div class="combo-option" data-value="enable_peer">enable_peer</div>
+                        <div class="combo-option" data-value="disable_peer">disable_peer</div>
+                        <div class="combo-option" data-value="edit_peer">edit_peer</div>
+                        <div class="combo-option" data-value="change_key_pair">change_key_pair</div>
+                        <div class="combo-option" data-value="device_approve">device_approve</div>
+                        <div class="combo-option" data-value="device_decline">device_decline</div>
+                    </div>
+                </div>
             </div>
             <div class="filter-actions">
                 <button class="btn-filter-reset" id="audit-filter-reset">Reset</button>
             </div>
         </div>
 
-        <!-- â”€â”€ Session Log filters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+        <!-- Session Log filters -->
         <div class="filter-panel" id="session-filter-panel">
             <div class="filter-field">
                 <label>Start time from</label>
@@ -420,22 +398,28 @@
             </div>
             <div class="filter-field">
                 <label>Peer IP</label>
-                <input type="text" id="sess-filter-peer-ip" placeholder="Search peer IPâ€¦">
+                <input type="text" id="sess-filter-peer-ip" placeholder="Search peer IP…">
             </div>
             <div class="filter-field">
                 <label>Peer Name</label>
-                <input type="text" id="sess-filter-peer-name" placeholder="Search peer nameâ€¦">
+                <input type="text" id="sess-filter-peer-name" placeholder="Search peer name…">
             </div>
             <div class="filter-field">
                 <label>App</label>
-                <input type="text" id="sess-filter-app" placeholder="Search appâ€¦">
+                <div class="combo-wrap">
+                    <input type="text" id="sess-filter-app" placeholder="Search app…" autocomplete="off">
+                    <div class="combo-dropdown" id="sess-app-dropdown">
+                        <div class="combo-option" data-value="">— All —</div>
+                        <!-- populated dynamically -->
+                    </div>
+                </div>
             </div>
             <div class="filter-actions">
                 <button class="btn-filter-reset" id="sess-filter-reset">Reset</button>
             </div>
         </div>
 
-        <!-- â”€â”€ Security Events filters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+        <!-- Security Events filters -->
         <div class="filter-panel" id="security-filter-panel">
             <div class="filter-field">
                 <label>Timestamp from</label>
@@ -447,15 +431,22 @@
             </div>
             <div class="filter-field">
                 <label>Event</label>
-                <input type="text" id="security-filter-event" placeholder="Search eventâ€¦">
+                <div class="combo-wrap">
+                    <input type="text" id="security-filter-event" placeholder="Search event…" autocomplete="off">
+                    <div class="combo-dropdown" id="security-event-dropdown">
+                        <div class="combo-option" data-value="">— All —</div>
+                        <div class="combo-option" data-value="unknown_peer_handshake">unknown_peer_handshake</div>
+                        <div class="combo-option" data-value="peer_endpoint_change">peer_endpoint_change</div>
+                    </div>
+                </div>
             </div>
             <div class="filter-field">
                 <label>Interface</label>
-                <input type="text" id="security-filter-interface" placeholder="Search interfaceâ€¦">
+                <input type="text" id="security-filter-interface" placeholder="Search interface…">
             </div>
             <div class="filter-field">
                 <label>Peer Name</label>
-                <input type="text" id="security-filter-peer-name" placeholder="Search peer nameâ€¦">
+                <input type="text" id="security-filter-peer-name" placeholder="Search peer name…">
             </div>
             <div class="filter-actions">
                 <button class="btn-filter-reset" id="security-filter-reset">Reset</button>
@@ -478,22 +469,31 @@
             </thead>
             <tbody id="log-body"></tbody>
         </table>
-    </div>
 
-    <div id="change-password-modal" class="modal">
-        <div class="modal-content">
-            <h3>Change Password</h3>
-            <form id="change-password-form">
-                <input type="password" id="current-password" placeholder="Current Password" required>
-                <input type="password" id="new-password" placeholder="New Password" required>
-                <input type="password" id="confirm-password" placeholder="Confirm New Password" required>
-                <button type="submit">Change</button>
-                <button type="button" id="cancel-change">Cancel</button>
-            </form>
-            <p id="change-error" class="error"></p>
+        <!-- Pagination -->
+        <div class="pagination-bar" id="pagination-bar">
+            <label style="font-size:0.85rem;color:#555;">Rows/page:</label>
+            <select id="page-size-select">
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+            </select>
+            <button class="page-btn" id="btn-prev">&#8249;</button>
+            <span id="pagination-info"></span>
+            <button class="page-btn" id="btn-next">&#8250;</button>
         </div>
     </div>
-    <script src="/js/layout.js"></script>
+
+    <!-- Detail modal -->
+    <div id="detail-modal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" id="detail-modal-close">&times;</button>
+            <h3 id="detail-modal-title">Details</h3>
+            <div class="detail-grid" id="detail-modal-body"></div>
+        </div>
+    </div>
+
+    <script src="/js/navbar.js"></script>
     <script src="/js/audit.js"></script>
 </body>
 

@@ -1,341 +1,419 @@
 // ── Shared state ──────────────────────────────────────────────
-let currentTab = 'audit'; // 'audit' | 'sessions' | 'security'
-let auditData = [];       // raw audit log entries
-let sessionData = [];     // raw session log entries
-let securityData = [];    // raw security event entries
+let currentTab = 'audit';
+let auditData    = [];
+let sessionData  = [];
+let securityData = [];
 
-// ── Filter helpers ────────────────────────────────────────────
-function toMs(datetimeLocalValue) {
-  return datetimeLocalValue ? new Date(datetimeLocalValue).getTime() : null;
-}
+// pagination
+let currentPage = 1;
+let pageSize    = 20;
+let filteredRows = []; // holds result of current filter pass
 
-function containsCI(str, query) {
-  return !query || String(str || '').toLowerCase().includes(query.toLowerCase().trim());
-}
+// ── Helpers ───────────────────────────────────────────────────
+function toMs(v) { return v ? new Date(v).getTime() : null; }
+function containsCI(str, q) { return !q || String(str || '').toLowerCase().includes(q.toLowerCase().trim()); }
 
-// ── Render audit rows with current filters ────────────────────
-function renderAuditRows() {
-  const tbody = document.getElementById('log-body');
-  if (!tbody) return;
+// ── Combo-box (dropdown + free-text) ─────────────────────────
+function initCombo(inputId, dropdownId, onSelect) {
+  const input = document.getElementById(inputId);
+  const dropdown = document.getElementById(dropdownId);
+  if (!input || !dropdown) return;
 
-  const tsFrom  = toMs(document.getElementById('audit-filter-ts-from')?.value);
-  const tsTo    = toMs(document.getElementById('audit-filter-ts-to')?.value);
-  const admin   = document.getElementById('audit-filter-admin')?.value;
-  const action  = document.getElementById('audit-filter-action')?.value;
-
-  tbody.innerHTML = '';
-
-  (auditData).forEach((entry, idx) => {
-    const ts = new Date(entry.timestamp).getTime();
-    if (tsFrom !== null && ts < tsFrom) return;
-    if (tsTo   !== null && ts > tsTo)   return;
-    if (!containsCI(entry.admin,  admin))  return;
-    if (!containsCI(entry.action, action)) return;
-
-    const dateStr = new Date(entry.timestamp).toLocaleString();
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${dateStr}</td>
-      <td>${entry.admin}</td>
-      <td>${entry.action}</td>
-      <td><button data-idx="${idx}" class="btn-view-details">View</button></td>
-    `;
-    tbody.appendChild(tr);
+  input.addEventListener('focus', () => dropdown.classList.add('open'));
+  input.addEventListener('input', () => {
+    const q = input.value.toLowerCase();
+    dropdown.querySelectorAll('.combo-option').forEach(opt => {
+      opt.style.display = !q || opt.dataset.value.includes(q) || opt.dataset.value === '' ? '' : 'none';
+    });
+    dropdown.classList.add('open');
+    onSelect();
   });
 
-  tbody.querySelectorAll('.btn-view-details').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const idx = btn.getAttribute('data-idx');
-      const entry = auditData[idx];
-      if (entry) alert(JSON.stringify(entry.details, null, 2));
+  dropdown.querySelectorAll('.combo-option').forEach(opt => {
+    opt.addEventListener('mousedown', e => {
+      e.preventDefault();
+      input.value = opt.dataset.value;
+      dropdown.classList.remove('open');
+      onSelect();
     });
   });
+
+  document.addEventListener('click', e => {
+    if (!input.contains(e.target) && !dropdown.contains(e.target)) {
+      dropdown.classList.remove('open');
+    }
+  });
 }
 
-// ── Render session rows with current filters ──────────────────
-function renderSessionRows() {
+// ── Detail modal ──────────────────────────────────────────────
+function showDetail(title, obj) {
+  document.getElementById('detail-modal-title').textContent = title;
+  const body = document.getElementById('detail-modal-body');
+  body.innerHTML = '';
+  if (!obj || typeof obj !== 'object') {
+    body.innerHTML = `<span style="grid-column:1/-1;color:#888">No details</span>`;
+  } else {
+    Object.entries(obj).forEach(([k, v]) => {
+      const label = document.createElement('div');
+      label.className = 'detail-label';
+      label.textContent = k.replace(/_/g, ' ');
+      const value = document.createElement('div');
+      value.className = 'detail-value';
+      if (v === null || v === undefined) {
+        value.textContent = '—';
+      } else if (typeof v === 'object') {
+        value.textContent = JSON.stringify(v, null, 2);
+        value.style.whiteSpace = 'pre-wrap';
+        value.style.fontFamily = 'monospace';
+        value.style.fontSize = '0.82rem';
+      } else {
+        value.textContent = String(v);
+      }
+      body.appendChild(label);
+      body.appendChild(value);
+    });
+  }
+  document.getElementById('detail-modal').style.display = 'block';
+}
+
+// ── Pagination render ─────────────────────────────────────────
+function renderPage(rows, renderRowFn) {
   const tbody = document.getElementById('log-body');
-  if (!tbody) return;
-
-  const startFrom  = toMs(document.getElementById('sess-filter-start-from')?.value);
-  const startTo    = toMs(document.getElementById('sess-filter-start-to')?.value);
-  const endFrom    = toMs(document.getElementById('sess-filter-end-from')?.value);
-  const endTo      = toMs(document.getElementById('sess-filter-end-to')?.value);
-  const peerIpQ    = document.getElementById('sess-filter-peer-ip')?.value;
-  const peerNameQ  = document.getElementById('sess-filter-peer-name')?.value;
-  const appQ       = document.getElementById('sess-filter-app')?.value;
-
   tbody.innerHTML = '';
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (currentPage > totalPages) currentPage = totalPages;
+  const start = (currentPage - 1) * pageSize;
+  const slice = rows.slice(start, start + pageSize);
+  slice.forEach(renderRowFn);
 
-  (sessionData).forEach((entry, idx) => {
-    const startTs = new Date(entry.start_time).getTime();
-    const endTs   = new Date(entry.end_time).getTime();
-    const peerIp  = entry.source ? entry.source.split(':')[0] : '';
+  // pagination bar
+  const info   = document.getElementById('pagination-info');
+  const btnPrev = document.getElementById('btn-prev');
+  const btnNext = document.getElementById('btn-next');
+  info.textContent = total === 0 ? '0 records' : `${start + 1}–${Math.min(start + pageSize, total)} / ${total}`;
+  btnPrev.disabled = currentPage <= 1;
+  btnNext.disabled = currentPage >= totalPages;
+}
 
-    if (startFrom !== null && startTs < startFrom) return;
-    if (startTo   !== null && startTs > startTo)   return;
-    if (endFrom   !== null && endTs   < endFrom)   return;
-    if (endTo     !== null && endTs   > endTo)     return;
-    if (!containsCI(peerIp,          peerIpQ))   return;
-    if (!containsCI(entry.peer_name, peerNameQ)) return;
-    if (!containsCI(entry.service,   appQ))       return;
+// ── Audit ─────────────────────────────────────────────────────
+function filterAudit() {
+  const tsFrom = toMs(document.getElementById('audit-filter-ts-from')?.value);
+  const tsTo   = toMs(document.getElementById('audit-filter-ts-to')?.value);
+  const admin  = document.getElementById('audit-filter-admin')?.value;
+  const action = document.getElementById('audit-filter-action')?.value;
 
-    const startStr = new Date(entry.start_time).toLocaleString();
-    const endStr   = new Date(entry.end_time).toLocaleString();
+  filteredRows = auditData.filter(e => {
+    const ts = new Date(e.timestamp).getTime();
+    if (tsFrom !== null && ts < tsFrom) return false;
+    if (tsTo   !== null && ts > tsTo)   return false;
+    if (!containsCI(e.admin,  admin))   return false;
+    if (!containsCI(e.action, action))  return false;
+    return true;
+  });
+}
+
+function renderAuditRows() {
+  filterAudit();
+  renderPage(filteredRows, (entry) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${startStr}</td>
-      <td>${endStr}</td>
+      <td>${new Date(entry.timestamp).toLocaleString()}</td>
+      <td>${entry.admin}</td>
+      <td>${entry.action}</td>
+      <td><button class="btn-view-details">View</button></td>
+    `;
+    tr.querySelector('.btn-view-details').addEventListener('click', () =>
+      showDetail(`Action: ${entry.action}`, entry.details)
+    );
+    document.getElementById('log-body').appendChild(tr);
+  });
+}
+
+// ── Sessions ──────────────────────────────────────────────────
+function filterSession() {
+  const startFrom = toMs(document.getElementById('sess-filter-start-from')?.value);
+  const startTo   = toMs(document.getElementById('sess-filter-start-to')?.value);
+  const endFrom   = toMs(document.getElementById('sess-filter-end-from')?.value);
+  const endTo     = toMs(document.getElementById('sess-filter-end-to')?.value);
+  const peerIpQ   = document.getElementById('sess-filter-peer-ip')?.value;
+  const peerNameQ = document.getElementById('sess-filter-peer-name')?.value;
+  const appQ      = document.getElementById('sess-filter-app')?.value;
+
+  filteredRows = sessionData.filter(e => {
+    const startTs = new Date(e.start_time).getTime();
+    const endTs   = new Date(e.end_time).getTime();
+    const peerIp  = e.source ? e.source.split(':')[0] : '';
+    if (startFrom !== null && startTs < startFrom) return false;
+    if (startTo   !== null && startTs > startTo)   return false;
+    if (endFrom   !== null && endTs   < endFrom)   return false;
+    if (endTo     !== null && endTs   > endTo)     return false;
+    if (!containsCI(peerIp,       peerIpQ))   return false;
+    if (!containsCI(e.peer_name,  peerNameQ)) return false;
+    if (!containsCI(e.service,    appQ))       return false;
+    return true;
+  });
+}
+
+function renderSessionRows() {
+  filterSession();
+  renderPage(filteredRows, (entry) => {
+    const peerIp = entry.source ? entry.source.split(':')[0] : '';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${new Date(entry.start_time).toLocaleString()}</td>
+      <td>${new Date(entry.end_time).toLocaleString()}</td>
       <td>${peerIp}</td>
       <td>${entry.peer_name || ''}</td>
       <td>${entry.service || ''}</td>
-      <td><button data-idx="${idx}" class="btn-view-details">View</button></td>
+      <td><button class="btn-view-details">View</button></td>
     `;
-    tbody.appendChild(tr);
-  });
-
-  tbody.querySelectorAll('.btn-view-details').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const idx = btn.getAttribute('data-idx');
-      const entry = sessionData[idx];
-      if (entry) {
-        alert(JSON.stringify({
-          direction1:   entry.direction1,
-          direction2:   entry.direction2,
-          total_bytes:  entry.total_bytes,
-          duration_sec: entry.duration_sec
-        }, null, 2));
-      }
-    });
+    tr.querySelector('.btn-view-details').addEventListener('click', () =>
+      showDetail('Session details', {
+        peer_name:    entry.peer_name,
+        source:       entry.source,
+        service:      entry.service,
+        start_time:   entry.start_time,
+        end_time:     entry.end_time,
+        duration_sec: entry.duration_sec,
+        total_bytes:  entry.total_bytes,
+        direction1:   entry.direction1,
+        direction2:   entry.direction2
+      })
+    );
+    document.getElementById('log-body').appendChild(tr);
   });
 }
 
-// ── Render security rows with current filters ──────────────────
+// ── Security ──────────────────────────────────────────────────
+function filterSecurity() {
+  const tsFrom = toMs(document.getElementById('security-filter-ts-from')?.value);
+  const tsTo   = toMs(document.getElementById('security-filter-ts-to')?.value);
+  const eventQ = document.getElementById('security-filter-event')?.value;
+  const ifaceQ = document.getElementById('security-filter-interface')?.value;
+  const peerQ  = document.getElementById('security-filter-peer-name')?.value;
+
+  filteredRows = securityData.filter(e => {
+    const ts = new Date(e.timestamp).getTime();
+    if (tsFrom !== null && ts < tsFrom) return false;
+    if (tsTo   !== null && ts > tsTo)   return false;
+    if (!containsCI(e.event_name,          eventQ)) return false;
+    if (!containsCI(e.details?.interface,  ifaceQ)) return false;
+    if (!containsCI(e.details?.peer_name,  peerQ))  return false;
+    return true;
+  });
+}
+
 function renderSecurityRows() {
-  const tbody = document.getElementById('log-body');
-  if (!tbody) return;
-
-  const tsFrom  = toMs(document.getElementById('security-filter-ts-from')?.value);
-  const tsTo    = toMs(document.getElementById('security-filter-ts-to')?.value);
-  const eventQ  = document.getElementById('security-filter-event')?.value;
-  const ifaceQ  = document.getElementById('security-filter-interface')?.value;
-  const peerQ   = document.getElementById('security-filter-peer-name')?.value;
-
-  tbody.innerHTML = '';
-
-  (securityData).forEach((entry, idx) => {
-    const ts = new Date(entry.timestamp).getTime();
-    if (tsFrom !== null && ts < tsFrom) return;
-    if (tsTo   !== null && ts > tsTo)   return;
-    if (!containsCI(entry.event_name, eventQ)) return;
-    if (!containsCI(entry.details?.interface, ifaceQ)) return;
-    if (!containsCI(entry.details?.peer_name, peerQ)) return;
-
-    const dateStr = new Date(entry.timestamp).toLocaleString();
+  filterSecurity();
+  renderPage(filteredRows, (entry) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${dateStr}</td>
+      <td>${new Date(entry.timestamp).toLocaleString()}</td>
       <td>${entry.event_name}</td>
-      <td><button data-idx="${idx}" class="btn-view-details">View</button></td>
+      <td><button class="btn-view-details">View</button></td>
     `;
-    tbody.appendChild(tr);
-  });
-
-  tbody.querySelectorAll('.btn-view-details').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const idx = btn.getAttribute('data-idx');
-      const entry = securityData[idx];
-      if (entry) alert(JSON.stringify(entry.details, null, 2));
-    });
+    tr.querySelector('.btn-view-details').addEventListener('click', () =>
+      showDetail(`Event: ${entry.event_name}`, entry.details)
+    );
+    document.getElementById('log-body').appendChild(tr);
   });
 }
 
-// ── Fetch + set headers + render ──────────────────────────────
+function rerender() {
+  currentPage = 1;
+  renderCurrent();
+}
+
+function renderCurrent() {
+  if (currentTab === 'audit')         renderAuditRows();
+  else if (currentTab === 'sessions') renderSessionRows();
+  else                                renderSecurityRows();
+}
+
 async function loadAuditLogs() {
-  const tbody = document.getElementById('log-body');
-  if (!tbody) return;
-  tbody.innerHTML = '';
-
-  const headerRow = document.getElementById('log-header-row');
-  const securityHeader = document.getElementById('security-header-row');
-  headerRow.innerHTML = `
-    <th>Timestamp</th>
-    <th>Admin</th>
-    <th>Action</th>
-    <th>Details</th>
-  `;
-  headerRow.style.display = '';
-  securityHeader.style.display = 'none';
-
+  setAuditHeaders();
   try {
     const res = await fetch('/api/audit-logs', { credentials: 'same-origin' });
-    let data;
-    try { data = await res.json(); }
-    catch (e) { alert('Failed to load logs: ' + e.message); return; }
+    const data = await res.json();
     if (!data.success) { alert(data.error || 'Cannot load audit logs'); return; }
-
-    auditData = data.logs || [];
+    auditData = (data.logs || []).slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    currentPage = 1;
     renderAuditRows();
-  } catch (e) {
-    alert(e.message || 'Error loading logs');
-  }
+  } catch (e) { alert(e.message || 'Error loading logs'); }
 }
 
 async function loadSessionLogs() {
-  const tbody = document.getElementById('log-body');
-  if (!tbody) return;
-  tbody.innerHTML = '';
-
-  const headerRow = document.getElementById('log-header-row');
-  const securityHeader = document.getElementById('security-header-row');
-  headerRow.innerHTML = `
-    <th>Start Time</th>
-    <th>End Time</th>
-    <th>Peer IP</th>
-    <th>Peer Name</th>
-    <th>App</th>
-    <th>Details</th>
-  `;
-  headerRow.style.display = '';
-  securityHeader.style.display = 'none';
-
+  setSessionHeaders();
   try {
     const res = await fetch('/api/session-logs', { credentials: 'same-origin' });
-    let data;
-    try { data = await res.json(); }
-    catch (e) { alert('Failed to load session logs: ' + e.message); return; }
+    const data = await res.json();
     if (!data.success) { alert(data.error || 'Cannot load session logs'); return; }
-
     sessionData = data.logs || [];
+    currentPage = 1;
     renderSessionRows();
-  } catch (e) {
-    alert(e.message || 'Error loading session logs');
-  }
+  } catch (e) { alert(e.message || 'Error loading session logs'); }
 }
 
-// ── Fetch + set headers + render security ──────────────────────
 async function loadSecurityLogs() {
-  const tbody = document.getElementById('log-body');
-  if (!tbody) return;
-  tbody.innerHTML = '';
-
-  const headerRow = document.getElementById('log-header-row');
-  const securityHeader = document.getElementById('security-header-row');
-  headerRow.style.display = 'none';
-  securityHeader.style.display = '';
-
+  setSecurityHeaders();
   try {
     const res = await fetch('/api/security-events', { credentials: 'same-origin' });
-    let data;
-    try { data = await res.json(); }
-    catch (e) { alert('Failed to load security events: ' + e.message); return; }
+    const data = await res.json();
     if (!data.success) { alert(data.error || 'Cannot load security events'); return; }
-
-    securityData = data.events || [];
+    securityData = (data.events || []).slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    currentPage = 1;
     renderSecurityRows();
-  } catch (e) {
-    alert(e.message || 'Error loading security events');
-  }
+  } catch (e) { alert(e.message || 'Error loading security events'); }
+}
+
+// populate app dropdown from API
+async function loadAppOptions() {
+  try {
+    const res = await fetch('/api/applications', { credentials: 'same-origin' });
+    const data = await res.json();
+    const apps = data.applications || [];
+    const dd = document.getElementById('sess-app-dropdown');
+    if (!dd) return;
+    // keep first "All" option
+    const allOpt = dd.querySelector('[data-value=""]');
+    dd.innerHTML = '';
+    if (allOpt) dd.appendChild(allOpt);
+    apps.forEach(app => {
+      const opt = document.createElement('div');
+      opt.className = 'combo-option';
+      opt.dataset.value = app.name;
+      opt.textContent = app.name;
+      opt.addEventListener('mousedown', e => {
+        e.preventDefault();
+        document.getElementById('sess-filter-app').value = app.name;
+        dd.classList.remove('open');
+        rerender();
+      });
+      dd.appendChild(opt);
+    });
+  } catch (_) {}
+}
+
+// ── Header helpers ────────────────────────────────────────────
+function setAuditHeaders() {
+  document.getElementById('log-header-row').innerHTML = `<th>Timestamp</th><th>Admin</th><th>Action</th><th>Details</th>`;
+  document.getElementById('log-header-row').style.display = '';
+  document.getElementById('security-header-row').style.display = 'none';
+}
+function setSessionHeaders() {
+  document.getElementById('log-header-row').innerHTML = `<th>Start Time</th><th>End Time</th><th>Peer IP</th><th>Peer Name</th><th>App</th><th>Details</th>`;
+  document.getElementById('log-header-row').style.display = '';
+  document.getElementById('security-header-row').style.display = 'none';
+}
+function setSecurityHeaders() {
+  document.getElementById('log-header-row').style.display = 'none';
+  document.getElementById('security-header-row').style.display = '';
 }
 
 // ── Tab switch ────────────────────────────────────────────────
 function switchTo(type) {
   currentTab = type;
-  const btnAudit    = document.getElementById('tab-audit');
-  const btnSess     = document.getElementById('tab-sessions');
-  const btnSec      = document.getElementById('tab-security');
-  const title       = document.getElementById('section-title');
-  const auditPanel  = document.getElementById('audit-filter-panel');
-  const sessPanel   = document.getElementById('session-filter-panel');
-  const secPanel    = document.getElementById('security-filter-panel');
+  ['audit', 'sessions', 'security'].forEach(t => {
+    document.getElementById(`tab-${t === 'audit' ? 'audit' : t === 'sessions' ? 'sessions' : 'security'}`)
+      ?.classList.toggle('active', t === type);
+  });
+  const titles = { audit: 'Admin actions', sessions: 'Peer sessions', security: 'Security events' };
+  document.getElementById('section-title').textContent = titles[type] || '';
 
-  // reset toggle arrow to collapsed when switching tabs
+  // collapse all filter panels
   const toggleBtn = document.getElementById('btn-toggle-filter');
   if (toggleBtn) toggleBtn.textContent = '\u25BC Filter';
-  auditPanel?.classList.remove('open');
-  sessPanel?.classList.remove('open');
-  secPanel?.classList.remove('open');
+  ['audit-filter-panel', 'session-filter-panel', 'security-filter-panel'].forEach(id =>
+    document.getElementById(id)?.classList.remove('open')
+  );
 
-  if (type === 'audit') {
-    btnAudit.classList.add('active');
-    btnSess.classList.remove('active');
-    btnSec.classList.remove('active');
-    title.textContent = 'Admin actions';
-    loadAuditLogs();
-  } else if (type === 'sessions') {
-    btnAudit.classList.remove('active');
-    btnSess.classList.add('active');
-    btnSec.classList.remove('active');
-    title.textContent = 'Peer sessions';
-    loadSessionLogs();
-  } else if (type === 'security') {
-    btnAudit.classList.remove('active');
-    btnSess.classList.remove('active');
-    btnSec.classList.add('active');
-    title.textContent = 'Security events';
-    loadSecurityLogs();
-  }
+  if (type === 'audit')     loadAuditLogs();
+  else if (type === 'sessions') loadSessionLogs();
+  else loadSecurityLogs();
 }
 
 // ── DOMContentLoaded ──────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  const btnAudit   = document.getElementById('tab-audit');
-  const btnSess    = document.getElementById('tab-sessions');
-  const btnSec     = document.getElementById('tab-security');
-  const toggleBtn  = document.getElementById('btn-toggle-filter');
-  const auditPanel = document.getElementById('audit-filter-panel');
-  const sessPanel  = document.getElementById('session-filter-panel');
-  const secPanel   = document.getElementById('security-filter-panel');
-
   // Tab buttons
-  if (btnAudit) btnAudit.addEventListener('click', () => switchTo('audit'));
-  if (btnSess)  btnSess.addEventListener('click',  () => switchTo('sessions'));
-  if (btnSec)   btnSec.addEventListener('click',   () => switchTo('security'));
+  document.getElementById('tab-audit')?.addEventListener('click',     () => switchTo('audit'));
+  document.getElementById('tab-sessions')?.addEventListener('click',  () => switchTo('sessions'));
+  document.getElementById('tab-security')?.addEventListener('click',  () => switchTo('security'));
 
   // Filter toggle
-  if (toggleBtn) {
-    toggleBtn.addEventListener('click', () => {
-      const panel = currentTab === 'audit' ? auditPanel : currentTab === 'sessions' ? sessPanel : secPanel;
-      if (!panel) return;
-      const isOpen = panel.classList.toggle('open');
-      toggleBtn.textContent = (isOpen ? '\u25B2' : '\u25BC') + ' Filter';
-    });
-  }
-
-  // ── Audit filter inputs ──
-  ['audit-filter-ts-from', 'audit-filter-ts-to', 'audit-filter-admin', 'audit-filter-action'].forEach(id => {
-    document.getElementById(id)?.addEventListener('input', renderAuditRows);
+  document.getElementById('btn-toggle-filter')?.addEventListener('click', () => {
+    const panelId = currentTab === 'audit' ? 'audit-filter-panel'
+                  : currentTab === 'sessions' ? 'session-filter-panel'
+                  : 'security-filter-panel';
+    const panel = document.getElementById(panelId);
+    if (!panel) return;
+    const isOpen = panel.classList.toggle('open');
+    document.getElementById('btn-toggle-filter').textContent = (isOpen ? '\u25B2' : '\u25BC') + ' Filter';
   });
 
+  // Combos with dropdown
+  initCombo('audit-filter-action', 'audit-action-dropdown', rerender);
+  initCombo('sess-filter-app',     'sess-app-dropdown',     rerender);
+  initCombo('security-filter-event','security-event-dropdown', rerender);
+
+  // Plain text filter inputs
+  ['audit-filter-ts-from','audit-filter-ts-to','audit-filter-admin'].forEach(id =>
+    document.getElementById(id)?.addEventListener('input', rerender));
+
+  ['sess-filter-start-from','sess-filter-start-to','sess-filter-end-from','sess-filter-end-to',
+   'sess-filter-peer-ip','sess-filter-peer-name'].forEach(id =>
+    document.getElementById(id)?.addEventListener('input', rerender));
+
+  ['security-filter-ts-from','security-filter-ts-to',
+   'security-filter-interface','security-filter-peer-name'].forEach(id =>
+    document.getElementById(id)?.addEventListener('input', rerender));
+
+  // Reset buttons
   document.getElementById('audit-filter-reset')?.addEventListener('click', () => {
-    ['audit-filter-ts-from', 'audit-filter-ts-to', 'audit-filter-admin', 'audit-filter-action']
+    ['audit-filter-ts-from','audit-filter-ts-to','audit-filter-admin','audit-filter-action']
       .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-    renderAuditRows();
+    rerender();
   });
-
-  // ── Session filter inputs ──
-  ['sess-filter-start-from', 'sess-filter-start-to', 'sess-filter-end-from', 'sess-filter-end-to',
-   'sess-filter-peer-ip', 'sess-filter-peer-name', 'sess-filter-app'].forEach(id => {
-    document.getElementById(id)?.addEventListener('input', renderSessionRows);
-  });
-
   document.getElementById('sess-filter-reset')?.addEventListener('click', () => {
-    ['sess-filter-start-from', 'sess-filter-start-to', 'sess-filter-end-from', 'sess-filter-end-to',
-     'sess-filter-peer-ip', 'sess-filter-peer-name', 'sess-filter-app']
+    ['sess-filter-start-from','sess-filter-start-to','sess-filter-end-from','sess-filter-end-to',
+     'sess-filter-peer-ip','sess-filter-peer-name','sess-filter-app']
       .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-    renderSessionRows();
+    rerender();
   });
-
-  // ── Security filter inputs ──
-  ['security-filter-ts-from', 'security-filter-ts-to', 'security-filter-event', 'security-filter-interface', 'security-filter-peer-name'].forEach(id => {
-    document.getElementById(id)?.addEventListener('input', renderSecurityRows);
-  });
-
   document.getElementById('security-filter-reset')?.addEventListener('click', () => {
-    ['security-filter-ts-from', 'security-filter-ts-to', 'security-filter-event', 'security-filter-interface', 'security-filter-peer-name']
+    ['security-filter-ts-from','security-filter-ts-to','security-filter-event',
+     'security-filter-interface','security-filter-peer-name']
       .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-    renderSecurityRows();
+    rerender();
   });
+
+  // Page size
+  document.getElementById('page-size-select')?.addEventListener('change', e => {
+    pageSize = parseInt(e.target.value, 10);
+    currentPage = 1;
+    rerender();
+  });
+
+  // Prev / Next
+  document.getElementById('btn-prev')?.addEventListener('click', () => {
+    if (currentPage > 1) { currentPage--; renderCurrent(); }
+  });
+  document.getElementById('btn-next')?.addEventListener('click', () => {
+    const totalPages = Math.ceil(filteredRows.length / pageSize);
+    if (currentPage < totalPages) { currentPage++; renderCurrent(); }
+  });
+
+  // Detail modal close
+  document.getElementById('detail-modal-close')?.addEventListener('click', () => {
+    document.getElementById('detail-modal').style.display = 'none';
+  });
+  document.getElementById('detail-modal')?.addEventListener('click', e => {
+    if (e.target === document.getElementById('detail-modal'))
+      document.getElementById('detail-modal').style.display = 'none';
+  });
+
+  // Load application list for session filter dropdown
+  loadAppOptions();
 
   // Initial load
   switchTo('audit');

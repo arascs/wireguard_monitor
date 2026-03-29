@@ -83,6 +83,7 @@ async function loadRequests() {
             <h3>${request.device_name || 'Unknown Device'}</h3>
             <p><strong>Username:</strong> ${request.username}</p>
             <p><strong>Machine ID:</strong> ${request.machine_id || '<em>N/A</em>'}</p>
+            <p><strong>Public Key:</strong> ${request.public_key || '<em>N/A</em>'}</p>
             <p><strong>Status:</strong> ${request.status}</p>
           </div>
           <div class="device-status">Waiting for approval</div>
@@ -150,9 +151,6 @@ async function approveDevice(id) {
     });
     const data = await res.json();
     if (data.success) {
-      if (data.privateKey) {
-        showPrivateKeyModal(data.privateKey);
-      }
       loadRequests();
     } else {
       alert(data.error || 'Failed to approve device');
@@ -203,14 +201,6 @@ async function deleteDevice(id) {
     alert(e.message || 'Error deleting device');
   }
 }
-
-function showPrivateKeyModal(privateKey) {
-  const modal = document.getElementById('private-key-modal');
-  const textarea = document.getElementById('private-key-text');
-  textarea.value = privateKey;
-  modal.style.display = 'block';
-}
-
 
 // helper functions for enable/disable/expire editing
 async function enableDevice(id) {
@@ -308,37 +298,5 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (tabRequests) {
     tabRequests.addEventListener('click', () => switchTab('requests'));
-  }
-
-  const copyBtn = document.getElementById('copy-key-btn');
-  if (copyBtn) {
-    copyBtn.addEventListener('click', async () => {
-      const textarea = document.getElementById('private-key-text');
-      const value = textarea.value || '';
-      if (!value) {
-        return;
-      }
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(value);
-          alert('Private key copied to clipboard');
-        } else {
-          textarea.focus();
-          textarea.select();
-          document.execCommand('copy');
-          alert('Please copy the key manually');
-        }
-      } catch (e) {
-        alert('Error copying: ' + e.message);
-      }
-    });
-  }
-
-  const closeBtn = document.getElementById('close-key-modal');
-  if (closeBtn) {
-    closeBtn.addEventListener('click', () => {
-      document.getElementById('private-key-modal').style.display = 'none';
-      document.getElementById('private-key-text').value = '';
-    });
   }
 });

@@ -1,25 +1,31 @@
 import sys
-import json
 import re
 from datetime import datetime, timezone, timedelta
+import pymysql
 
-PEERS_FILE = "/root/wireguard_monitor/wireguard_monitor/app/config/peers.json"
 EVENT_FILE = "/root/wireguard_monitor/wireguard_monitor/app/endpoint_events.json"
 INTERFACE = "wgA"
 
-# load peers
-with open(PEERS_FILE) as f:
-    data = json.load(f)
+DB_CONFIG = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': 'root',
+    'database': 'wg_monitor'
+}
 
-peers = data.get(INTERFACE, [])
+conn = pymysql.connect(**DB_CONFIG)
+cursor = conn.cursor(pymysql.cursors.DictCursor)
+cursor.execute("SELECT site_endpoint FROM sites")
+rows = cursor.fetchall()
+cursor.close()
+conn.close()
 
-# build set endpoint hợp lệ
 valid_endpoints = set()
-for p in peers:
-    valid_endpoints.add(p["endpoint"])
+for row in rows:
+    ep = row['site_endpoint']
+    if ep:
+        valid_endpoints.add(ep.strip())
 
-# regex parse tcpdump line
-# ví dụ: 172.16.0.2.51820 >
 regex = re.compile(r'(\d+\.\d+\.\d+\.\d+)\.(\d+)\s*>')
 
 def now_iso():
@@ -27,12 +33,12 @@ def now_iso():
     return datetime.now(tz).isoformat()
 
 def log_event(event):
+    import json
     with open(EVENT_FILE, "a") as f:
         f.write(json.dumps(event) + "\n")
 
 for line in sys.stdin:
     line = line.strip()
-
     m = regex.search(line)
     if not m:
         continue
@@ -41,7 +47,6 @@ for line in sys.stdin:
     port = m.group(2)
     endpoint = f"{ip}:{port}"
 
-    # nếu không match peer nào
     if endpoint not in valid_endpoints:
         event = {
             "timestamp": now_iso(),
@@ -51,5 +56,4 @@ for line in sys.stdin:
                 "endpoint": endpoint
             }
         }
-
         log_event(event)

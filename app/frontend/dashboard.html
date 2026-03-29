@@ -6,92 +6,14 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
     <style>
         body {
-            font-family: 'Roboto', sans-serif;
             max-width: 1400px;
             margin: 0 auto;
-            padding: 70px 20px 20px 220px;
-            /* left padding for sidebar */
-            background-color: #f0f0f0;
-            color: #333;
-            font-size: 16px;
-            line-height: 1.6;
-        }
-
-        h1 {
-            font-size: 2rem;
-            font-weight: 700;
-        }
-
-        h2 {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: rgba(134, 22, 24, 1);
-        }
-
-        p {
-            font-size: 1rem;
-            margin: 0.5rem 0;
-        }
-
-        .navbar {
-            background-color: rgba(134, 22, 24, 0.9);
-            color: white;
-            padding: 10px 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            z-index: 1000;
-            box-sizing: border-box;
-        }
-
-        .navbar h1 {
-            margin: 0;
-            font-weight: 700;
-            font-size: 2rem;
-        }
-
-        .hostname-display {
-            color: white;
-            font-size: 0.85rem;
-            margin-right: 10px;
-            padding: 6px 14px;
-            font-weight: 500;
-            background-color: rgba(255, 255, 255, 0.15);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 6px;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .nav-buttons {
-            display: flex;
-            gap: 10px;
-            margin-right: 20px;
-        }
-
-        .nav-btn {
-            text-decoration: none;
-            padding: 8px 15px;
-            border-radius: 5px;
-            background-color: rgba(134, 22, 24, 0.8);
-            color: white;
-            transition: background-color 0.3s;
-            font-weight: 500;
-        }
-
-        .nav-btn:hover {
-            background-color: rgba(134, 22, 24, 1);
+            padding-top: 80px;
+            padding-left: 185px;
         }
 
         .interface-overview,
@@ -103,7 +25,6 @@
             margin-bottom: 20px;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
         }
-
 
         .interface-overview h2,
         .peers-section h2,
@@ -141,83 +62,11 @@
             transition: background-color 0.3s;
             font-weight: 500;
             font-size: 0.95rem;
+            font-family: inherit;
         }
 
         button:hover {
             background-color: rgba(134, 22, 24, 1);
-        }
-
-        .filter-form button {
-            padding: 8px 15px;
-            background-color: rgba(134, 22, 24, 0.8);
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            transition: background-color 0.3s;
-            font-weight: 500;
-        }
-
-        .filter-form button:hover {
-            background-color: rgba(134, 22, 24, 1);
-        }
-
-        /* sidebar styles copied from index.html */
-        .sidebar {
-            position: fixed;
-            top: 60px;
-            left: 0;
-            bottom: 0;
-            width: 200px;
-            background-color: #ffffff;
-            box-shadow: 2px 0 8px rgba(0, 0, 0, 0.08);
-            padding: 15px 10px;
-            box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .sidebar-title {
-            font-weight: 600;
-            margin-bottom: 5px;
-            color: rgba(134, 22, 24, 1);
-        }
-
-        .sidebar-menu {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .sidebar-submenu {
-            display: flex;
-            flex-direction: column;
-            margin-left: 10px;
-            gap: 4px;
-        }
-
-        .sidebar-item {
-            border: none;
-            border-radius: 5px;
-            padding: 8px 10px;
-            text-align: left;
-            background-color: transparent;
-            color: #333;
-            font-size: 0.95rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background-color 0.2s, color 0.2s;
-        }
-
-        .sidebar-item:hover {
-            background-color: rgba(134, 22, 24, 0.1);
-            color: rgba(134, 22, 24, 1);
-        }
-
-        .sidebar-item.active {
-            background-color: rgba(134, 22, 24, 0.1);
-            color: rgba(134, 22, 24, 1);
         }
 
         .interface-info-grid {
@@ -343,7 +192,7 @@
             color: #dc3545;
         }
 
-        /* Log viewer modal */
+        /* Log viewer modal overrides */
         #log-modal {
             display: none;
             position: fixed;
@@ -354,12 +203,11 @@
             color: #e0e0e0;
             padding: 0;
             border-radius: 10px;
-            box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
             z-index: 3000;
             width: 780px;
             max-width: 95vw;
             max-height: 80vh;
-            display: none;
             flex-direction: column;
         }
 
@@ -368,13 +216,15 @@
             justify-content: space-between;
             align-items: center;
             padding: 16px 20px;
-            background: rgba(134,22,24,0.9);
+            background: rgba(134, 22, 24, 0.9);
             border-radius: 10px 10px 0 0;
             font-weight: 600;
             font-size: 1rem;
         }
 
-        #log-modal-header span { color: white; }
+        #log-modal-header span {
+            color: white;
+        }
 
         #log-close-btn {
             background: transparent;
@@ -387,7 +237,10 @@
             font-weight: bold;
         }
 
-        #log-close-btn:hover { background: rgba(255,255,255,0.2); border-radius: 4px; }
+        #log-close-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
 
         #log-content {
             flex: 1;
@@ -414,7 +267,7 @@
             display: none;
             position: fixed;
             inset: 0;
-            background: rgba(0,0,0,0.5);
+            background: rgba(0, 0, 0, 0.5);
             z-index: 2999;
         }
 
@@ -426,33 +279,13 @@
             border-radius: 5px;
         }
 
-        .log-view-btn:hover { background: rgba(20, 60, 140, 1) !important; }
+        .log-view-btn:hover {
+            background: rgba(20, 60, 140, 1) !important;
+        }
     </style>
 </head>
 
 <body data-current="connections">
-    <div class="navbar">
-        <h1>WireGuard VPN Manager</h1>
-        <div class="nav-buttons">
-            <span class="hostname-display"><span></span><strong>{{HOSTNAME}}</strong></span>
-            <a href="/" class="nav-btn">Home</a>
-        </div>
-    </div>
-
-    <!-- sidebar menu shown on every page -->
-    <div class="sidebar">
-        <div class="sidebar-menu">
-            <button class="sidebar-item" data-section="dashboard" data-path="/">Dashboard</button>
-            <button class="sidebar-item" data-section="connections" data-path="/interfaces">Interfaces</button>
-            <button class="sidebar-item" data-section="users" data-path="/users">Identity</button>
-            <button class="sidebar-item" data-section="devices" data-path="/devices">Devices</button>
-            <button class="sidebar-item" data-section="applications" data-path="/applications">Applications</button>
-            <button class="sidebar-item" data-section="access" data-path="/access-rules">Access rules</button>
-            <button class="sidebar-item" data-section="audit" data-path="/audit-log">Logging</button>
-            <button class="sidebar-item" data-section="backup" data-path="/backup">Backup & Restore</button>
-            <button class="sidebar-item" data-section="settings" data-path="/settings">Settings</button>
-        </div>
-    </div>
 
     <div class="interface-overview">
         <!-- top row: interface title, status and controls -->
@@ -466,9 +299,6 @@
                 <button id="edit-interface-btn">Edit Interface</button>
                 <button id="view-log-btn" class="log-view-btn" title="View Interface Log">📋</button>
             </div>
-        </div>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h3 id="title" style="margin: 0; color: rgba(134, 22, 24, 1);"></h3>
         </div>
         <div id="interface-info" class="loading">Loading interface information...</div>
     </div>
@@ -498,33 +328,37 @@
     </div>
 
     <!-- edit interface modal -->
-    <div id="edit-interface-modal"
-        style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:25px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.15);z-index:2000;max-width:500px;width:100%;max-height:80vh;overflow-y:auto;">
-        <h3>Edit Interface</h3>
-        <form id="edit-interface-form">
-            <div style="margin-bottom:10px;"><label>Address:</label><input type="text" id="edit-if-address"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-            <div style="margin-bottom:10px;"><label>Listen Port:</label><input type="text" id="edit-if-port"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-            <div style="margin-bottom:10px;"><label>DNS:</label><input type="text" id="edit-if-dns"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-            <div style="margin-bottom:10px;"><label>MTU:</label><input type="text" id="edit-if-mtu"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-            <div style="margin-bottom:10px;"><label>PreUp:</label><input type="text" id="edit-if-preup"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-            <div style="margin-bottom:10px;"><label>PostUp:</label><input type="text" id="edit-if-postup"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-            <div style="margin-bottom:10px;"><label>PreDown:</label><input type="text" id="edit-if-predown"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-            <div style="margin-bottom:10px;"><label>PostDown:</label><input type="text" id="edit-if-postdown"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-            <button type="button" id="edit-if-generate-keys" style="margin-bottom:10px;">Generate new key pair</button>
-            <div id="edit-if-keys-output" style="margin-bottom:15px;"></div>
-            <div style="text-align:right;">
-                <button type="button" id="cancel-edit-if" style="margin-right:10px;">Cancel</button>
-                <button type="submit">Save</button>
-            </div>
-        </form>
+    <div id="edit-interface-modal" class="modal">
+        <div class="modal-content"
+            style="max-width:500px; width:100%; max-height:80vh; overflow-y:auto; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); margin:0;">
+            <h3>Edit Interface</h3>
+            <form id="edit-interface-form">
+                <div style="margin-bottom:10px;"><label>Address:</label><input type="text" id="edit-if-address"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+                <div style="margin-bottom:10px;"><label>Listen Port:</label><input type="text" id="edit-if-port"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+                <div style="margin-bottom:10px;"><label>DNS:</label><input type="text" id="edit-if-dns"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+                <div style="margin-bottom:10px;"><label>MTU:</label><input type="text" id="edit-if-mtu"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+                <div style="margin-bottom:10px;"><label>PreUp:</label><input type="text" id="edit-if-preup"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+                <div style="margin-bottom:10px;"><label>PostUp:</label><input type="text" id="edit-if-postup"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+                <div style="margin-bottom:10px;"><label>PreDown:</label><input type="text" id="edit-if-predown"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+                <div style="margin-bottom:10px;"><label>PostDown:</label><input type="text" id="edit-if-postdown"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+                <button type="button" id="edit-if-generate-keys" style="margin-bottom:10px;">Generate new key
+                    pair</button>
+                <div id="edit-if-keys-output" style="margin-bottom:15px;"></div>
+                <div style="text-align:right;">
+                    <button type="button" id="cancel-edit-if"
+                        style="margin-right:10px; background:none; border:1px solid #bbb; color:#555; padding:7px 16px; border-radius:5px; cursor:pointer;">Cancel</button>
+                    <button type="submit">Save</button>
+                </div>
+            </form>
+        </div>
     </div>
 
     <!-- log backdrop -->
@@ -540,31 +374,34 @@
     </div>
 
     <!-- add peer modal -->
-    <div id="add-peer-modal"
-        style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:25px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.15);z-index:2000;max-width:500px;width:100%;">
-        <h3>Add New Peer</h3>
-        <form id="add-peer-form">
-            <div style="margin-bottom:10px;"><label>Name:</label><input type="text" id="new-peer-name"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-            <div style="margin-bottom:10px;"><label>Public Key:</label><input type="text" id="new-peer-publicKey"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-            <div style="margin-bottom:10px;"><label>Endpoint:</label><input type="text" id="new-peer-endpoint"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-            <div style="margin-bottom:10px;"><label>Allowed IPs:</label><input type="text" id="new-peer-allowedIPs"
-                    style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;" value="0.0.0.0/0"></div>
-            <div style="margin-bottom:10px;"><label>Persistent Keepalive:</label><input type="text"
-                    id="new-peer-keepalive" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"
-                    value="25"></div>
-            <div style="margin-bottom:10px;"><label><input type="checkbox" id="new-peer-generatePsk"> Generate
-                    PSK</label></div>
-            <div style="text-align:right;">
-                <button type="button" id="cancel-add-peer" style="margin-right:10px;">Cancel</button>
-                <button type="submit">Add</button>
-            </div>
-        </form>
+    <div id="add-peer-modal" class="modal">
+        <div class="modal-content"
+            style="max-width:500px; width:100%; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); margin:0;">
+            <h3>Add New Peer</h3>
+            <form id="add-peer-form">
+                <div style="margin-bottom:10px;"><label>Name:</label><input type="text" id="new-peer-name"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+                <div style="margin-bottom:10px;"><label>Public Key:</label><input type="text" id="new-peer-publicKey"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+                <div style="margin-bottom:10px;"><label>Endpoint:</label><input type="text" id="new-peer-endpoint"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
+                <div style="margin-bottom:10px;"><label>Allowed IPs:</label><input type="text" id="new-peer-allowedIPs"
+                        style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;" value="0.0.0.0/0"></div>
+                <div style="margin-bottom:10px;"><label>Persistent Keepalive:</label><input type="text"
+                        id="new-peer-keepalive" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"
+                        value="25"></div>
+                <div style="margin-bottom:10px;"><label><input type="checkbox" id="new-peer-generatePsk"> Generate
+                        PSK</label></div>
+                <div style="text-align:right;">
+                    <button type="button" id="cancel-add-peer"
+                        style="margin-right:10px; background:none; border:1px solid #bbb; color:#555; padding:7px 16px; border-radius:5px; cursor:pointer;">Cancel</button>
+                    <button type="submit">Add</button>
+                </div>
+            </form>
+        </div>
     </div>
 
-    <script src="/js/layout.js"></script>
+    <script src="/js/navbar.js"></script>
     <script src="/js/dashboard_page.js"></script>
 </body>
 

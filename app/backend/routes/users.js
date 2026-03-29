@@ -7,8 +7,18 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
   const router = express.Router();
   const CONFIG_DIR = '/etc/wireguard/';
 
-  function getPeerLatestHandshakeEpochSeconds(publicKey) {
-    const out = run('wg show wg2 latest-handshakes').trim();
+  function getPeerLatestHandshakeEpochSeconds(interfaceName, publicKey) {
+    if (!interfaceName || !publicKey) {
+      return null;
+    }
+
+    let out = '';
+    try {
+      out = run(`wg show ${interfaceName} latest-handshakes`).trim();
+    } catch (e) {
+      return null;
+    }
+
     if (!out) {
       return null;
     }
@@ -26,10 +36,14 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
     return null;
   }
 
-  function deletePeerByPublicKey(publicKey) {
-    const configFile = path.join(CONFIG_DIR, 'wg2.conf');
+  function deletePeerByPublicKey(interfaceName, publicKey) {
+    if (!interfaceName || !publicKey) {
+      return { updated: false, reason: 'Missing interface or public key' };
+    }
+
+    const configFile = path.join(CONFIG_DIR, `${interfaceName}.conf`);
     if (!fs.existsSync(configFile)) {
-      return { updated: false, reason: 'wg2.conf not found' };
+      return { updated: false, reason: `${interfaceName}.conf not found` };
     }
 
     const content = fs.readFileSync(configFile, 'utf8');
@@ -83,8 +97,8 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
     try {
       const interfaces = run('wg show interfaces').trim();
-      if (interfaces.split(/\s+/).includes('wg2')) {
-        run('bash -c "wg syncconf wg2 <(wg-quick strip wg2)"');
+      if (interfaces.split(/\s+/).includes(interfaceName)) {
+        run(`bash -c "wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName})"`);
       }
     } catch (e) {
       // ignore sync errors; config file already updated
@@ -141,7 +155,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       try {
         const admin = req.session && req.session.user ? req.session.user : 'unknown';
         logAction(admin, 'create_user', { username });
-      } catch (e) {}
+      } catch (e) { }
 
       res.json({
         success: true,
@@ -174,14 +188,14 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
       // Get all devices for this user to get public keys
       const [devices] = await connection.execute(
-        'SELECT public_key FROM devices WHERE username = ?',
+        'SELECT public_key, interface FROM devices WHERE username = ?',
         [username]
       );
 
-      // Delete peers from wg2.conf for each device
+      // Delete peers from the device interface config for each device
       for (const device of devices) {
-        if (device.public_key) {
-          deletePeerByPublicKey(device.public_key);
+        if (device.public_key && device.interface) {
+          deletePeerByPublicKey(device.interface, device.public_key);
         }
       }
 
@@ -195,7 +209,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       try {
         const admin = req.session && req.session.user ? req.session.user : 'unknown';
         logAction(admin, 'delete_user', { username });
-      } catch (e) {}
+      } catch (e) { }
 
       res.json({ success: true, message: 'User deleted successfully' });
     } catch (error) {
@@ -215,7 +229,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       connection = await mysql.createConnection(dbConfig);
       // include status so frontend can know whether a device is enabled or disabled
       const [rows] = await connection.execute(
-        'SELECT id, device_name, username, allowed_ips, public_key, expire_date, status FROM devices ORDER BY id DESC'
+        'SELECT id, device_name, username, interface, allowed_ips, public_key, machine_id, expire_date, status FROM devices ORDER BY id DESC'
       );
       res.json({ success: true, devices: rows });
     } catch (error) {
@@ -229,7 +243,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
   });
 
   router.post('/devices/approve', requireAuth, async (req, res) => {
-    const { id, allowedIPs, expireDate } = req.body || {};
+    const { id, interface: selectedInterface, allowedIPs, expireDate } = req.body || {};
     if (!id || !allowedIPs) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
@@ -240,7 +254,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
       // Get enrollment request info
       const [reqs] = await connection.execute(
-        'SELECT device_name, username FROM device_enrollment_requests WHERE id = ?',
+        'SELECT device_name, username, machine_id FROM device_enrollment_requests WHERE id = ?',
         [id]
       );
 
@@ -251,6 +265,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       const reqItem = reqs[0];
       const deviceName = reqItem.device_name;
       const username = reqItem.username;
+      const machineId = reqItem.machine_id;
 
       // Generate key pair
       const privateKey = run('wg genkey').trim();
@@ -268,8 +283,8 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
       // Insert into approved devices table
       await connection.execute(
-        'INSERT INTO devices (device_name, username, allowed_ips, private_key, public_key, expire_date, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [deviceName, username, allowedIPs, privateKeyHash, publicKey, expireEpoch, 1]
+        'INSERT INTO devices (device_name, username, interface, allowed_ips, private_key, public_key, machine_id, expire_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [deviceName, username, selectedInterface, allowedIPs, privateKeyHash, publicKey, machineId, expireEpoch, 1]
       );
 
       // audit
@@ -278,11 +293,13 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
         logAction(admin, 'device_approve', {
           device_name: deviceName,
           user: username,
+          interface: selectedInterface,
           allowed_ips: allowedIPs,
           public_key: publicKey,
+          machine_id: machineId,
           expire_date: expireEpoch
         });
-      } catch (e) {}
+      } catch (e) { }
 
       // Remove enrollment request
       await connection.execute(
@@ -314,7 +331,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       });
     } catch (error) {
       console.error('Error approving device:', error);
-      res.status(500).json({ success: false, error: 'Internal server error' });
+      res.status(500).json({ success: false, error: error.message });
     } finally {
       if (connection) {
         await connection.end();
@@ -335,7 +352,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
       // Get device info including public key
       const [devices] = await connection.execute(
-        'SELECT public_key FROM devices WHERE id = ?',
+        'SELECT public_key, interface FROM devices WHERE id = ?',
         [id]
       );
 
@@ -345,9 +362,9 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
       const device = devices[0];
 
-      // Delete peer from wg2.conf if public key exists
-      if (device.public_key) {
-        const result = deletePeerByPublicKey(device.public_key);
+      // Delete peer from interface config if public key exists
+      if (device.public_key && device.interface) {
+        const result = deletePeerByPublicKey(device.interface, device.public_key);
         if (!result.updated) {
           return res.status(500).json({ success: false, error: `Failed to update config: ${result.reason}` });
         }
@@ -376,7 +393,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
     try {
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        'SELECT id, device_name, username, status FROM device_enrollment_requests ORDER BY id DESC'
+        'SELECT id, device_name, username, status, machine_id FROM device_enrollment_requests ORDER BY id DESC'
       );
       res.json({ success: true, requests: rows });
     } catch (error) {
@@ -413,7 +430,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
         try {
           const admin = req.session && req.session.user ? req.session.user : 'unknown';
           logAction(admin, 'device_decline', { device_name: reqs[0].device_name, user: reqs[0].username });
-        } catch (e) {}
+        } catch (e) { }
       }
 
       res.json({ success: true, message: 'Enrollment request declined' });
@@ -429,7 +446,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
   // Enroll device (client endpoint)
   router.post('/enroll-device', authenticateToken, async (req, res) => {
-    const { deviceName } = req.body || {};
+    const { deviceName, machineId } = req.body || {};
     const username = req.user.username;
     if (!deviceName) {
       return res.status(400).json({ success: false, error: 'Missing deviceName' });
@@ -451,8 +468,8 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
       // Create enrollment request in separate table
       await connection.execute(
-        'INSERT INTO device_enrollment_requests (device_name, username, status) VALUES (?, ?, "pending")',
-        [deviceName, username]
+        'INSERT INTO device_enrollment_requests (device_name, username, status, machine_id) VALUES (?, ?, "pending", ?)',
+        [deviceName, username, machineId || '']
       );
 
       res.json({ success: true, message: 'Enrollment request submitted' });
@@ -522,7 +539,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
         try {
           const admin = req.session && req.session.user ? req.session.user : 'unknown';
           logAction(admin, 'disable_device', { device_name: rows[0].device_name, user: rows[0].username });
-        } catch (e) {}
+        } catch (e) { }
       }
       res.json({ success: true, message: 'Device disabled successfully' });
     } catch (error) {
@@ -582,7 +599,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       try {
         const admin = req.session && req.session.user ? req.session.user : 'unknown';
         logAction(admin, 'enable_device', { device_name: deviceName, user: deviceUser });
-      } catch (e) {}
+      } catch (e) { }
 
       res.json({ success: true, message: 'Device enabled successfully', expire_date: expireEpoch });
     } catch (error) {
@@ -592,7 +609,8 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       if (connection) {
         await connection.end();
       }
-    }});
+    }
+  });
 
 
   // edit expire date for a device (admin UI)
@@ -636,23 +654,24 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
     try {
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        'SELECT public_key FROM devices WHERE device_name = ? AND username = ? ORDER BY id DESC LIMIT 1',
+        'SELECT public_key, interface FROM devices WHERE device_name = ? AND username = ? ORDER BY id DESC LIMIT 1',
         [deviceName, username]
       );
 
-      if (rows.length === 0 || !rows[0].public_key) {
+      if (rows.length === 0 || !rows[0].public_key || !rows[0].interface) {
         return res.status(404).json({ success: false, error: 'Device not found' });
       }
 
       const publicKey = rows[0].public_key;
-      const latestHandshake = getPeerLatestHandshakeEpochSeconds(publicKey);
+      const iface = rows[0].interface;
+      const latestHandshake = getPeerLatestHandshakeEpochSeconds(iface, publicKey);
       const isActive = latestHandshake !== null && latestHandshake > 0;
 
       if (!isActive) {
         return res.json({ success: true, active: false, disabled: false });
       }
 
-      const result = deletePeerByPublicKey(publicKey);
+      const result = deletePeerByPublicKey(iface, publicKey);
       if (!result.updated) {
         return res.status(404).json({ success: false, error: result.reason || 'Cannot disable peer' });
       }

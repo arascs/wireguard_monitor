@@ -1,7 +1,4 @@
 #!/bin/bash
-# wg_disable_peer.sh <interface> <publicKey>
-# Disables a WireGuard peer by commenting out its [Peer] block in the conf file,
-# then syncs the running interface (if up).
 set -e
 
 IFACE="$1"

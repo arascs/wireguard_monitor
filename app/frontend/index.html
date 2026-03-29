@@ -6,124 +6,9 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
     <style>
-        * {
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Roboto', sans-serif;
-            margin: 0;
-            padding: 70px 20px 20px 220px;
-            background-color: #f0f0f0;
-            color: #333;
-            font-size: 15px;
-            line-height: 1.5;
-        }
-
-        /* ── Navbar ── */
-        .navbar {
-            background-color: rgba(134, 22, 24, 0.9);
-            color: white;
-            padding: 10px 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            z-index: 1000;
-            box-sizing: border-box;
-        }
-
-        .navbar h1 {
-            margin: 0;
-            font-weight: 700;
-            font-size: 2rem;
-        }
-
-        .hostname-display {
-            color: white;
-            font-size: 0.85rem;
-            margin-right: 10px;
-            padding: 6px 14px;
-            font-weight: 500;
-            background-color: rgba(255, 255, 255, .15);
-            border: 1px solid rgba(255, 255, 255, .3);
-            border-radius: 6px;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .nav-buttons {
-            display: flex;
-            gap: 10px;
-            margin-right: 20px;
-        }
-
-        .nav-btn {
-            text-decoration: none;
-            padding: 8px 15px;
-            border-radius: 5px;
-            background-color: rgba(134, 22, 24, .8);
-            color: white;
-            transition: background-color .3s;
-            font-weight: 500;
-            font-size: .9rem;
-            border: none;
-            cursor: pointer;
-        }
-
-        .nav-btn:hover {
-            background-color: rgba(134, 22, 24, 1);
-        }
-
-        /* ── Sidebar ── */
-        .sidebar {
-            position: fixed;
-            top: 60px;
-            left: 0;
-            bottom: 0;
-            width: 200px;
-            background-color: #fff;
-            box-shadow: 2px 0 8px rgba(0, 0, 0, .08);
-            padding: 15px 10px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .sidebar-menu {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .sidebar-item {
-            border: none;
-            border-radius: 5px;
-            padding: 8px 10px;
-            text-align: left;
-            background-color: transparent;
-            color: #333;
-            font-size: .95rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background-color .2s, color .2s;
-        }
-
-        .sidebar-item:hover,
-        .sidebar-item.active {
-            background-color: rgba(134, 22, 24, .1);
-            color: rgba(134, 22, 24, 1);
-        }
-
         /* ── Page layout ── */
         .page-title {
             font-size: 1.5rem;
@@ -232,6 +117,7 @@
             font-size: .8rem;
             cursor: pointer;
             transition: background .2s;
+            font-family: inherit;
         }
 
         .btn-terminate:hover {
@@ -241,27 +127,6 @@
 </head>
 
 <body data-current="main-dashboard">
-    <div class="navbar">
-        <h1>WireGuard VPN Manager</h1>
-        <div class="nav-buttons">
-            <span class="hostname-display"><strong>{{HOSTNAME}}</strong></span>
-            <a href="/main-dashboard" class="nav-btn">Home</a>
-        </div>
-    </div>
-
-    <div class="sidebar">
-        <div class="sidebar-menu">
-            <button class="sidebar-item" data-section="main-dashboard" data-path="/">Dashboard</button>
-            <button class="sidebar-item" data-section="connections" data-path="/interfaces">Interfaces</button>
-            <button class="sidebar-item" data-section="users" data-path="/users">Identity</button>
-            <button class="sidebar-item" data-section="devices" data-path="/devices">Devices</button>
-            <button class="sidebar-item" data-section="applications" data-path="/applications">Applications</button>
-            <button class="sidebar-item" data-section="access_rules" data-path="/access-rules">Access rules</button>
-            <button class="sidebar-item" data-section="audit" data-path="/audit-log">Logging</button>
-            <button class="sidebar-item" data-section="backup" data-path="/backup">Backup &amp; Restore</button>
-            <button class="sidebar-item" data-section="settings" data-path="/settings">Settings</button>
-        </div>
-    </div>
 
     <div class="dashboard-grid">
         <!-- 1. Total Traffic -->
@@ -276,7 +141,7 @@
         <div class="card">
             <div class="card-title">Active Devices</div>
             <div class="stat-header">
-                <span class="stat-badge" id="devices-count">–</span>
+                <span class="stat-badge" id="devices-count">_</span>
                 <span class="stat-label">connected devices / total</span>
             </div>
             <div id="devices-table-wrap">
@@ -288,7 +153,7 @@
         <div class="card">
             <div class="card-title">Active Sites</div>
             <div class="stat-header">
-                <span class="stat-badge" id="sites-count">–</span>
+                <span class="stat-badge" id="sites-count">_</span>
                 <span class="stat-label">connected sites / total</span>
             </div>
             <div id="sites-table-wrap">
@@ -297,15 +162,8 @@
         </div>
     </div>
 
-    <script src="/js/layout.js"></script>
+    <script src="/js/navbar.js"></script>
     <script>
-        // ── Sidebar navigation ────────────────────────────────────────────────
-        document.querySelectorAll('.sidebar-item').forEach(btn => {
-            btn.addEventListener('click', () => {
-                window.location.href = btn.dataset.path;
-            });
-        });
-
         // ── Helpers ──────────────────────────────────────────────────────────
         function fmtBytes(b) {
             if (!b) return '0 B';

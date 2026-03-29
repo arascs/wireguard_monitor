@@ -1,10 +1,34 @@
 const express = require('express');
-const router = express.Router();
 const fs = require('fs');
 const path = require('path');
 
 const CONFIG_DIR = '/etc/wireguard/';
 const TRAFFIC_FILE = path.join(__dirname, '../../traffic_history.json');
+
+function createMainDashboardRoutes({ mysql, dbConfig }) {
+  const router = express.Router();
+
+  async function getDeviceCount() {
+    let connection;
+    try {
+      connection = await mysql.createConnection(dbConfig);
+      const [rows] = await connection.execute('SELECT COUNT(*) AS total FROM devices');
+      return rows[0] && rows[0].total ? parseInt(rows[0].total, 10) : 0;
+    } finally {
+      if (connection) await connection.end();
+    }
+  }
+
+  async function getSiteCount() {
+    let connection;
+    try {
+      connection = await mysql.createConnection(dbConfig);
+      const [rows] = await connection.execute('SELECT COUNT(*) AS total FROM sites');
+      return rows[0] && rows[0].total ? parseInt(rows[0].total, 10) : 0;
+    } finally {
+      if (connection) await connection.end();
+    }
+  }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -124,20 +148,22 @@ router.get('/traffic', (req, res) => {
 });
 
 // GET /api/main-dashboard/active-devices
-router.get('/active-devices', (req, res) => {
+router.get('/active-devices', async (req, res) => {
     try {
-        const { active, total } = buildActivePeers('Client');
-        res.json({ success: true, active, totalDevices: total });
+        const { active } = buildActivePeers('Client');
+        const totalDevices = await getDeviceCount();
+        res.json({ success: true, active, totalDevices });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
 // GET /api/main-dashboard/active-sites
-router.get('/active-sites', (req, res) => {
+router.get('/active-sites', async (req, res) => {
     try {
-        const { active, total } = buildActivePeers('Site');
-        res.json({ success: true, active, totalSites: total });
+        const { active } = buildActivePeers('Site');
+        const totalSites = await getSiteCount();
+        res.json({ success: true, active, totalSites });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
@@ -220,4 +246,7 @@ router.post('/disable-peer', (req, res) => {
     }
 });
 
-module.exports = router;
+  return router;
+}
+
+module.exports = createMainDashboardRoutes;
