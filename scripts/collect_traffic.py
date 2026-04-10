@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 WG_DIR       = "/etc/wireguard"
 SYS_NET_DIR  = "/sys/class/net"
-TRAFFIC_FILE = os.path.join(os.path.dirname(__file__), "../app/traffic_history.json")
+TRAFFIC_FILE = "/etc/wireguard/logs/traffic_history.json"
 
 
 def is_wg_interface(iface: str) -> bool:

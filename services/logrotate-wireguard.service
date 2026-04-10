@@ -1,0 +1,6 @@
+[Unit]
+Description=Rotate WireGuard logs
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/logrotate-wireguard.sh

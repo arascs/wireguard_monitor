@@ -1,8 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const LOG_FILE = path.join(__dirname, '../audit_log.json');
-const SECURITY_FILE = path.join(__dirname, '../endpoint_events.json');
+const LOG_FILE = '/etc/wireguard/logs/audit_log.json';
+const SECURITY_FILE = '/etc/wireguard/logs/endpoint_events.json';
 
 function logAction(admin, action, details) {
   const entry = {

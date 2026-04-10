@@ -582,7 +582,7 @@ app.get('/api/interface-log/:interfaceName', (req, res) => {
     if (!interfaceName) {
       return res.status(400).json({ success: false, error: 'Invalid interface name' });
     }
-    const LOG_FILE = '/var/log/wg_systemd.log';
+    const LOG_FILE = '/etc/wireguard/logs/wg_systemd.log';
     let lines;
     try {
       // grep lines matching the interface name, then take last 50
@@ -1417,7 +1417,7 @@ app.get('/api/security-events', requireAuth, (req, res) => {
 });
 
 // session history retrieval (sessions log)
-const HISTORY_DIR = '/var/log/vpn_history';
+const HISTORY_DIR = '/etc/wireguard/logs/vpn_history';
 app.use('/api', createSessionLogRoutes({ requireAuth, HISTORY_DIR }));
 
 // backup APIs

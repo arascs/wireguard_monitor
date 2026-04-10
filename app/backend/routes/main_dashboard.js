@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const CONFIG_DIR = '/etc/wireguard/';
-const TRAFFIC_FILE = path.join(__dirname, '../../traffic_history.json');
+const TRAFFIC_FILE = '/etc/wireguard/logs/traffic_history.json';
 
 function createMainDashboardRoutes({ mysql, dbConfig }) {
   const router = express.Router();

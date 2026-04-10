@@ -6,23 +6,22 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
 
 ## Features
 
-### Configuration UI
-#### Admin UI
+### Admin
+
+#### Configuration
 - Create, edit, and delete **WireGuard interfaces**
 - Manage peers for each interface
 - Manage client-to-site connections using user identity and device enrollment
 - Apply access rules to internal applications
 - Create new key pair and synchronize key to other peers
-- Apply configuration changes directly to the system
+- Apply configuration changes directly to the system 
 
-#### Client UI
-- Web interface now requires local login using JWT tokens from identity server
-- After successful authentication the app will proxy enroll/connect actions so the password is never sent again from the browser
+#### Backup and Restore
+- Backup and restore configuration files, log files and databases
+- Snapshot review for diffing between snapshots
 
-#### Identity Server
-- New Python Flask server (`scripts/identity_server.py`) running on port 5001
-- Handles `/api/login` endpoint for user authentication, issues JWT tokens
-- Uses same credentials file as VPN server backend
+### Client
+- Automatically generate key pair to enroll device and join tunnels without manual setup. 
 
 ---
 
@@ -41,6 +40,9 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
 - Traffic from peers to **local services**
 - Peer online/offline detection
 
+### Audit logs
+- Support admin actions, session logging and security alerts on abnormal handshakes and peer endpoint changes.
+
 ---
 
 ### Data Collection
@@ -48,7 +50,10 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
   - WireGuard statistics (`wg`, `/proc`, netlink)
   - Interface counters
   - Peer traffic metrics
-- Data is stored in log files for further integration with SOC systems
+  - `conntrack` to detect sessions to internal applications
+  - Packet inspection to detect abnormal handshakes
+- Local log files are rotated using `logrotate`
+- Data is stored in log files and metric exports for further integration with SOC systems
 
 ---
 

@@ -11,9 +11,9 @@ import pymysql
 import ipaddress
 
 INTERVAL = 5
-LOG_FILE = "/var/log/vpn_monitor.log"
+LOG_FILE = "/etc/wireguard/logs/vpn_monitor.log"
 STATUS_FILE = "/dev/shm/vpn_live_status.json"
-HISTORY_DIR = "/var/log/vpn_history"
+HISTORY_DIR = "/etc/wireguard/logs/vpn_history"
 
 CONNTRACK_CMD = shutil.which("conntrack") or "conntrack"
 
