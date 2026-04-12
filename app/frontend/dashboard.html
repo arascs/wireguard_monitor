@@ -76,23 +76,109 @@
             margin-top: 15px;
         }
 
-        .info-item {
-            padding: 10px;
-            border-radius: 2px;
-            border: 1px solid #e0e0e0;
-            background-color: #fafafa;
+        /* Interface info as a single table */
+        .if-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 14px;
+            font-size: 0.9rem;
         }
 
-        .info-item strong {
-            display: block;
-            margin-bottom: 5px;
-            color: #555;
-            font-size: 0.9em;
+        .if-table th, .if-table td {
+            padding: 8px 12px;
+            border: 1px solid #e8e8e8;
+            text-align: left;
         }
 
-        .info-item span {
-            word-break: break-all;
+        .if-table th {
+            background: #fafafa;
+            color: #666;
             font-weight: 500;
+            white-space: nowrap;
+            width: 160px;
+        }
+
+        .if-table td {
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 0.85rem;
+        }
+
+        /* Peers section */
+        .peers-search {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .peers-search input {
+            flex: 1;
+            padding: 7px 11px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            font-family: inherit;
+        }
+
+        .peers-table-wrap {
+            max-height: 380px;
+            overflow-y: auto;
+            border: 1px solid #eee;
+            border-radius: 6px;
+        }
+
+        .peers-tbl {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+        }
+
+        .peers-tbl th {
+            position: sticky;
+            top: 0;
+            background: #fafafa;
+            color: #555;
+            font-weight: 500;
+            padding: 9px 12px;
+            border-bottom: 1px solid #e0e0e0;
+            text-align: left;
+            white-space: nowrap;
+        }
+
+        .peers-tbl td {
+            padding: 8px 12px;
+            border-bottom: 1px solid #f3f3f3;
+            vertical-align: middle;
+        }
+
+        .peers-tbl tbody tr:hover {
+            background: #fafafa;
+            cursor: pointer;
+        }
+
+        .peer-badge {
+            font-size: 0.72em;
+            padding: 2px 7px;
+            border-radius: 6px;
+            color: white;
+            font-weight: bold;
+        }
+
+        .badge-active   { background-color: #28a745; }
+        .badge-inactive { background-color: #6c757d; }
+        .badge-disabled { background-color: #dc3545; }
+
+        /* Two charts side by side */
+        .charts-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        @media (max-width: 900px) {
+            .charts-row { grid-template-columns: 1fr; }
         }
 
         .peers-grid {
@@ -101,6 +187,7 @@
             gap: 20px;
             margin-top: 20px;
         }
+
 
         .peer-card {
             padding: 20px;
@@ -287,8 +374,8 @@
 
 <body data-current="connections">
 
+    <!-- 1. Interface overview -->
     <div class="interface-overview">
-        <!-- top row: interface title, status and controls -->
         <div id="interface-controls" style="display:flex;justify-content:space-between;align-items:center;">
             <div>
                 <h2 id="title" style="margin:0;color:rgba(134,22,24,1);"></h2>
@@ -303,6 +390,38 @@
         <div id="interface-info" class="loading">Loading interface information...</div>
     </div>
 
+    <!-- 2. Peers section -->
+    <div class="peers-section">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h2 style="margin:0;">Peers</h2>
+            <button id="add-peer-btn">Add Peer</button>
+        </div>
+        <div class="peers-search">
+            <input type="text" id="peer-search" placeholder="Search by name or IP…" oninput="filterPeersTable()">
+        </div>
+        <div class="peers-table-wrap">
+            <table class="peers-tbl" id="peers-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Allowed IPs</th>
+                        <th>Endpoint</th>
+                        <th>Last Handshake</th>
+                        <th>RX / TX</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="peers-tbody">
+                    <tr><td colspan="7" class="loading">Loading peers...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <!-- hidden container still needed by JS event delegation -->
+        <div id="peers-container" style="display:none;"></div>
+    </div>
+
+    <!-- 3. Charts section (cuối cùng) -->
     <div class="chart-section">
         <h2>Interface Statistics</h2>
         <div class="filter-form">
@@ -311,20 +430,14 @@
             <button id="applyFilter">Apply Filter</button>
             <button id="clearFilter">Clear</button>
         </div>
-        <div id="rxSpeedChart" style="height:300px; margin-bottom: 20px;"></div>
-        <div id="txSpeedChart" style="height:300px; margin-bottom: 20px;"></div>
-        <div id="rxDropRateChart" style="height:250px; margin-bottom: 20px;"></div>
-        <div id="txDropRateChart" style="height:250px;"></div>
-    </div>
-
-    <div class="peers-section">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-            <h2>Peers</h2>
-            <button id="add-peer-btn"
-                style="padding:8px 15px; background-color:rgba(134,22,24,0.8); color:white; border:none; border-radius:5px;">Add
-                Peer</button>
+        <div class="charts-row">
+            <div id="rxSpeedChart" style="height:300px;"></div>
+            <div id="txSpeedChart" style="height:300px;"></div>
         </div>
-        <div id="peers-container" class="loading">Loading peers...</div>
+        <div class="charts-row">
+            <div id="rxDropRateChart" style="height:250px;"></div>
+            <div id="txDropRateChart" style="height:250px;"></div>
+        </div>
     </div>
 
     <!-- edit interface modal -->

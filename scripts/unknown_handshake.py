@@ -117,7 +117,7 @@ def build_tcpdump_cmd(site_ports):
     port_filter = " or ".join([f"udp dst port {p}" for p in site_ports])
     bpf_filter = f"udp and ({port_filter}) and udp[8] = 1"
     # Set interface ens37 in global settings
-    return ["tcpdump", "-i", "ens37", "-n", "-tttt", "-l", bpf_filter]
+    return ["tcpdump", "-i", "ens37", "-Q", "in", "-n", "-tttt", "-l", bpf_filter]
 
 def start_tcpdump(site_ports):
     cmd = build_tcpdump_cmd(site_ports)

@@ -83,6 +83,62 @@ PersistentKeepalive = 25
   }
 }
 
+// Security check before connecting VPN
+function runSecurityCheck() {
+  const issues = [];
+
+  // 1. Kernel version must be > 4
+  try {
+    const kernelVersion = run('uname -r').trim();
+    const majorVersion = parseInt(kernelVersion.split('.')[0], 10);
+    if (majorVersion <= 4) {
+      issues.push(`Kernel version ${kernelVersion} is too old (must be > 4)`);
+    }
+  } catch (e) {
+    issues.push('Cannot determine kernel version: ' + e.message);
+  }
+
+  // 2. SSH: PermitRootLogin yes (not commented)
+  try {
+    const sshdConfig = fs.readFileSync('/etc/ssh/sshd_config', 'utf8');
+    const hasPermitRootLogin = sshdConfig.split('\n').some(line => {
+      const trimmed = line.trim();
+      return !trimmed.startsWith('#') && /^PermitRootLogin\s+yes$/i.test(trimmed);
+    });
+    if (hasPermitRootLogin) {
+      issues.push('SSH PermitRootLogin is set to yes');
+    }
+  } catch (e) {
+    // File not readable or not present — skip
+  }
+
+  // 3. Firewall status
+  try {
+    run('which ufw');
+    // ufw is available
+    try {
+      const ufwStatus = run('ufw status').trim();
+      if (/^Status:\s*inactive/im.test(ufwStatus)) {
+        issues.push('Firewall (ufw) is inactive');
+      }
+    } catch (e) {
+      issues.push('Cannot check ufw status: ' + e.message);
+    }
+  } catch (_) {
+    // ufw not found, fallback to iptables
+    try {
+      const iptablesOutput = run('iptables -L INPUT').trim();
+      if (/Chain INPUT \(policy ACCEPT\)/i.test(iptablesOutput)) {
+        issues.push('Firewall (iptables) INPUT policy is ACCEPT (no firewall rules)');
+      }
+    } catch (e) {
+      issues.push('Cannot check iptables status: ' + e.message);
+    }
+  }
+
+  return issues;
+}
+
 // 1. Get VPN servers list
 app.get('/api/client/servers', (req, res) => {
   if (!fs.existsSync(VPN_SERVERS_FILE)) {
@@ -241,7 +297,13 @@ app.post('/api/client/connect/:ip/:port', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Missing Authorization header' });
     }
 
-    // 7a. Check enrollment
+    // 7a. Security check
+    const securityIssues = runSecurityCheck();
+    if (securityIssues.length > 0) {
+      return res.status(403).json({ success: false, error: 'Security check failed', issues: securityIssues });
+    }
+
+    // 7b. Check enrollment
     const checkUrl = `http://${ip}:${port}/api/check-device-enroll`;
     let r = await fetch(checkUrl, {
       method: 'POST',
@@ -256,7 +318,7 @@ app.post('/api/client/connect/:ip/:port', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Device not enrolled' });
     }
 
-    // 7b. Login and get config
+    // 7c. Login and get config
     const loginUrl = `http://${ip}:${port}/api/connect-vpn`;
     r = await fetch(loginUrl, {
       method: 'POST',
@@ -269,7 +331,7 @@ app.post('/api/client/connect/:ip/:port', async (req, res) => {
     data = await r.json();
     if (!data.success) return res.status(r.status).json(data);
 
-    // 7c. Configure local interface
+    // 7d. Configure local interface
     configureClientInterface({
       allowedIPs: data.allowedIPs,
       serverPublicKey: data.serverPublicKey,
@@ -277,7 +339,7 @@ app.post('/api/client/connect/:ip/:port', async (req, res) => {
       serverAllowedIPs: data.serverAllowedIPs
     });
 
-    // 7d. Save server public key to VPN_servers.json
+    // 7e. Save server public key to VPN_servers.json
     try {
       const serversData = JSON.parse(fs.readFileSync(VPN_SERVERS_FILE, 'utf8'));
       const server = serversData.servers.find(s => s.ip === ip && s.port === parseInt(port));

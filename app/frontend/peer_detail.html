@@ -10,9 +10,10 @@
     <link rel="stylesheet" href="/styles.css">
     <style>
         body {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
-            padding: 80px 25px 25px 185px;
+            padding-top: 80px;
+            padding-left: 185px;
         }
 
         button {
@@ -34,7 +35,7 @@
 
         .peer-detail-container {
             background-color: white;
-            padding: 30px;
+            padding: 16px 20px;
             border-radius: 5px;
             border: none;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
@@ -42,14 +43,14 @@
 
         .peer-header {
             border-bottom: 2px solid rgba(134, 22, 24, 0.5);
-            padding-bottom: 20px;
-            margin-bottom: 30px;
+            padding-bottom: 10px;
+            margin-bottom: 14px;
         }
 
         .peer-name {
-            font-size: 1.8em;
+            font-size: 1.5em;
             font-weight: bold;
-            margin-bottom: 10px;
+            margin-bottom: 6px;
             color: rgba(134, 22, 24, 1);
         }
 
@@ -63,14 +64,15 @@
         }
 
         .detail-section {
-            margin-bottom: 30px;
+            margin-bottom: 12px;
         }
 
         .detail-section h3 {
-            border-bottom: 1px solid rgba(134, 22, 24, 0.5);
-            padding-bottom: 10px;
-            margin-bottom: 15px;
+            border-bottom: 1px solid rgba(134, 22, 24, 0.3);
+            padding-bottom: 6px;
+            margin: 0 0 10px;
             color: rgba(134, 22, 24, 1);
+            font-size: 1rem;
         }
 
         .detail-grid {
@@ -157,7 +159,7 @@
         }
 
         .filter-form {
-            margin-bottom: 20px;
+            margin-bottom: 10px;
             display: flex;
             gap: 10px;
             align-items: center;
@@ -171,6 +173,75 @@
             padding: 5px;
             border: 1px solid #ddd;
             border-radius: 5px;
+        }
+        /* Connection info & throughput as tables */
+        .detail-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        .detail-table th, .detail-table td {
+            padding: 6px 10px;
+            border: 1px solid #ededed;
+            text-align: left;
+        }
+
+        .detail-table th {
+            background: #fafafa;
+            color: #555;
+            font-weight: 500;
+            white-space: nowrap;
+            width: 180px;
+        }
+
+        .detail-table td {
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 0.85rem;
+        }
+
+        /* Throughput summary row */
+        .throughput-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .throughput-box {
+            text-align: center;
+            padding: 9px 8px;
+            border-radius: 6px;
+            background: #fafafa;
+            border: 1px solid #ebebeb;
+        }
+
+        .throughput-box strong {
+            display: block;
+            color: #666;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .throughput-box .val {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: rgba(134, 22, 24, 1);
+        }
+
+        /* Two charts side by side */
+        .charts-pair {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 900px) {
+            .charts-pair { grid-template-columns: 1fr; }
+            .throughput-row { grid-template-columns: 1fr 1fr; }
         }
     </style>
 </head>

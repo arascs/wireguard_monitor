@@ -133,33 +133,36 @@ async function loadPeerPage() {
 function renderSkeleton(peer) {
     if (document.getElementById('peer-skeleton')) return;
 
+    const statusColors = { active: '#28a745', inactive: '#6c757d', disabled: '#dc3545' };
+    const statusColor = statusColors[peer.status] || '#6c757d';
+
     const content = `
         <div id="peer-skeleton">
             <div class="peer-header">
                 <div class="peer-name">${peer.name || `Peer ${peer.id}`}</div>
-                <div id="peer-status-badge" class="peer-status ${peer.status}">${peer.status.toUpperCase()}</div>
             </div>
-            <div class="detail-section" style="background-color: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1); padding: 10px; margin-bottom: 20px;">
-                <h3>Connection Information</h3>
-                <div class="detail-grid">
-                    <div class="detail-item" style="border: 1px solid #861618; padding: 10px;"><strong>Public Key</strong><span class="value">${peer.publicKey || 'Not set'}</span></div>
-                    <div class="detail-item" style="border: 1px solid #861618; padding: 10px;"><strong>Endpoint</strong><span id="peer-endpoint-val">${peer.endpoint || 'Not set'}</span></div>
-                    <div class="detail-item" style="border: 1px solid #861618; padding: 10px;"><strong>Allowed IPs</strong><span>${peer.allowedIPs || 'Not set'}</span></div>
-                    <div class="detail-item" style="border: 1px solid #861618; padding: 10px;"><strong>Latest Handshake</strong><span id="peer-handshake-val">${calculateHandshake(peer.handshake)}</span></div>
-                </div>
+
+            <!-- Connection Information + Throughput -->
+            <div class="detail-section" style="background:#fff;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.07);padding:14px;margin-bottom:10px;">
+                <h3>Peer Information</h3>
+                <table class="detail-table">
+                    <tbody>
+                        <tr><th>Status</th><td><span id="peer-status-badge" style="display:inline-block;padding:2px 10px;border-radius:4px;background:${statusColor};color:#fff;font-size:0.8rem;font-weight:600;">${peer.status.toUpperCase()}</span></td></tr>
+                        <tr><th>Public Key</th><td>${peer.publicKey || 'Not set'}</td></tr>
+                        <tr><th>Endpoint</th><td id="peer-endpoint-val">${peer.endpoint || 'Not set'}</td></tr>
+                        <tr><th>Allowed IPs</th><td>${peer.allowedIPs || 'Not set'}</td></tr>
+                        <tr><th>Latest Handshake</th><td id="peer-handshake-val">${calculateHandshake(peer.handshake)}</td></tr>
+                        <tr><th>Received (RX)</th><td id="peer-rx-human">${formatBytes(peer.receivedBytes)}</td></tr>
+                        <tr><th>Sent (TX)</th><td id="peer-tx-human">${formatBytes(peer.sentBytes)}</td></tr>
+                    </tbody>
+                </table>
             </div>
-            <div class="detail-section" style="background-color: white; border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25); padding: 10px; margin-bottom: 20px;">
-                <h3>Throughput Statistics</h3>
-                <div class="throughput-section">
-                    <div class="throughput-grid">
-                        <div class="throughput-item" style="border: 1px solid #861618; padding: 10px;"><strong>Received</strong><div id="peer-rx-human" class="value">${formatBytes(peer.receivedBytes)}</div></div>
-                        <div class="throughput-item" style="border: 1px solid #861618; padding: 10px;"><strong>Sent</strong><div id="peer-tx-human" class="value">${formatBytes(peer.sentBytes)}</div></div>
-                        <div class="throughput-item" style="border: 1px solid #861618; padding: 10px;"><strong>Total</strong><div id="peer-total-human" class="value">${formatBytes(peer.totalBytes)}</div></div>
-                    </div>
-                </div>
-            </div>
-            <div id="connections-section" class="detail-section" style="box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); background-color: white; border-radius: 8px; padding: 15px; margin-bottom: 30px;"></div>
-            <div class="detail-section" style="box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); background-color: white; border-radius: 8px; padding: 15px; margin-bottom: 30px;">
+
+            <!-- Active Connections -->
+            <div id="connections-section" class="detail-section" style="box-shadow:0 1px 4px rgba(0,0,0,.07);background:#fff;border-radius:6px;padding:14px;margin-bottom:10px;"></div>
+
+            <!-- Peer Statistics Charts -->
+            <div class="detail-section" style="box-shadow:0 1px 4px rgba(0,0,0,.07);background:#fff;border-radius:6px;padding:14px;margin-bottom:10px;">
                 <h3>Peer Statistics</h3>
                 <div class="filter-form">
                     <label>From: <input type="date" id="peerStartDate"></label>
@@ -167,14 +170,19 @@ function renderSkeleton(peer) {
                     <button id="applyPeerFilter">Apply Filter</button>
                     <button id="clearPeerFilter">Clear</button>
                 </div>
-                <div id="peerRxSpeedChart" style="height:300px; margin-bottom: 20px;"></div>
-                <div id="peerTxSpeedChart" style="height:300px;"></div>
+                <div class="charts-pair">
+                    <div id="peerRxSpeedChart" style="height:260px;"></div>
+                    <div id="peerTxSpeedChart" style="height:260px;"></div>
+                </div>
             </div>
         </div>
     `;
     document.getElementById('peer-detail-content').innerHTML = content;
     setupFilterEventListeners();
 }
+
+
+
 
 function calculateHandshake(timestamp) {
     if (!timestamp) return "Never";
@@ -201,15 +209,19 @@ async function refreshPeerDataOnly() {
         const response = await fetch(url);
         const peer = await response.json();
 
-        document.getElementById('peer-status-badge').className = `peer-status ${peer.status}`;
-        document.getElementById('peer-status-badge').innerText = peer.status.toUpperCase();
+        const statusColors = { active: '#28a745', inactive: '#6c757d', disabled: '#dc3545' };
+        const badge = document.getElementById('peer-status-badge');
+        if (badge) {
+            badge.style.background = statusColors[peer.status] || '#6c757d';
+            badge.innerText = peer.status.toUpperCase();
+        }
         document.getElementById('peer-handshake-val').innerText = calculateHandshake(peer.handshake);
         document.getElementById('peer-rx-human').innerText = formatBytes(peer.receivedBytes);
         document.getElementById('peer-tx-human').innerText = formatBytes(peer.sentBytes);
-        document.getElementById('peer-total-human').innerText = formatBytes(peer.totalBytes);
         document.getElementById('peer-endpoint-val').innerText = peer.endpoint || 'Not set';
     } catch (e) { console.error(e); }
 }
+
 
 // Cập nhật biểu đồ qua setOption
 function updatePeerCharts() {

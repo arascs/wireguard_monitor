@@ -42,39 +42,28 @@ async function loadInterfaceInfo() {
             currentInterfaceConfig = ifaceObj || {};
             const interfaceInfo = document.getElementById('interface-info');
 
-            interfaceInfo.innerHTML = `
-                <div class="interface-info-grid">
-                    <div class="info-item">
-                        <strong>Public Key</strong>
-                        <span>${ifaceObj.publicKey ? ifaceObj.publicKey : 'Not set'}</span>
-                    </div>
-                    <div class="info-item">
-                        <strong>Address</strong>
-                        <span>${ifaceObj.address || 'Not set'}</span>
-                    </div>
-                    <div class="info-item">
-                        <strong>Listen Port</strong>
-                        <span>${ifaceObj.listenPort || 'Not set'}</span>
-                    </div>
-                
-                    <div class="info-item" style="border-color: #007bff; background-color: #e3f2fd;">
-                        <strong>Active Peers (< 180s)</strong>
-                        <span id="active-peers-stat" style="font-size: 1.1em; font-weight: bold; color: #0056b3;">0/0</span>
-                    </div>
+            const rows = [
+                ['Public Key',  ifaceObj.publicKey  || 'Not set'],
+                ['Address',     ifaceObj.address    || 'Not set'],
+                ['Listen Port', ifaceObj.listenPort || 'Not set'],
+                ['DNS',         ifaceObj.dns        || 'Not set'],
+                ['MTU',         ifaceObj.mtu        || 'Not set'],
+            ];
+            if (ifaceObj.preUp)   rows.push(['PreUp',   ifaceObj.preUp]);
+            if (ifaceObj.postUp)  rows.push(['PostUp',  ifaceObj.postUp]);
+            if (ifaceObj.preDown) rows.push(['PreDown', ifaceObj.preDown]);
+            if (ifaceObj.postDown)rows.push(['PostDown',ifaceObj.postDown]);
 
-                    <div class="info-item">
-                        <strong>DNS</strong>
-                        <span>${ifaceObj.dns || 'Not set'}</span>
-                    </div>
-                    <div class="info-item">
-                        <strong>MTU</strong>
-                        <span>${ifaceObj.mtu || 'Not set'}</span>
-                    </div>
-                    ${ifaceObj.preUp ? `<div class="info-item"><strong>PreUp</strong><span>${ifaceObj.preUp}</span></div>` : ''}
-                    ${ifaceObj.postUp ? `<div class="info-item"><strong>PostUp</strong><span>${ifaceObj.postUp}</span></div>` : ''}
-                    ${ifaceObj.preDown ? `<div class="info-item"><strong>PreDown</strong><span>${ifaceObj.preDown}</span></div>` : ''}
-                    ${ifaceObj.postDown ? `<div class="info-item"><strong>PostDown</strong><span>${ifaceObj.postDown}</span></div>` : ''}
-                </div>
+            interfaceInfo.innerHTML = `
+                <table class="if-table">
+                    <tbody>
+                        ${rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')}
+                        <tr>
+                            <th>Active Peers</th>
+                            <td><span id="active-peers-stat" style="font-weight:600;color:#0056b3;">0/0</span></td>
+                        </tr>
+                    </tbody>
+                </table>
             `;
         } else {
             document.getElementById('interface-info').innerHTML = '<div class="error">Error loading interface information</div>';
@@ -85,6 +74,10 @@ async function loadInterfaceInfo() {
     }
 }
 
+
+// All peers data cached for client-side search
+let _allPeersData = [];
+
 async function loadPeers() {
     try {
         const interfaceId = getInterfaceIdFromUrl();
@@ -92,113 +85,94 @@ async function loadPeers() {
         const response = await fetch(url);
         const data = await response.json();
 
-        const peersContainer = document.getElementById('peers-container');
+        const tbody = document.getElementById('peers-tbody');
 
         if (!Array.isArray(data)) {
-            peersContainer.innerHTML = '<div class="error">Error loading peers: Invalid response</div>';
+            tbody.innerHTML = '<tr><td colspan="7" class="error">Error loading peers: Invalid response</td></tr>';
             return;
         }
 
         if (data.length === 0) {
-            peersContainer.innerHTML = '<p>No peers configured.</p>';
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#888;padding:20px;">No peers configured.</td></tr>';
             return;
         }
 
-        // Calculate active/inactive
         const nowSec = Math.floor(Date.now() / 1000);
         let activeCount = 0;
 
-        // Xử lý dữ liệu từng peer
-        const processedPeers = data.map(peer => {
-            // Backend phải trả về 'handshake' là Unix timestamp (int)
+        _allPeersData = data.map(peer => {
             const lastHandshake = parseInt(peer.handshake || 0);
             const diff = nowSec - lastHandshake;
-
-            // Active nếu handshake > 0 VÀ cách đây < 180 giây
             let calculatedStatus = 'inactive';
-
-            // treat disabled flag coming from backend
             if (peer.isDisabled) {
                 calculatedStatus = 'disabled';
             } else if (lastHandshake > 0 && diff < 180) {
                 calculatedStatus = 'active';
                 activeCount++;
             }
-
-            // Tạo chuỗi hiển thị thời gian
-            let timeAgo = "Never";
+            let timeAgo = 'Never';
             if (lastHandshake > 0) {
                 if (diff < 60) timeAgo = `${diff}s ago`;
                 else if (diff < 3600) timeAgo = `${Math.floor(diff / 60)}m ${diff % 60}s ago`;
                 else if (diff < 86400) timeAgo = `${Math.floor(diff / 3600)}h ago`;
                 else timeAgo = new Date(lastHandshake * 1000).toLocaleString();
             }
-
-            return {
-                ...peer,
-                calculatedStatus,
-                timeAgo
-            };
+            return { ...peer, calculatedStatus, timeAgo };
         });
 
         const activeStatEl = document.getElementById('active-peers-stat');
         if (activeStatEl) {
-            activeStatEl.innerHTML = `${activeCount} <span style="color: #666; font-weight: normal; font-size: 0.8em;">/ ${data.length}</span>`;
+            activeStatEl.innerHTML = `${activeCount} <span style="color:#666;font-weight:normal;font-size:0.8em;">/ ${data.length}</span>`;
         }
 
-        peersContainer.innerHTML = '<div class="peers-grid"></div>';
-        const peersGrid = peersContainer.querySelector('.peers-grid');
-
-        processedPeers.forEach((peer, index) => {
-            const peerCard = document.createElement('div');
-            peerCard.className = `peer-card ${peer.calculatedStatus}`;
-
-            // card click navigates to detail page; ignore clicks on action buttons
-            peerCard.addEventListener('click', (ev) => {
-                if (ev.target.closest('.peer-action-btn')) return; // let button handler manage it
-                const link = interfaceId ? `/dashboard/${encodeURIComponent(interfaceId)}/peer/${peer.id}` : `/dashboard/peer/${peer.id}`;
-                window.location.href = link;
-            });
-
-            const badgeClass = `badge-${peer.calculatedStatus}`;
-
-            // build action buttons for peer management (use explicit enabled flag)
-            const disabled = peer.isDisabled === true;
-            const actionsHtml = `
-                <div style="margin-top:12px; display:flex; gap:6px; flex-wrap:wrap;">
-                    <button class="peer-action-btn" data-action="delete" data-index="${peer.id}" style="flex:1;">Delete</button>
-                    <button class="peer-action-btn" data-action="${disabled ? 'enable' : 'disable'}" data-index="${peer.id}" style="flex:1;">${disabled ? 'Enable' : 'Disable'}</button>
-                </div>`;
-
-            peerCard.innerHTML = `
-                <div class="peer-name">
-                    ${peer.name || `Peer ${peer.id}`}
-                    <span class="peer-badge ${badgeClass}">${peer.calculatedStatus.toUpperCase()}</span>
-                </div>
-                <div class="peer-public-key">${peer.publicKey || 'No public key'}</div>
-                
-                <div style="font-size: 0.85em; color: #555; margin-bottom: 8px;">
-                    Last Handshake: <strong>${peer.timeAgo}</strong>
-                </div>
-
-                <div class="peer-throughput">
-                    <div class="peer-throughput-item">
-                        <span>RX:</span> <strong>${formatBytes(peer.receivedBytes)}</strong>
-                    </div>
-                    <div class="peer-throughput-item">
-                        <span>TX:</span> <strong>${formatBytes(peer.sentBytes)}</strong>
-                    </div>
-                </div>
-                ${actionsHtml}
-            `;
-
-            peersGrid.appendChild(peerCard);
-        });
+        renderPeersTable(_allPeersData, interfaceId);
     } catch (error) {
         console.error('Error loading peers:', error);
-        document.getElementById('peers-container').innerHTML = '<div class="error">Error: ' + error.message + '</div>';
+        const tbody = document.getElementById('peers-tbody');
+        if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="error">Error: ${error.message}</td></tr>`;
     }
 }
+
+function renderPeersTable(peers, interfaceId) {
+    const tbody = document.getElementById('peers-tbody');
+    if (!tbody) return;
+    if (peers.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#888;padding:16px;">No matching peers.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = peers.map(peer => {
+        const disabled = peer.isDisabled === true;
+        const detailLink = interfaceId
+            ? `/dashboard/${encodeURIComponent(interfaceId)}/peer/${peer.id}`
+            : `/dashboard/peer/${peer.id}`;
+        return `<tr data-peer-id="${peer.id}">
+            <td><a href="${detailLink}" style="color:rgba(134,22,24,1);text-decoration:none;font-weight:500;">${peer.name || `Peer ${peer.id}`}</a></td>
+            <td style="font-family:monospace;font-size:0.82em;">${peer.allowedIPs || '—'}</td>
+            <td style="font-family:monospace;font-size:0.82em;">${peer.endpoint || '—'}</td>
+            <td>${peer.timeAgo}</td>
+            <td>${formatBytes(peer.receivedBytes)} / ${formatBytes(peer.sentBytes)}</td>
+            <td><span class="peer-badge badge-${peer.calculatedStatus}">${peer.calculatedStatus.toUpperCase()}</span></td>
+            <td>
+                <div style="display:flex;gap:6px;">
+                    <button class="peer-action-btn" data-action="${disabled ? 'enable' : 'disable'}" data-index="${peer.id}" style="padding:4px 10px;font-size:0.8rem;">${disabled ? 'Enable' : 'Disable'}</button>
+                    <button class="peer-action-btn" data-action="delete" data-index="${peer.id}" style="padding:4px 10px;font-size:0.8rem;background:rgba(220,53,69,.85);">Delete</button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function filterPeersTable() {
+    const q = (document.getElementById('peer-search')?.value || '').toLowerCase();
+    const interfaceId = getInterfaceIdFromUrl();
+    const filtered = _allPeersData.filter(p =>
+        (p.name || '').toLowerCase().includes(q) ||
+        (p.allowedIPs || '').toLowerCase().includes(q) ||
+        (p.endpoint || '').toLowerCase().includes(q)
+    );
+    renderPeersTable(filtered, interfaceId);
+}
+
 
 // Vẽ biểu đồ
 document.getElementById("title").innerText = `${iface}`;
@@ -570,8 +544,8 @@ function setupPeerModals() {
         } catch (err) { alert(err.message); }
     });
 
-    // delegate action buttons
-    document.getElementById('peers-container').addEventListener('click', async (ev) => {
+    // delegate action buttons (table rows)
+    document.getElementById('peers-tbody').addEventListener('click', async (ev) => {
         const btn = ev.target.closest('.peer-action-btn');
         if (!btn) return;
         ev.stopPropagation();

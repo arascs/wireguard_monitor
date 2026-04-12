@@ -50,7 +50,36 @@ function authenticateToken(req, res, next) {
 
 const app = express();
 const PORT = 3000;
+const EXPORTER_SCRIPT = "/usr/local/bin/exporter.sh";
+
 app.use(cors());
+
+// Prometheus-style metrics (no session auth; for central / monitoring)
+app.get('/metrics', (req, res) => {
+  try {
+    const out = execSync(`bash "${EXPORTER_SCRIPT}"`, {
+      encoding: 'utf8',
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 120000
+    });
+    res.type('text/plain; version=0.0.4').send(out);
+  } catch (e) {
+    res.status(500).type('text/plain').send(`# exporter error: ${e.message || e}\n`);
+  }
+});
+
+// Local WireGuard availability (wg show)
+app.get('/health', (req, res) => {
+  try {
+    const out = execSync('bash -c "wg show > /dev/null 2>&1 && echo ok || echo fail"', {
+      encoding: 'utf8'
+    }).trim();
+    const ok = out === 'ok';
+    res.status(ok ? 200 : 503).type('text/plain').send(ok ? 'ok' : 'fail');
+  } catch {
+    res.status(503).type('text/plain').send('fail');
+  }
+});
 
 const CONFIG_DIR = '/etc/wireguard/';
 let INTERFACE = 'wgA';
@@ -1738,10 +1767,96 @@ setInterval(() => {
   checkAndDisconnectIfExpired();
 }, 60 * 60 * 1000);
 
+function normalizeCentralUrl(u) {
+  if (!u) return '';
+  const t = String(u).trim().replace(/\/+$/, '');
+  if (/^https?:\/\//i.test(t)) return t;
+  return `http://${t}`;
+}
+
+function registerWithCentral() {
+  const centralBase = process.env.CENTRAL_URL;
+  const secret = process.env.CENTRAL_REGISTER_SECRET;
+  if (!centralBase || !secret) {
+    return Promise.reject(new Error('CENTRAL_URL hoặc CENTRAL_REGISTER_SECRET chưa set'));
+  }
+  const base = normalizeCentralUrl(centralBase);
+  // baseUrl gửi lên central = URL mà central dùng để poll /metrics (thường là SSH tunnel, ví dụ http://127.0.0.1:4000)
+  const pollBase =
+    process.env.CENTRAL_POLL_BASE_URL ||
+    process.env.PUBLIC_BASE_URL ||
+    `http://127.0.0.1:${PORT}`;
+  const body = {
+    name: process.env.CENTRAL_NODE_NAME || HOSTNAME,
+    baseUrl: pollBase.replace(/\/+$/, ''),
+    publicIp: process.env.CENTRAL_PUBLIC_IP || '',
+    secret
+  };
+  return fetch(`${base}/api/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(async (r) => {
+    let payload = null;
+    try {
+      payload = await r.json();
+    } catch {
+      /* ignore */
+    }
+    if (!r.ok) {
+      const msg =
+        (payload && (payload.error || payload.message)) ||
+        `central trả ${r.status} ${r.statusText}`;
+      const err = new Error(msg);
+      err.status = r.status;
+      throw err;
+    }
+    return payload;
+  });
+}
+
+function allowCentralRegister(req, res, next) {
+  const headerKey = req.header('x-register-key') || '';
+  const bodySecret =
+    req.body && typeof req.body.secret === 'string' ? req.body.secret : '';
+  const provided = headerKey || bodySecret;
+  const hook = process.env.LOCAL_REGISTER_HOOK_KEY;
+  const regSecret = process.env.CENTRAL_REGISTER_SECRET;
+  if (hook && provided && provided === hook) return next();
+  if (regSecret && provided && provided === regSecret) return next();
+  if (req.session && req.session.user) return next();
+  return res.status(401).json({
+    success: false,
+    error: 'Authentication required',
+    hint:
+      'Không khớp secret hoặc process Node không có CENTRAL_REGISTER_SECRET trong env. ' +
+      'Dừng app, rồi chạy lại cùng lúc với biến: CENTRAL_REGISTER_SECRET=... node app.js ' +
+      'Hoặc gửi header X-Register-Key / JSON {"secret":"..."} đúng secret. Đặt CENTRAL_URL dạng http://host:port'
+  });
+}
+
+app.post('/api/central-register', allowCentralRegister, (req, res) => {
+  registerWithCentral()
+    .then((payload) => res.json({ success: true, central: payload }))
+    .catch((e) => {
+      const code = e.status >= 400 && e.status < 500 ? e.status : 502;
+      res.status(code).json({ success: false, error: e.message });
+    });
+});
+
 app.listen(PORT, () => {
   // Load config from file on startup
   loadConfigFromFile();
   // Initialize shared config
   updateSharedConfig();
   console.log(`WireGuard VPN Manager running on http://localhost:${PORT}`);
+  registerWithCentral().catch((e) => {
+    console.error('[central register lúc khởi động]', e.message);
+  });
+  const regMs = parseInt(process.env.CENTRAL_REGISTER_INTERVAL_MS || '300000', 10);
+  if (regMs > 0) {
+    setInterval(() => {
+      registerWithCentral().catch((e) => console.error('[central register định kỳ]', e.message));
+    }, regMs);
+  }
 });

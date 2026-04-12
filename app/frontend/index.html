@@ -23,6 +23,18 @@
             gap: 20px;
         }
 
+        .two-col-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .two-col-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
         /* ── Card ── */
         .card {
             background: white;
@@ -137,27 +149,30 @@
             <div id="traffic-empty">No data available. Run collect-traffic to save the first snapshot.</div>
         </div>
 
-        <!-- 2. Active Devices -->
-        <div class="card">
-            <div class="card-title">Active Devices</div>
-            <div class="stat-header">
-                <span class="stat-badge" id="devices-count">_</span>
-                <span class="stat-label">connected devices / total</span>
+        <!-- 2 & 3. Active Devices + Active Sites side by side -->
+        <div class="two-col-grid">
+            <!-- Active Devices -->
+            <div class="card">
+                <div class="card-title">Active Devices</div>
+                <div class="stat-header">
+                    <span class="stat-badge" id="devices-count">_</span>
+                    <span class="stat-label">connected devices / total</span>
+                </div>
+                <div id="devices-table-wrap">
+                    <div class="empty-msg">Loading...</div>
+                </div>
             </div>
-            <div id="devices-table-wrap">
-                <div class="empty-msg">Loading...</div>
-            </div>
-        </div>
 
-        <!-- 3. Active Sites -->
-        <div class="card">
-            <div class="card-title">Active Sites</div>
-            <div class="stat-header">
-                <span class="stat-badge" id="sites-count">_</span>
-                <span class="stat-label">connected sites / total</span>
-            </div>
-            <div id="sites-table-wrap">
-                <div class="empty-msg">Loading...</div>
+            <!-- Active Sites -->
+            <div class="card">
+                <div class="card-title">Active Sites</div>
+                <div class="stat-header">
+                    <span class="stat-badge" id="sites-count">_</span>
+                    <span class="stat-label">connected sites / total</span>
+                </div>
+                <div id="sites-table-wrap">
+                    <div class="empty-msg">Loading...</div>
+                </div>
             </div>
         </div>
     </div>
