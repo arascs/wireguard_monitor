@@ -9,6 +9,7 @@ const bcrypt = require('bcrypt');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const fetch = require('node-fetch');
+const https = require('https');
 const dashboardRoutes = require('./routes/dashboard');
 const createUserRoutes = require('./routes/users');
 const createApplicationRoutes = require('./routes/applications');
@@ -29,6 +30,24 @@ const dbConfig = {
 };
 
 const JWT_SECRET = process.env.JWT_SECRET || 'please_change_this_secret';
+const ALERT_INGEST_KEY = process.env.ALERT_INGEST_KEY || '';
+const notificationState = {
+  total: 0,
+  readTotal: 0,
+  latestAt: null
+};
+
+function countIncomingAlerts(payload) {
+  if (Array.isArray(payload)) return payload.length;
+  if (payload && Array.isArray(payload.events)) return payload.events.length;
+  if (payload && payload.event) return 1;
+  if (payload && typeof payload === 'object' && Object.keys(payload).length > 0) return 1;
+  return 0;
+}
+
+function getUnreadAlerts() {
+  return Math.max(0, notificationState.total - notificationState.readTotal);
+}
 
 // helper to verify token and attach user info
 function authenticateToken(req, res, next) {
@@ -54,9 +73,18 @@ const EXPORTER_SCRIPT = "/usr/local/bin/exporter.sh";
 
 app.use(cors());
 
+const TLS_KEY_PATH = '/usr/local/share/ca-certificates/key.pem';
+const TLS_CERT_PATH = '/usr/local/share/ca-certificates/cert.pem';
+
+const POLL_API_KEY = "hungnlq_poll";
+
 // Prometheus-style metrics (no session auth; for central / monitoring)
 app.get('/metrics', (req, res) => {
   try {
+    if (req.headers['x-api-key'] !== POLL_API_KEY) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
     const out = execSync(`bash "${EXPORTER_SCRIPT}"`, {
       encoding: 'utf8',
       maxBuffer: 10 * 1024 * 1024,
@@ -99,7 +127,11 @@ function loadGlobalSettings() {
   const defaultSettings = {
     keyExpiryDays: 90,
     peerDisableHours: 12,
-    keyRenewalTime: "08:00"
+    keyRenewalTime: "08:00",
+    enforceKernelCheck: true,
+    minKernelVersion: 4,
+    enforceNoRootLogin: true,
+    enforceFirewall: true
   };
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
@@ -772,7 +804,11 @@ app.post('/api/settings', (req, res) => {
     const newSettings = {
       keyExpiryDays: req.body.keyExpiryDays ? parseInt(req.body.keyExpiryDays, 10) : currentSettings.keyExpiryDays,
       peerDisableHours: req.body.peerDisableHours ? parseInt(req.body.peerDisableHours, 10) : currentSettings.peerDisableHours,
-      keyRenewalTime: req.body.keyRenewalTime || currentSettings.keyRenewalTime
+      keyRenewalTime: req.body.keyRenewalTime || currentSettings.keyRenewalTime,
+      enforceKernelCheck: req.body.enforceKernelCheck !== undefined ? req.body.enforceKernelCheck : currentSettings.enforceKernelCheck,
+      minKernelVersion: req.body.minKernelVersion !== undefined ? parseInt(req.body.minKernelVersion, 10) : currentSettings.minKernelVersion,
+      enforceNoRootLogin: req.body.enforceNoRootLogin !== undefined ? req.body.enforceNoRootLogin : currentSettings.enforceNoRootLogin,
+      enforceFirewall: req.body.enforceFirewall !== undefined ? req.body.enforceFirewall : currentSettings.enforceFirewall
     };
 
     // Save to settings.json
@@ -1514,6 +1550,36 @@ app.post('/api/logout', (req, res) => {
   res.json({ success: true });
 });
 
+app.post('/api/notifications/ingest', (req, res) => {
+  const providedKey = (req.header('x-alert-key') || '').trim();
+  if (ALERT_INGEST_KEY && providedKey !== ALERT_INGEST_KEY) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+
+  const count = countIncomingAlerts(req.body);
+  if (count <= 0) {
+    return res.status(400).json({ success: false, error: 'Empty payload' });
+  }
+
+  notificationState.total += count;
+  notificationState.latestAt = new Date().toISOString();
+  res.json({ success: true, added: count, unread: getUnreadAlerts() });
+});
+
+app.get('/api/notifications/unread', requireAuth, (req, res) => {
+  res.json({
+    success: true,
+    unread: getUnreadAlerts(),
+    total: notificationState.total,
+    latestAt: notificationState.latestAt
+  });
+});
+
+app.post('/api/notifications/mark-read', requireAuth, (req, res) => {
+  notificationState.readTotal = notificationState.total;
+  res.json({ success: true, unread: 0 });
+});
+
 function renderHtmlWithHostname(filePath) {
   let html = fs.readFileSync(filePath, 'utf8');
   html = html.replace(/\{\{HOSTNAME\}\}/g, HOSTNAME);
@@ -1628,11 +1694,32 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
   let connection;
 
   try {
-    const { deviceName } = req.body;
+    const { deviceName, securityInfo } = req.body;
     const username = req.user.username;
 
     if (!deviceName) {
       return res.status(400).json({ success: false, error: 'Missing deviceName' });
+    }
+
+    // Security Policies Check
+    const settings = loadGlobalSettings();
+    if (securityInfo) {
+      const issues = [];
+      if (settings.enforceKernelCheck && securityInfo.kernelVersion !== null) {
+        if (securityInfo.kernelVersion <= settings.minKernelVersion) {
+          issues.push(`Kernel version ${securityInfo.rawKernel || securityInfo.kernelVersion} is too old (must be > ${settings.minKernelVersion})`);
+        }
+      }
+      if (settings.enforceNoRootLogin && securityInfo.sshRootLogin === true) {
+        issues.push('SSH PermitRootLogin is set to yes');
+      }
+      if (settings.enforceFirewall && securityInfo.firewallActive === false) {
+        issues.push('Firewall is inactive or missing');
+      }
+      
+      if (issues.length > 0) {
+        return res.status(403).json({ success: false, error: 'Security policy violation', issues });
+      }
     }
 
     connection = await mysql.createConnection(dbConfig);
@@ -1844,12 +1931,17 @@ app.post('/api/central-register', allowCentralRegister, (req, res) => {
     });
 });
 
-app.listen(PORT, () => {
+const httpsOptions = {
+  key: fs.readFileSync(TLS_KEY_PATH),
+  cert: fs.readFileSync(TLS_CERT_PATH)
+};
+
+https.createServer(httpsOptions, app).listen(PORT, () => {
   // Load config from file on startup
   loadConfigFromFile();
   // Initialize shared config
   updateSharedConfig();
-  console.log(`WireGuard VPN Manager running on http://localhost:${PORT}`);
+  console.log(`WireGuard VPN Manager running on https://localhost:${PORT}`);
   registerWithCentral().catch((e) => {
     console.error('[central register lúc khởi động]', e.message);
   });

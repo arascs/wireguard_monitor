@@ -27,6 +27,19 @@
       </svg>
       <strong id="navbar-hostname-text">Loading...</strong>
     </span>
+    <div class="notification-wrap">
+      <button class="nav-btn notification-btn" id="notification-btn" type="button" title="Notifications">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5"></path>
+          <path d="M9 17a3 3 0 0 0 6 0"></path>
+        </svg>
+        <span class="notification-dot" id="notification-dot" style="display:none;"></span>
+      </button>
+      <div class="notification-popover" id="notification-popover" style="display:none;">
+        <strong id="notification-text">0 new alerts</strong>
+      </div>
+    </div>
     <a href="/" class="nav-btn" id="nav-home-btn">Home</a>
     <button class="nav-btn" id="change-password-btn">Change Password</button>
     <button class="nav-btn" id="logout-btn">Logout</button>
@@ -118,6 +131,56 @@
     }
 
     // ── 5. Change-password modal ────────────────────────────────
+    const notificationBtn = document.getElementById('notification-btn');
+    const notificationDot = document.getElementById('notification-dot');
+    const notificationPopover = document.getElementById('notification-popover');
+    const notificationText = document.getElementById('notification-text');
+    let unreadAlerts = 0;
+    let openedUnread = 0;
+
+    async function loadUnreadAlerts() {
+      try {
+        const r = await fetch('/api/notifications/unread', { credentials: 'same-origin' });
+        const data = await r.json();
+        if (data.success) {
+          unreadAlerts = Math.max(0, Number(data.unread) || 0);
+          if (notificationText) {
+            notificationText.textContent = `${unreadAlerts} new alerts`;
+          }
+          if (notificationDot) {
+            notificationDot.style.display = unreadAlerts > 0 ? 'block' : 'none';
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load notifications', e);
+      }
+    }
+
+    if (notificationBtn) {
+      notificationBtn.addEventListener('click', async () => {
+        openedUnread = unreadAlerts;
+        if (notificationText) {
+          notificationText.textContent = `${openedUnread} new alerts`;
+        }
+        if (notificationPopover) {
+          notificationPopover.style.display =
+            notificationPopover.style.display === 'none' ? 'block' : 'none';
+        }
+        try {
+          await fetch('/api/notifications/mark-read', {
+            method: 'POST',
+            credentials: 'same-origin'
+          });
+          unreadAlerts = 0;
+          if (notificationDot) notificationDot.style.display = 'none';
+        } catch (e) {
+          console.error('Failed to mark notifications as read', e);
+        }
+      });
+      setInterval(loadUnreadAlerts, 5000);
+      loadUnreadAlerts();
+    }
+
     const changeBtn = document.getElementById('change-password-btn');
     const modal = document.getElementById('change-password-modal');
     const cancelBtn = document.getElementById('cancel-change');

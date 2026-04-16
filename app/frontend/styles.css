@@ -100,6 +100,43 @@ p {
     font-weight: 700;
 }
 
+.notification-wrap {
+    position: relative;
+}
+
+.notification-btn {
+    position: relative;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    justify-content: center;
+}
+
+.notification-dot {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 8px;
+    height: 8px;
+    border-radius: 9999px;
+    background: #ef4444;
+}
+
+.notification-popover {
+    position: absolute;
+    top: 40px;
+    right: 0;
+    min-width: 140px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid #ddd;
+    background: #fff;
+    color: #333;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15);
+    z-index: 1100;
+    font-size: 0.85rem;
+}
+
 /* ── Sidebar ────────────────────────────────────────────────── */
 .sidebar {
     position: fixed;

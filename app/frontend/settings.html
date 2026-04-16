@@ -114,7 +114,34 @@
                         via systemd timer.</span>
                 </div>
 
-                <div style="text-align: right;">
+                <hr style="border:0; border-top:1px solid #eee; margin:30px 0;">
+                <h2>Security Policies</h2>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="enforceKernelCheck"> Protect Minimum Kernel Required
+                    </label>
+                    <div style="margin-top: 10px; padding-left: 24px;">
+                        <label for="minKernelVersion" style="display:inline-block; width: auto; font-weight: normal;">Minimum Major Version:</label>
+                        <input type="number" id="minKernelVersion" min="1" max="99" style="width: 80px; display: inline-block;">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="enforceNoRootLogin"> Enforce SSH PermitRootLogin Disabled
+                    </label>
+                    <span class="form-text" style="padding-left: 24px;">Check if client device allows root SSH login (must not be 'yes').</span>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="enforceFirewall"> Enforce Firewall Enabled (ufw/iptables)
+                    </label>
+                    <span class="form-text" style="padding-left: 24px;">Check if client device has an active firewall.</span>
+                </div>
+
+                <div style="text-align: right; margin-top: 20px;">
                     <button type="submit" class="save-btn" id="save-settings-btn">Save Settings</button>
                 </div>
             </form>

@@ -1,0 +1,82 @@
+data_dir: /var/lib/vector
+
+sources:
+  from_local:
+    type: vector
+    address: "0.0.0.0:6000"
+    tls:
+      enabled: true
+      crt_file: "/etc/vector/certs/central.crt"
+      key_file: "/etc/vector/certs/central.key"
+
+transforms:
+  # BƯỚC XÁC THỰC API KEY
+  auth_filter:
+    type: filter
+    inputs:
+      - from_local
+    condition: '.push_api_key == "hungnlq_push"'
+
+  format_for_clickhouse:
+    type: remap
+    inputs:
+      - auth_filter
+    source: |
+      raw_data = .
+      del(.push_api_key)
+
+      ts = .timestamp || now()
+      .timestamp = to_string(ts) ?? to_string(now())
+      .origin_host = to_string(.origin_host) ?? "unknown"
+
+      type = to_string(.event_type) ?? to_string(.event_name) ?? "general"
+      .event_type = type
+      .message = to_string(.message) ?? ""
+      .data = encode_json(raw_data)
+
+      . = {
+        "timestamp": .timestamp,
+        "origin_host": .origin_host,
+        "event_type": .event_type,
+        "message": .message,
+        "data": .data
+      }
+
+sinks:
+  out_debug:
+    type: console
+    inputs:
+      - from_local
+    encoding:
+      codec: json
+
+  # GỬI VÀO CLICKHOUSE
+  to_clickhouse:
+    type: clickhouse
+    inputs:
+      - format_for_clickhouse
+    endpoint: "http://localhost:8123"
+    database: "vpn_monitoring"
+    table: "wireguard_logs"
+    skip_unknown_fields: true
+    auth:
+      strategy: basic
+      user: default
+      password: root
+    batch:
+      max_events: 1
+
+  to_central_backend:
+    type: http
+    inputs:
+      - format_for_clickhouse
+    uri: "https://localhost:4001/api/notifications/ingest
+    method: post
+    encoding:
+      codec: json
+    batch:
+      max_events: 10
+      timeout_secs: 1
+    tls:
+      enabled: true
+      verify_certificate: false

@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
 const fetch = require('node-fetch');
+const https = require('https');
 const { loadNodes, saveNodes, nodeIdFor } = require('./state');
 const { createPoller } = require('./poller');
 const { fetchLogs } = require('./clickhouseLogs');
@@ -14,6 +15,11 @@ const {
 } = require('./centralAuth');
 
 ensureCredentials();
+
+const options = {
+  key: fs.readFileSync('key.pem'),
+  cert: fs.readFileSync('cert.pem')
+};
 
 function usageFromMetrics(m) {
   let memUsedPct = null;
@@ -31,15 +37,37 @@ const PORT = process.env.PORT || 4001;
 const SHARED_SECRET = process.env.CENTRAL_SHARED_SECRET || '';
 const POLL_MS = parseInt(process.env.POLL_INTERVAL_MS || '30000', 10);
 const GEO_DISABLED = process.env.GEO_LOOKUP === '0';
+const ALERT_INGEST_KEY = process.env.ALERT_INGEST_KEY || '';
 
 let nodes = loadNodes();
 const geoCache = new Map();
 const latestByNode = new Map();
 let trafficSeries = [];
 let lastPollSec = Math.floor(Date.now() / 1000);
+const notificationState = {
+  total: 0,
+  readTotal: 0,
+  latestAt: null
+};
 
 function normalizeBaseUrl(u) {
-  return u.replace(/\/+$/, '');
+  const trimmed = String(u || '').trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+  if (/^https:\/\//i.test(trimmed)) return trimmed;
+  if (/^http:\/\//i.test(trimmed)) return trimmed.replace(/^http:\/\//i, 'https://');
+  return `https://${trimmed}`;
+}
+
+function countIncomingAlerts(payload) {
+  if (Array.isArray(payload)) return payload.length;
+  if (payload && Array.isArray(payload.events)) return payload.events.length;
+  if (payload && payload.event) return 1;
+  if (payload && typeof payload === 'object' && Object.keys(payload).length > 0) return 1;
+  return 0;
+}
+
+function getUnreadAlerts() {
+  return Math.max(0, notificationState.total - notificationState.readTotal);
 }
 
 async function geoForIp(ip) {
@@ -145,6 +173,36 @@ app.post('/api/register', async (req, res) => {
   else nodes.push(row);
   saveNodes(nodes);
   res.json({ ok: true, id });
+});
+
+app.post('/api/notifications/ingest', (req, res) => {
+  const providedKey = (req.header('x-alert-key') || '').trim();
+  if (ALERT_INGEST_KEY && providedKey !== ALERT_INGEST_KEY) {
+    return res.status(401).json({ ok: false, error: 'unauthorized' });
+  }
+
+  const count = countIncomingAlerts(req.body);
+  if (count <= 0) {
+    return res.status(400).json({ ok: false, error: 'empty payload' });
+  }
+
+  notificationState.total += count;
+  notificationState.latestAt = new Date().toISOString();
+  res.json({ ok: true, added: count, unread: getUnreadAlerts() });
+});
+
+app.get('/api/notifications/unread', authMiddleware, (req, res) => {
+  res.json({
+    ok: true,
+    unread: getUnreadAlerts(),
+    total: notificationState.total,
+    latestAt: notificationState.latestAt
+  });
+});
+
+app.post('/api/notifications/mark-read', authMiddleware, (req, res) => {
+  notificationState.readTotal = notificationState.total;
+  res.json({ ok: true, unread: 0 });
 });
 
 app.get('/api/nodes', authMiddleware, async (req, res) => {
@@ -272,7 +330,12 @@ setInterval(() => {
 
 poller.tick().catch(() => {});
 
-app.listen(PORT, () => {
-  const ui = fs.existsSync(INDEX_HTML) ? ' + UI' : ' (API only — build frontend for UI)';
-  console.log(`Central http://127.0.0.1:${PORT}${ui}`);
+// app.listen(PORT, () => {
+//   const ui = fs.existsSync(INDEX_HTML) ? ' + UI' : ' (API only — build frontend for UI)';
+//   console.log(`Central http://127.0.0.1:${PORT}${ui}`);
+// });
+
+https.createServer(options, app).listen(PORT, () => {
+  //const ui = fs.existsSync(INDEX_HTML) ? ' + UI' : ' (API only — build frontend for UI)';
+  console.log('HTTPS Server đang chạy tại https://160.250.65.230:4000');
 });

@@ -26,6 +26,10 @@ function run(cmd) {
   }
 }
 
+function buildServerApiUrl(ip, port, apiPath) {
+  return `https://${ip}:${port}${apiPath}`;
+}
+
 // Ensure client keypair exists locally. The server only needs the public key.
 function ensureClientKeypair() {
   let privateKey = '';
@@ -83,33 +87,37 @@ PersistentKeepalive = 25
   }
 }
 
-// Security check before connecting VPN
-function runSecurityCheck() {
-  const issues = [];
+// Security Info collection before connecting VPN
+function getSecurityInfo() {
+  const info = {
+    kernelVersion: null,
+    rawKernel: null,
+    sshRootLogin: false,
+    firewallActive: false
+  };
 
-  // 1. Kernel version must be > 4
+  // 1. Kernel version
   try {
     const kernelVersion = run('uname -r').trim();
+    info.rawKernel = kernelVersion;
     const majorVersion = parseInt(kernelVersion.split('.')[0], 10);
-    if (majorVersion <= 4) {
-      issues.push(`Kernel version ${kernelVersion} is too old (must be > 4)`);
+    if (!isNaN(majorVersion)) {
+      info.kernelVersion = majorVersion;
     }
   } catch (e) {
-    issues.push('Cannot determine kernel version: ' + e.message);
+    // Ignore error
   }
 
-  // 2. SSH: PermitRootLogin yes (not commented)
+  // 2. SSH: PermitRootLogin yes
   try {
     const sshdConfig = fs.readFileSync('/etc/ssh/sshd_config', 'utf8');
     const hasPermitRootLogin = sshdConfig.split('\n').some(line => {
       const trimmed = line.trim();
       return !trimmed.startsWith('#') && /^PermitRootLogin\s+yes$/i.test(trimmed);
     });
-    if (hasPermitRootLogin) {
-      issues.push('SSH PermitRootLogin is set to yes');
-    }
+    info.sshRootLogin = hasPermitRootLogin;
   } catch (e) {
-    // File not readable or not present — skip
+    // Ignore error
   }
 
   // 3. Firewall status
@@ -118,25 +126,25 @@ function runSecurityCheck() {
     // ufw is available
     try {
       const ufwStatus = run('ufw status').trim();
-      if (/^Status:\s*inactive/im.test(ufwStatus)) {
-        issues.push('Firewall (ufw) is inactive');
+      if (!/^Status:\s*inactive/im.test(ufwStatus)) {
+        info.firewallActive = true;
       }
     } catch (e) {
-      issues.push('Cannot check ufw status: ' + e.message);
+      info.firewallActive = false;
     }
   } catch (_) {
     // ufw not found, fallback to iptables
     try {
       const iptablesOutput = run('iptables -L INPUT').trim();
-      if (/Chain INPUT \(policy ACCEPT\)/i.test(iptablesOutput)) {
-        issues.push('Firewall (iptables) INPUT policy is ACCEPT (no firewall rules)');
+      if (!/Chain INPUT \(policy ACCEPT\)/i.test(iptablesOutput)) {
+        info.firewallActive = true;
       }
     } catch (e) {
-      issues.push('Cannot check iptables status: ' + e.message);
+      info.firewallActive = false;
     }
   }
 
-  return issues;
+  return info;
 }
 
 // 1. Get VPN servers list
@@ -209,7 +217,7 @@ app.post('/api/client/login/:ip/:port', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Username and password required' });
     }
 
-    const loginUrl = `http://${ip}:${port}/api/login`;
+    const loginUrl = buildServerApiUrl(ip, port, '/api/login');
     const r = await fetch(loginUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -243,7 +251,7 @@ app.post('/api/client/enroll/:ip/:port', async (req, res) => {
 
     const { publicKey } = ensureClientKeypair();
 
-    const enrollUrl = `http://${ip}:${port}/api/enroll-device`;
+    const enrollUrl = buildServerApiUrl(ip, port, '/api/enroll-device');
     const r = await fetch(enrollUrl, {
       method: 'POST',
       headers: {
@@ -270,7 +278,7 @@ app.post('/api/client/check-enrollment/:ip/:port', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Missing Authorization header' });
     }
 
-    const checkUrl = `http://${ip}:${port}/api/check-device-enroll`;
+    const checkUrl = buildServerApiUrl(ip, port, '/api/check-device-enroll');
     const r = await fetch(checkUrl, {
       method: 'POST',
       headers: {
@@ -297,14 +305,11 @@ app.post('/api/client/connect/:ip/:port', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Missing Authorization header' });
     }
 
-    // 7a. Security check
-    const securityIssues = runSecurityCheck();
-    if (securityIssues.length > 0) {
-      return res.status(403).json({ success: false, error: 'Security check failed', issues: securityIssues });
-    }
+    // 7a. Get raw security info to send to server
+    const securityInfo = getSecurityInfo();
 
     // 7b. Check enrollment
-    const checkUrl = `http://${ip}:${port}/api/check-device-enroll`;
+    const checkUrl = buildServerApiUrl(ip, port, '/api/check-device-enroll');
     let r = await fetch(checkUrl, {
       method: 'POST',
       headers: {
@@ -319,14 +324,14 @@ app.post('/api/client/connect/:ip/:port', async (req, res) => {
     }
 
     // 7c. Login and get config
-    const loginUrl = `http://${ip}:${port}/api/connect-vpn`;
+    const loginUrl = buildServerApiUrl(ip, port, '/api/connect-vpn');
     r = await fetch(loginUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': authHeader
       },
-      body: JSON.stringify({ username, deviceName })
+      body: JSON.stringify({ username, deviceName, securityInfo })
     });
     data = await r.json();
     if (!data.success) return res.status(r.status).json(data);
@@ -368,7 +373,7 @@ app.post('/api/client/disconnect/:ip/:port', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Missing Authorization header' });
     }
 
-    const disconnectUrl = `http://${ip}:${port}/api/disconnect-vpn`;
+    const disconnectUrl = buildServerApiUrl(ip, port, '/api/disconnect-vpn');
     const r = await fetch(disconnectUrl, {
       method: 'POST',
       headers: {

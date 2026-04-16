@@ -23,7 +23,9 @@ function createPoller({ getNodes, onSnapshot }) {
   }
 
   async function pollNode(node) {
-    const base = node.baseUrl.replace(/\/+$/, '');
+    const POLL_API_KEY = "hungnlq_poll";
+    
+    const base = node.baseUrl.replace(/\/+$/, '').replace(/^http:\/\//i, 'https://');
     let online = false;
     let metricsText = '';
     try {
@@ -34,7 +36,13 @@ function createPoller({ getNodes, onSnapshot }) {
       online = false;
     }
     try {
-      const mr = await fetch(`${base}/metrics`, { timeout: 60000 });
+      const mr = await fetch(`${base}/metrics`, {
+        method: 'GET',
+        headers: {
+            'x-api-key': POLL_API_KEY
+        },
+        signal: AbortSignal.timeout(60000) 
+      });
       metricsText = await mr.text();
     } catch {
       metricsText = '';
