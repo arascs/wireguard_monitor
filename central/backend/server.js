@@ -6,7 +6,16 @@ const fetch = require('node-fetch');
 const https = require('https');
 const { loadNodes, saveNodes, nodeIdFor } = require('./state');
 const { createPoller } = require('./poller');
-const { fetchLogs } = require('./clickhouseLogs');
+const {
+  fetchLogs,
+  insertOperationLog,
+  fetchOperationLogs,
+  upsertDeviceRow,
+  deleteDeviceRow,
+  deleteAllDeviceRowsForMachine,
+  fetchDistinctBaseUrlsForMachine,
+  fetchDevicesAggregated
+} = require('./clickhouseLogs');
 const {
   ensureCredentials,
   generateToken,
@@ -17,8 +26,8 @@ const {
 ensureCredentials();
 
 const options = {
-  key: fs.readFileSync('key.pem'),
-  cert: fs.readFileSync('cert.pem')
+  key: fs.readFileSync('/usr/local/share/ca-certificates/key.pem'),
+  cert: fs.readFileSync('/usr/local/share/ca-certificates/cert.pem')
 };
 
 function usageFromMetrics(m) {
@@ -42,13 +51,75 @@ const ALERT_INGEST_KEY = process.env.ALERT_INGEST_KEY || '';
 let nodes = loadNodes();
 const geoCache = new Map();
 const latestByNode = new Map();
+const lastHealthOkByNode = new Map();
+const notifyCooldownKeys = new Map();
 let trafficSeries = [];
 let lastPollSec = Math.floor(Date.now() / 1000);
-const notificationState = {
-  total: 0,
-  readTotal: 0,
-  latestAt: null
+
+const NOTIFY_LABELS = {
+  ingest: 'NEW ALERTS',
+  node_offline: 'Node offline',
+  high_resource: 'High resource usage',
+  service_offline: 'Services offline',
+  node_connection_error: 'Node connection error'
 };
+
+const httpsAgent = new https.Agent({
+  rejectUnauthorized: process.env.CENTRAL_NODE_TLS_INSECURE !== '1'
+});
+
+const notificationState = {
+  items: [],
+  lastReadTs: 0,
+  maxItems: 500
+};
+
+function pushNotification(type, { nodeName = '', nodeId = '', detail = '' }) {
+  const title = type === 'ingest' ? 'NEW ALERTS' : NOTIFY_LABELS[type] || type;
+  const detailOut = type === 'ingest' ? '' : detail;
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  notificationState.items.unshift({
+    id,
+    type,
+    title,
+    detail: detailOut,
+    nodeName,
+    nodeId,
+    ts: Date.now()
+  });
+  if (notificationState.items.length > notificationState.maxItems) {
+    notificationState.items.length = notificationState.maxItems;
+  }
+  if (
+    type === 'node_offline' ||
+    type === 'high_resource' ||
+    type === 'service_offline' ||
+    type === 'node_connection_error'
+  ) {
+    insertOperationLog({
+      alertType: type,
+      nodeId,
+      nodeName,
+      detail: detailOut
+    });
+  }
+}
+
+function canNotify(key, minMs) {
+  const now = Date.now();
+  const last = notifyCooldownKeys.get(key) || 0;
+  if (now - last < minMs) return false;
+  notifyCooldownKeys.set(key, now);
+  return true;
+}
+
+function clearNotifyKey(key) {
+  notifyCooldownKeys.delete(key);
+}
+
+function getUnreadCount() {
+  return notificationState.items.filter((i) => i.ts > notificationState.lastReadTs).length;
+}
 
 function normalizeBaseUrl(u) {
   const trimmed = String(u || '').trim().replace(/\/+$/, '');
@@ -64,10 +135,6 @@ function countIncomingAlerts(payload) {
   if (payload && payload.event) return 1;
   if (payload && typeof payload === 'object' && Object.keys(payload).length > 0) return 1;
   return 0;
-}
-
-function getUnreadAlerts() {
-  return Math.max(0, notificationState.total - notificationState.readTotal);
 }
 
 async function geoForIp(ip) {
@@ -96,6 +163,10 @@ function onSnapshot(results) {
   lastPollSec = now;
 
   for (const r of results) {
+    if (r.online) {
+      lastHealthOkByNode.set(r.nodeId, now);
+      clearNotifyKey(`offline:${r.nodeId}`);
+    }
     latestByNode.set(r.nodeId, { ...r, polledAt: now, pollDt: dt });
   }
 
@@ -113,6 +184,81 @@ function onSnapshot(results) {
   }
   trafficSeries.push({ t: now, clientRx, clientTx, siteRx, siteTx });
   if (trafficSeries.length > 200) trafficSeries.shift();
+
+  const cooldownMs = 5 * 60 * 1000;
+  for (const n of nodes) {
+    const snap = latestByNode.get(n.id);
+    if (!snap) continue;
+    const name = n.name || n.id;
+    const lastOk = lastHealthOkByNode.get(n.id);
+
+    if (lastOk != null && now - lastOk > 300) {
+      if (canNotify(`offline:${n.id}`, cooldownMs)) {
+        pushNotification('node_offline', {
+          nodeId: n.id,
+          nodeName: name,
+          detail: `No successful /health for over 5 minutes (last ok: ${new Date(lastOk * 1000).toISOString()})`
+        });
+      }
+    }
+
+    const m = snap.metrics;
+    if (!m) continue;
+
+    const { memUsedPct, diskUsedPct } = usageFromMetrics(m);
+    const cpu = snap.cpuPct;
+    const hi =
+      (cpu != null && cpu >= 90) ||
+      (memUsedPct != null && memUsedPct >= 90) ||
+      (diskUsedPct != null && diskUsedPct >= 90);
+    if (hi) {
+      const parts = [];
+      if (cpu != null && cpu >= 90) parts.push(`CPU ${cpu.toFixed(0)}%`);
+      if (memUsedPct != null && memUsedPct >= 90) parts.push(`RAM ${memUsedPct.toFixed(0)}%`);
+      if (diskUsedPct != null && diskUsedPct >= 90) parts.push(`Disk ${diskUsedPct.toFixed(0)}%`);
+      if (canNotify(`hi:${n.id}`, cooldownMs)) {
+        pushNotification('high_resource', {
+          nodeId: n.id,
+          nodeName: name,
+          detail: parts.join(', ')
+        });
+      }
+    } else {
+      clearNotifyKey(`hi:${n.id}`);
+    }
+
+    if (snap.online) {
+      const ps = m.peersSite;
+      const os = m.peersOnlineSite;
+      if (ps != null && ps > 0 && os != null && os < ps) {
+        if (canNotify(`siteconn:${n.id}`, cooldownMs)) {
+          pushNotification('node_connection_error', {
+            nodeId: n.id,
+            nodeName: name,
+            detail: 'Site-to-site connection offline'
+          });
+        }
+      } else {
+        clearNotifyKey(`siteconn:${n.id}`);
+      }
+    } else {
+      clearNotifyKey(`siteconn:${n.id}`);
+    }
+
+    const svcs = m.services || {};
+    const bad = Object.keys(svcs).filter((k) => svcs[k] === 0);
+    if (bad.length) {
+      if (canNotify(`svc:${n.id}`, cooldownMs)) {
+        pushNotification('service_offline', {
+          nodeId: n.id,
+          nodeName: name,
+          detail: `Inactive: ${bad.join(', ')}`
+        });
+      }
+    } else {
+      clearNotifyKey(`svc:${n.id}`);
+    }
+  }
 }
 
 const poller = createPoller({
@@ -186,22 +332,30 @@ app.post('/api/notifications/ingest', (req, res) => {
     return res.status(400).json({ ok: false, error: 'empty payload' });
   }
 
-  notificationState.total += count;
-  notificationState.latestAt = new Date().toISOString();
-  res.json({ ok: true, added: count, unread: getUnreadAlerts() });
+  pushNotification('ingest', { detail: '' });
+  res.json({ ok: true, added: count, unread: getUnreadCount() });
 });
 
 app.get('/api/notifications/unread', authMiddleware, (req, res) => {
+  const unread = getUnreadCount();
+  const items = notificationState.items.slice(0, 100);
+  const byType = {};
+  for (const i of notificationState.items) {
+    if (i.ts > notificationState.lastReadTs) {
+      byType[i.type] = (byType[i.type] || 0) + 1;
+    }
+  }
   res.json({
     ok: true,
-    unread: getUnreadAlerts(),
-    total: notificationState.total,
-    latestAt: notificationState.latestAt
+    unread,
+    items,
+    byType
   });
 });
 
 app.post('/api/notifications/mark-read', authMiddleware, (req, res) => {
-  notificationState.readTotal = notificationState.total;
+  notificationState.items = [];
+  notificationState.lastReadTs = Date.now();
   res.json({ ok: true, unread: 0 });
 });
 
@@ -218,6 +372,7 @@ app.get('/api/nodes', authMiddleware, async (req, res) => {
     const dt = (snap && snap.pollDt) || POLL_MS / 1000;
     const bps = snap ? snap.bandwidthDelta / dt : 0;
     const { memUsedPct, diskUsedPct } = usageFromMetrics(m);
+    const lastOk = lastHealthOkByNode.get(n.id);
     enriched.push({
       id: n.id,
       name: n.name,
@@ -232,6 +387,14 @@ app.get('/api/nodes', authMiddleware, async (req, res) => {
       diskUsedPct,
       bandwidthBps: bps,
       peers: snap ? snap.peers : null,
+      peersOnline: snap && snap.peersOnline != null ? snap.peersOnline : null,
+      peersTotal: snap && snap.peersTotal != null ? snap.peersTotal : snap ? snap.peers : null,
+      clientsOnline: snap && snap.clientsOnline != null ? snap.clientsOnline : null,
+      clientsTotal: snap && snap.clientsTotal != null ? snap.clientsTotal : null,
+      sitesOnline: snap && snap.sitesOnline != null ? snap.sitesOnline : null,
+      sitesTotal: snap && snap.sitesTotal != null ? snap.sitesTotal : null,
+      services: snap && snap.services ? snap.services : {},
+      lastHealthOkAt: lastOk != null ? lastOk : null,
       memTotal: m && m.memTotal,
       memAvail: m && m.memAvail
     });
@@ -256,6 +419,7 @@ app.get('/api/dashboard', authMiddleware, async (req, res) => {
     if (snap && snap.online) online += 1;
     if (snap && snap.alerts24h != null) alerts24h += snap.alerts24h;
     const { memUsedPct, diskUsedPct } = usageFromMetrics(m);
+    const lastOk = lastHealthOkByNode.get(n.id);
     list.push({
       id: n.id,
       name: n.name,
@@ -270,6 +434,14 @@ app.get('/api/dashboard', authMiddleware, async (req, res) => {
       diskUsedPct,
       bandwidthBps: bps,
       peers: snap ? snap.peers : null,
+      peersOnline: snap && snap.peersOnline != null ? snap.peersOnline : null,
+      peersTotal: snap && snap.peersTotal != null ? snap.peersTotal : snap ? snap.peers : null,
+      clientsOnline: snap && snap.clientsOnline != null ? snap.clientsOnline : null,
+      clientsTotal: snap && snap.clientsTotal != null ? snap.clientsTotal : null,
+      sitesOnline: snap && snap.sitesOnline != null ? snap.sitesOnline : null,
+      sitesTotal: snap && snap.sitesTotal != null ? snap.sitesTotal : null,
+      services: snap && snap.services ? snap.services : {},
+      lastHealthOkAt: lastOk != null ? lastOk : null,
       memTotal: m && m.memTotal,
       memAvail: m && m.memAvail
     });
@@ -300,6 +472,121 @@ app.get('/api/alerts', authMiddleware, async (req, res) => {
       error: e.message || 'ClickHouse unavailable. Check CLICKHOUSE_URL (HTTP port 8123) and service status.'
     });
   }
+});
+
+app.get('/api/operation-logs', authMiddleware, async (req, res) => {
+  try {
+    const out = await fetchOperationLogs(req.query);
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    if (e.code === 'CH_DISABLED') {
+      return res.status(503).json({ ok: false, error: e.message });
+    }
+    console.error('[api/operation-logs]', e.message);
+    res.status(503).json({ ok: false, error: e.message || 'ClickHouse unavailable.' });
+  }
+});
+
+app.post('/api/devices/sync', async (req, res) => {
+  const key = (req.header('x-register-key') || '').trim();
+  if (!SHARED_SECRET || key !== SHARED_SECRET) {
+    return res.status(401).json({ ok: false, error: 'unauthorized' });
+  }
+  const b = req.body || {};
+  const required = ['machine_id', 'device_name', 'public_key', 'interface', 'node_id', 'node_name', 'base_url'];
+  for (const k of required) {
+    if (b[k] === undefined || b[k] === null || String(b[k]).trim() === '') {
+      return res.status(400).json({ ok: false, error: `missing ${k}` });
+    }
+  }
+  try {
+    await upsertDeviceRow({
+      machine_id: String(b.machine_id).trim(),
+      device_name: String(b.device_name).trim(),
+      public_key: String(b.public_key).trim(),
+      interface: String(b.interface).trim(),
+      node_id: String(b.node_id).trim(),
+      node_name: String(b.node_name).trim(),
+      base_url: normalizeBaseUrl(String(b.base_url).trim())
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[api/devices/sync]', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post('/api/devices/unsync', async (req, res) => {
+  const key = (req.header('x-register-key') || '').trim();
+  if (!SHARED_SECRET || key !== SHARED_SECRET) {
+    return res.status(401).json({ ok: false, error: 'unauthorized' });
+  }
+  const machine_id = req.body && req.body.machine_id != null ? String(req.body.machine_id).trim() : '';
+  const node_id = req.body && req.body.node_id != null ? String(req.body.node_id).trim() : '';
+  if (!machine_id || !node_id) {
+    return res.status(400).json({ ok: false, error: 'machine_id and node_id required' });
+  }
+  try {
+    await deleteDeviceRow(machine_id, node_id);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[api/devices/unsync]', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/api/registry/devices', authMiddleware, async (req, res) => {
+  try {
+    const rows = await fetchDevicesAggregated();
+    res.json({ ok: true, devices: rows });
+  } catch (e) {
+    if (e.code === 'CH_DISABLED') {
+      return res.status(503).json({ ok: false, error: e.message });
+    }
+    console.error('[api/registry/devices]', e.message);
+    res.status(503).json({ ok: false, error: e.message || 'ClickHouse unavailable.' });
+  }
+});
+
+app.delete('/api/registry/devices/:machineId', authMiddleware, async (req, res) => {
+  if (!SHARED_SECRET) {
+    return res.status(503).json({ ok: false, error: 'CENTRAL_SHARED_SECRET not configured' });
+  }
+  const machineId = decodeURIComponent(String(req.params.machineId || '').trim());
+  if (!machineId) {
+    return res.status(400).json({ ok: false, error: 'machineId required' });
+  }
+  let bases = [];
+  try {
+    bases = await fetchDistinctBaseUrlsForMachine(machineId);
+  } catch (e) {
+    return res.status(503).json({ ok: false, error: e.message });
+  }
+  const warnings = [];
+  for (const base of bases) {
+    const u = normalizeBaseUrl(base);
+    if (!u) continue;
+    const path = `/api/devices/by-machine/${encodeURIComponent(machineId)}`;
+    try {
+      const r = await fetch(`${u}${path}`, {
+        method: 'DELETE',
+        headers: { 'X-Register-Key': SHARED_SECRET },
+        agent: u.startsWith('https') ? httpsAgent : undefined
+      });
+      if (!r.ok) {
+        const txt = await r.text();
+        warnings.push(`${u}: ${r.status} ${txt.slice(0, 120)}`);
+      }
+    } catch (e) {
+      warnings.push(`${u}: ${e.message}`);
+    }
+  }
+  try {
+    await deleteAllDeviceRowsForMachine(machineId);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+  res.json({ ok: true, warnings });
 });
 
 if (fs.existsSync(INDEX_HTML)) {

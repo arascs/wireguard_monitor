@@ -1,17 +1,106 @@
 import { useEffect, useMemo, useState } from 'react';
 import { formatBps } from '../util';
 import { apiFetch } from '../auth';
+import NodeRegistry from './NodeRegistry';
 
 function pct(v) {
   if (v == null || Number.isNaN(v)) return '—';
   return `${v.toFixed(1)}%`;
 }
 
+function formatLastSeen(ts) {
+  if (ts == null || ts === undefined) return '—';
+  try {
+    return new Date(ts * 1000).toLocaleString();
+  } catch {
+    return '—';
+  }
+}
+
+const SERVICE_KEYS = ['endpoint_monitor', 'wg_handshake_monitor', 'services_monitor', 'mysql'];
+
+function wgPairLabel(online, total) {
+  if (online != null && total != null) return `${online} / ${total}`;
+  if (total != null) return `— / ${total}`;
+  return '—';
+}
+
+function NodeServicesModal({ node, onClose }) {
+  if (!node) return null;
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl max-w-md w-full p-5 border border-zinc-200 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-between items-start gap-2 mb-4">
+          <h2 className="text-lg font-semibold text-primary">Node detail — {node.name}</h2>
+          <button
+            type="button"
+            className="text-zinc-500 hover:text-zinc-800 text-sm"
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+
+        <p className="text-xs font-medium text-zinc-600 mb-2">Services</p>
+        <div className="space-y-0 mb-6">
+          {SERVICE_KEYS.map((k) => {
+            const v = node.services && node.services[k];
+            const active = v === 1;
+            return (
+              <div
+                key={k}
+                className="flex justify-between items-center text-sm py-2 border-b border-zinc-100 last:border-0"
+              >
+                <span className="font-mono text-xs text-zinc-800">{k}</span>
+                <span
+                  className={
+                    active
+                      ? 'text-emerald-700 font-medium text-xs'
+                      : 'text-red-700 font-medium text-xs'
+                  }
+                >
+                  {v === undefined || v === null ? '—' : active ? 'active' : 'inactive'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="text-xs font-medium text-zinc-600 mb-1">WireGuard</p>
+        <div className="space-y-0">
+          <div className="flex justify-between items-center text-sm py-2 border-b border-zinc-100">
+            <span className="text-zinc-800">Active clients</span>
+            <span className="text-zinc-700 font-mono text-xs">
+              {wgPairLabel(node.clientsOnline, node.clientsTotal)}
+            </span>
+          </div>
+          <div className="flex justify-between items-center text-sm py-2 border-b border-zinc-100 last:border-0">
+            <span className="text-zinc-800">Active sites</span>
+            <span className="text-zinc-700 font-mono text-xs">
+              {wgPairLabel(node.sitesOnline, node.sitesTotal)}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function NodeExplorer() {
+  const [section, setSection] = useState('nodes');
   const [rows, setRows] = useState([]);
   const [q, setQ] = useState('');
   const [region, setRegion] = useState('');
   const [err, setErr] = useState(null);
+  const [detailNode, setDetailNode] = useState(null);
 
   useEffect(() => {
     let cancel = false;
@@ -52,17 +141,52 @@ export default function NodeExplorer() {
     });
   }, [rows, q, region]);
 
-  if (err) {
-    return (
-      <p className="text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2 text-sm">
-        Failed to load nodes: {err}
-      </p>
-    );
+  function sitesLabel(n) {
+    const on = n.sitesOnline;
+    const tot = n.sitesTotal;
+    if (on != null && tot != null) return `${on} / ${tot}`;
+    if (tot != null) return `— / ${tot}`;
+    return '—';
   }
 
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold text-zinc-900">Node Explorer</h1>
+
+      <div className="flex flex-wrap gap-2 border-b border-zinc-200 pb-2">
+        <button
+          type="button"
+          className={`px-4 py-2 text-sm rounded-t-md border-b-2 -mb-px transition-colors ${
+            section === 'nodes'
+              ? 'border-primary text-primary font-medium'
+              : 'border-transparent text-zinc-600 hover:text-zinc-900'
+          }`}
+          onClick={() => setSection('nodes')}
+        >
+          Nodes
+        </button>
+        <button
+          type="button"
+          className={`px-4 py-2 text-sm rounded-t-md border-b-2 -mb-px transition-colors ${
+            section === 'devices'
+              ? 'border-primary text-primary font-medium'
+              : 'border-transparent text-zinc-600 hover:text-zinc-900'
+          }`}
+          onClick={() => setSection('devices')}
+        >
+          Devices
+        </button>
+      </div>
+
+      {section === 'devices' && <NodeRegistry />}
+
+      {section === 'nodes' && (
+        <>
+      {err && (
+        <p className="text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2 text-sm">
+          Failed to load nodes: {err}
+        </p>
+      )}
       <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
         <div className="flex-1">
           <label className="block text-xs font-medium text-zinc-600 mb-1">Search</label>
@@ -101,8 +225,10 @@ export default function NodeExplorer() {
               <th className="px-3 py-2 font-medium">RAM used</th>
               <th className="px-3 py-2 font-medium">Disk used</th>
               <th className="px-3 py-2 font-medium">Throughput</th>
-              <th className="px-3 py-2 font-medium">Peers</th>
+              <th className="px-3 py-2 font-medium">Sites</th>
+              <th className="px-3 py-2 font-medium">Last seen</th>
               <th className="px-3 py-2 font-medium">Status</th>
+              <th className="px-3 py-2 font-medium"> </th>
             </tr>
           </thead>
           <tbody>
@@ -110,14 +236,6 @@ export default function NodeExplorer() {
               <tr key={n.id} className="border-t border-zinc-100 hover:bg-zinc-50">
                 <td className="px-3 py-2 font-medium text-zinc-900">
                   <div>{n.name}</div>
-                  {n.baseUrl && (
-                    <div
-                      className="text-[11px] text-zinc-400 font-normal mt-0.5 font-mono truncate max-w-[14rem]"
-                      title={n.baseUrl}
-                    >
-                      Scrape: {n.baseUrl}
-                    </div>
-                  )}
                 </td>
                 <td className="px-3 py-2 text-zinc-700 font-mono text-xs">{n.publicIp || '—'}</td>
                 <td className="px-3 py-2 text-zinc-700">{n.region || '—'}</td>
@@ -127,7 +245,10 @@ export default function NodeExplorer() {
                 <td className="px-3 py-2 text-zinc-700">{pct(n.memUsedPct)}</td>
                 <td className="px-3 py-2 text-zinc-700">{pct(n.diskUsedPct)}</td>
                 <td className="px-3 py-2 text-zinc-700">{formatBps(n.bandwidthBps)}</td>
-                <td className="px-3 py-2 text-zinc-700">{n.peers != null ? n.peers : '—'}</td>
+                <td className="px-3 py-2 text-zinc-700 whitespace-nowrap">{sitesLabel(n)}</td>
+                <td className="px-3 py-2 text-zinc-600 text-xs whitespace-nowrap" title="/health last OK">
+                  {formatLastSeen(n.lastHealthOkAt)}
+                </td>
                 <td className="px-3 py-2">
                   <span
                     className={
@@ -139,11 +260,20 @@ export default function NodeExplorer() {
                     {n.online ? 'Online' : 'Offline'}
                   </span>
                 </td>
+                <td className="px-3 py-2">
+                  <button
+                    type="button"
+                    className="text-primary text-xs font-medium hover:underline"
+                    onClick={() => setDetailNode(n)}
+                  >
+                    View detail
+                  </button>
+                </td>
               </tr>
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-3 py-6 text-center text-zinc-500">
+                <td colSpan={11} className="px-3 py-6 text-center text-zinc-500">
                   No nodes registered.
                 </td>
               </tr>
@@ -151,6 +281,10 @@ export default function NodeExplorer() {
           </tbody>
         </table>
       </div>
+
+      {detailNode && <NodeServicesModal node={detailNode} onClose={() => setDetailNode(null)} />}
+        </>
+      )}
     </div>
   );
 }

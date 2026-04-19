@@ -14,6 +14,8 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
 - Manage client-to-site connections using user identity and device enrollment
 - Apply access rules to internal applications
 - Create new key pair and synchronize key to other peers
+- Automate disconnecting client after a period (default 12h)
+- Decide mandatory security settings (firewall, ssh, kernel version,...) 
 - Apply configuration changes directly to the system 
 
 #### Backup and Restore

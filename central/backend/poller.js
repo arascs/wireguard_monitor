@@ -80,7 +80,21 @@ function createPoller({ getNodes, onSnapshot }) {
     }
     if (sumD > 0) cpuPct = (busyD / sumD) * 100;
 
-    const peers = (m.peersClient || 0) + (m.peersSite || 0);
+    const clientsTotal = m.peersClient != null ? m.peersClient : null;
+    const sitesTotal = m.peersSite != null ? m.peersSite : null;
+    const clientsOnline = m.peersOnlineClient != null ? m.peersOnlineClient : null;
+    const sitesOnline = m.peersOnlineSite != null ? m.peersOnlineSite : null;
+    const peersTotal =
+      clientsTotal != null || sitesTotal != null
+        ? (clientsTotal || 0) + (sitesTotal || 0)
+        : null;
+    const peersOnline =
+      m.peersOnlineTotal != null
+        ? m.peersOnlineTotal
+        : clientsOnline != null && sitesOnline != null
+          ? clientsOnline + sitesOnline
+          : null;
+    const peers = peersTotal;
     const bandwidthDelta =
       traffic.clientRx + traffic.clientTx + traffic.siteRx + traffic.siteTx;
 
@@ -99,6 +113,13 @@ function createPoller({ getNodes, onSnapshot }) {
       metrics: m,
       cpuPct,
       peers,
+      peersOnline,
+      peersTotal,
+      clientsOnline,
+      clientsTotal,
+      sitesOnline,
+      sitesTotal,
+      services: m.services || {},
       bandwidthDelta,
       traffic,
       alerts24h: alertsDelta24h(node.id, nowSec, m.alerts)

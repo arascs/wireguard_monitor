@@ -3,7 +3,7 @@ import AppShell from './components/AppShell';
 import Login from './pages/Login';
 import Overview from './pages/Overview';
 import NodeExplorer from './pages/NodeExplorer';
-import Alerts from './pages/Alerts';
+import Logging from './pages/Logging';
 import { getToken } from './auth';
 
 function RequireAuth({ children }) {
@@ -29,7 +29,8 @@ export default function App() {
         >
           <Route index element={<Overview />} />
           <Route path="nodes" element={<NodeExplorer />} />
-          <Route path="alerts" element={<Alerts />} />
+          <Route path="logging" element={<Logging />} />
+          <Route path="alerts" element={<Navigate to="/logging" replace />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

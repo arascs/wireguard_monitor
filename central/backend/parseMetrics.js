@@ -49,6 +49,17 @@ function getLabeled(lines, metricName, filters) {
   return undefined;
 }
 
+/** Metric line without `{labels}` (legacy exporters). */
+function getUnlabeledMetric(lines, metricName) {
+  for (const line of lines) {
+    const p = parseLine(line);
+    if (!p || p.name !== metricName) continue;
+    if (p.labels) continue;
+    return p.value;
+  }
+  return undefined;
+}
+
 function parseMetrics(text) {
   const lines = text.split('\n');
   const cpu = {};
@@ -56,6 +67,21 @@ function parseMetrics(text) {
     const v = getLabeled(lines, 'node_cpu_seconds_total', { mode });
     if (v !== undefined) cpu[mode] = v;
   }
+  const services = {};
+  for (const svc of ['endpoint_monitor', 'wg_handshake_monitor', 'services_monitor', 'mysql']) {
+    const v = getLabeled(lines, 'wireguard_monitor_service_active', { service: svc });
+    if (v !== undefined) services[svc] = v >= 1 ? 1 : 0;
+  }
+  const peersOnlineClient = getLabeled(lines, 'wireguard_peers_online_total', { type: 'client' });
+  const peersOnlineSite = getLabeled(lines, 'wireguard_peers_online_total', { type: 'site' });
+  const peersOnlineLegacy = getUnlabeledMetric(lines, 'wireguard_peers_online_total');
+  let peersOnlineTotal;
+  if (peersOnlineClient != null && peersOnlineSite != null) {
+    peersOnlineTotal = peersOnlineClient + peersOnlineSite;
+  } else if (peersOnlineLegacy != null) {
+    peersOnlineTotal = peersOnlineLegacy;
+  }
+
   return {
     memTotal: getLabeled(lines, 'node_memory_MemTotal_bytes', {}) || sumByName(lines, 'node_memory_MemTotal_bytes'),
     memAvail: getLabeled(lines, 'node_memory_MemAvailable_bytes', {}) || sumByName(lines, 'node_memory_MemAvailable_bytes'),
@@ -64,6 +90,10 @@ function parseMetrics(text) {
     alerts: getLabeled(lines, 'wireguard_alerts_total', {}),
     peersClient: getLabeled(lines, 'wireguard_peers_total', { type: 'client' }),
     peersSite: getLabeled(lines, 'wireguard_peers_total', { type: 'site' }),
+    peersOnlineClient,
+    peersOnlineSite,
+    peersOnlineTotal,
+    services,
     trafficRxClient: getLabeled(lines, 'wireguard_traffic_receive_bytes_total', { type: 'client' }),
     trafficTxClient: getLabeled(lines, 'wireguard_traffic_transmit_bytes_total', { type: 'client' }),
     trafficRxSite: getLabeled(lines, 'wireguard_traffic_receive_bytes_total', { type: 'site' }),

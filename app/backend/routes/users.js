@@ -2,6 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { logAction } = require('../auditLogger');
+const { notifyDeviceApproved, notifyDeviceRemoved } = require('../centralSync');
 
 function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authenticateToken }) {
   const router = express.Router();
@@ -254,7 +255,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
       // Get enrollment request info
       const [reqs] = await connection.execute(
-        'SELECT device_name, username, machine_id FROM device_enrollment_requests WHERE id = ?',
+        'SELECT device_name, username, machine_id, public_key FROM device_enrollment_requests WHERE id = ?',
         [id]
       );
 
@@ -267,10 +268,8 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       const username = reqItem.username;
       const machineId = reqItem.machine_id;
 
-      // Generate key pair
-      const privateKey = run('wg genkey').trim();
-      const publicKey = run(`echo "${privateKey}" | wg pubkey`).trim();
-      const privateKeyHash = await bcrypt.hash(privateKey, 10);
+      // Use the client's public key if provided
+      let publicKey = reqItem.public_key;
 
       // Calculate expire epoch
       let expireEpoch = null;
@@ -283,8 +282,8 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
       // Insert into approved devices table
       await connection.execute(
-        'INSERT INTO devices (device_name, username, interface, allowed_ips, private_key, public_key, machine_id, expire_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [deviceName, username, selectedInterface, allowedIPs, privateKeyHash, publicKey, machineId, expireEpoch, 1]
+        'INSERT INTO devices (device_name, username, interface, allowed_ips, public_key, machine_id, expire_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [deviceName, username, selectedInterface, allowedIPs, publicKey, machineId, expireEpoch, 1]
       );
 
       // audit
@@ -324,9 +323,15 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
         fs.writeFileSync(CONFIG_FILE, configContent);
       }
 
+      notifyDeviceApproved({
+        machine_id: machineId,
+        device_name: deviceName,
+        public_key: publicKey,
+        interface: selectedInterface
+      });
+
       res.json({
         success: true,
-        privateKey,
         message: 'Device approved successfully'
       });
     } catch (error) {
@@ -352,7 +357,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
       // Get device info including public key
       const [devices] = await connection.execute(
-        'SELECT public_key, interface FROM devices WHERE id = ?',
+        'SELECT public_key, interface, machine_id FROM devices WHERE id = ?',
         [id]
       );
 
@@ -361,6 +366,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       }
 
       const device = devices[0];
+      const machineId = device.machine_id;
 
       // Delete peer from interface config if public key exists
       if (device.public_key && device.interface) {
@@ -376,10 +382,51 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
         [id]
       );
 
+      if (machineId) {
+        notifyDeviceRemoved(machineId);
+      }
+
       res.json({ success: true, message: 'Device deleted successfully' });
     } catch (error) {
       console.error('Error deleting device:', error);
       res.status(500).json({ success: false, error: 'Internal server error' });
+    } finally {
+      if (connection) {
+        await connection.end();
+      }
+    }
+  });
+
+  router.delete('/devices/by-machine/:machineId', async (req, res) => {
+    const key = (req.header('x-register-key') || '').trim();
+    if (!process.env.CENTRAL_REGISTER_SECRET || key !== process.env.CENTRAL_REGISTER_SECRET) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+    const machineId = decodeURIComponent(req.params.machineId || '');
+    if (!machineId) {
+      return res.status(400).json({ success: false, error: 'machineId required' });
+    }
+
+    let connection;
+    try {
+      connection = await mysql.createConnection(dbConfig);
+      const [rows] = await connection.execute(
+        'SELECT id, public_key, interface FROM devices WHERE machine_id = ?',
+        [machineId]
+      );
+      if (rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'Device not found' });
+      }
+      for (const dev of rows) {
+        if (dev.public_key && dev.interface) {
+          deletePeerByPublicKey(dev.interface, dev.public_key);
+        }
+        await connection.execute('DELETE FROM devices WHERE id = ?', [dev.id]);
+      }
+      res.json({ success: true, message: 'Device removed' });
+    } catch (error) {
+      console.error('Error deleting device by machine:', error);
+      res.status(500).json({ success: false, error: error.message });
     } finally {
       if (connection) {
         await connection.end();
@@ -393,7 +440,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
     try {
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        'SELECT id, device_name, username, status, machine_id FROM device_enrollment_requests ORDER BY id DESC'
+        'SELECT id, device_name, username, status, machine_id, public_key FROM device_enrollment_requests ORDER BY id DESC'
       );
       res.json({ success: true, requests: rows });
     } catch (error) {
@@ -446,7 +493,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
   // Enroll device (client endpoint)
   router.post('/enroll-device', authenticateToken, async (req, res) => {
-    const { deviceName, machineId } = req.body || {};
+    const { deviceName, machineId, publicKey } = req.body || {};
     const username = req.user.username;
     if (!deviceName) {
       return res.status(400).json({ success: false, error: 'Missing deviceName' });
@@ -468,8 +515,8 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
       // Create enrollment request in separate table
       await connection.execute(
-        'INSERT INTO device_enrollment_requests (device_name, username, status, machine_id) VALUES (?, ?, "pending", ?)',
-        [deviceName, username, machineId || '']
+        'INSERT INTO device_enrollment_requests (device_name, username, status, machine_id, public_key) VALUES (?, ?, "pending", ?, ?)',
+        [deviceName, username, machineId || '', publicKey || null]
       );
 
       res.json({ success: true, message: 'Enrollment request submitted' });

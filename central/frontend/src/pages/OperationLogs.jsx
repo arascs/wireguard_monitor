@@ -1,123 +1,15 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../auth';
 
-function parseDataField(raw) {
-  if (raw == null || raw === '') return null;
-  if (typeof raw === 'object') return raw;
-  try {
-    return JSON.parse(String(raw));
-  } catch {
-    return { _raw: String(raw) };
-  }
-}
-
-function JsonBlock({ label, value, depth = 0 }) {
-  const pad = { paddingLeft: depth * 12 };
-  if (value === null || value === undefined) {
-    return (
-      <div style={pad} className="text-sm">
-        <span className="text-zinc-500">{label ? `${label}: ` : ''}</span>
-        <span className="text-zinc-400">null</span>
-      </div>
-    );
-  }
-  if (typeof value !== 'object') {
-    return (
-      <div style={pad} className="text-sm break-all">
-        <span className="font-medium text-primary">{label ? `${label}: ` : ''}</span>
-        <span className="text-zinc-800">{String(value)}</span>
-      </div>
-    );
-  }
-  if (Array.isArray(value)) {
-    return (
-      <div style={pad} className="text-sm">
-        <div className="font-medium text-primary mb-1">{label || '[]'}</div>
-        {value.map((item, i) => (
-          <JsonBlock key={i} label={`[${i}]`} value={item} depth={depth + 1} />
-        ))}
-      </div>
-    );
-  }
-  return (
-    <div style={pad} className="text-sm border-l border-zinc-200 pl-2 my-1">
-      {label && <div className="font-semibold text-zinc-700 mb-1">{label}</div>}
-      {Object.entries(value).map(([k, v]) => (
-        <JsonBlock key={k} label={k} value={v} depth={depth + 1} />
-      ))}
-    </div>
-  );
-}
-
-function DetailModal({ row, onClose }) {
-  if (!row) return null;
-  const parsed = parseDataField(row.data);
-  return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[85vh] overflow-y-auto p-5 border border-zinc-200"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex justify-between items-start gap-4 mb-4">
-          <h2 className="text-lg font-semibold text-primary">Log detail</h2>
-          <button
-            type="button"
-            className="text-zinc-500 hover:text-zinc-800 text-sm"
-            onClick={onClose}
-          >
-            Close
-          </button>
-        </div>
-        <dl className="grid grid-cols-1 gap-2 text-sm mb-4">
-          <div>
-            <dt className="text-zinc-500">timestamp</dt>
-            <dd className="font-mono text-zinc-900">{String(row.timestamp)}</dd>
-          </div>
-          <div>
-            <dt className="text-zinc-500">origin_host</dt>
-            <dd className="font-mono text-zinc-900">{row.origin_host ?? '—'}</dd>
-          </div>
-          <div>
-            <dt className="text-zinc-500">event_type</dt>
-            <dd className="font-mono text-zinc-900">{row.event_type ?? '—'}</dd>
-          </div>
-          {row.message != null && String(row.message).trim() !== '' && (
-            <div>
-              <dt className="text-zinc-500">message</dt>
-              <dd className="text-zinc-900 whitespace-pre-wrap break-words">{String(row.message)}</dd>
-            </div>
-          )}
-        </dl>
-        <div>
-          <div className="text-zinc-500 text-sm mb-2">data</div>
-          <div className="bg-zinc-50 rounded border border-zinc-100 p-3 overflow-x-auto">
-            {parsed && typeof parsed === 'object' ? (
-              <JsonBlock value={parsed} depth={0} />
-            ) : (
-              <span className="text-zinc-500">—</span>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function Alerts() {
+export default function OperationLogs() {
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [limit, setLimit] = useState(50);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
-  const [detail, setDetail] = useState(null);
 
-  const emptyFilters = { origin_host: '', event_type: '', from: '', to: '', q: '' };
+  const emptyFilters = { alert_type: '', node_id: '', from: '', to: '', q: '' };
   const [draft, setDraft] = useState(emptyFilters);
   const [applied, setApplied] = useState(emptyFilters);
 
@@ -128,14 +20,14 @@ export default function Alerts() {
       setErr(null);
       try {
         const p = new URLSearchParams();
-        if (applied.origin_host.trim()) p.set('origin_host', applied.origin_host.trim());
-        if (applied.event_type.trim()) p.set('event_type', applied.event_type.trim());
+        if (applied.alert_type.trim()) p.set('alert_type', applied.alert_type.trim());
+        if (applied.node_id.trim()) p.set('node_id', applied.node_id.trim());
         if (applied.from.trim()) p.set('from', applied.from.trim());
         if (applied.to.trim()) p.set('to', applied.to.trim());
         if (applied.q.trim()) p.set('q', applied.q.trim());
         p.set('limit', String(limit));
         p.set('offset', String(offset));
-        const r = await apiFetch(`/api/alerts?${p.toString()}`);
+        const r = await apiFetch(`/api/operation-logs?${p.toString()}`);
         const j = await r.json();
         if (!r.ok || !j.ok) {
           throw new Error(j.error || `HTTP ${r.status}`);
@@ -174,20 +66,20 @@ export default function Alerts() {
       <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           <div>
-            <label className="block text-xs font-medium text-zinc-600 mb-1">origin_host</label>
+            <label className="block text-xs font-medium text-zinc-600 mb-1">alert_type</label>
             <input
               className="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-              value={draft.origin_host}
-              onChange={(e) => setDraft((d) => ({ ...d, origin_host: e.target.value }))}
-              placeholder="peerA"
+              value={draft.alert_type}
+              onChange={(e) => setDraft((d) => ({ ...d, alert_type: e.target.value }))}
+              placeholder="node_offline"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-zinc-600 mb-1">event_type</label>
+            <label className="block text-xs font-medium text-zinc-600 mb-1">node_id</label>
             <input
-              className="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-              value={draft.event_type}
-              onChange={(e) => setDraft((d) => ({ ...d, event_type: e.target.value }))}
+              className="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm font-mono"
+              value={draft.node_id}
+              onChange={(e) => setDraft((d) => ({ ...d, node_id: e.target.value }))}
             />
           </div>
           <div>
@@ -196,7 +88,6 @@ export default function Alerts() {
               className="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm font-mono"
               value={draft.from}
               onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value }))}
-              placeholder="2026-04-12T00:00:00Z"
             />
           </div>
           <div>
@@ -208,9 +99,7 @@ export default function Alerts() {
             />
           </div>
           <div className="md:col-span-2">
-            <label className="block text-xs font-medium text-zinc-600 mb-1">
-              Message / data contains
-            </label>
+            <label className="block text-xs font-medium text-zinc-600 mb-1">detail / node name</label>
             <input
               className="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
               value={draft.q}
@@ -282,34 +171,30 @@ export default function Alerts() {
         <table className="min-w-full text-sm">
           <thead>
             <tr className="bg-primary text-white text-left">
-              <th className="px-3 py-2 font-medium">timestamp</th>
-              <th className="px-3 py-2 font-medium">origin_host</th>
-              <th className="px-3 py-2 font-medium">event_type</th>
-              <th className="px-3 py-2 font-medium w-32"> </th>
+              <th className="px-3 py-2 font-medium">ts</th>
+              <th className="px-3 py-2 font-medium">alert_type</th>
+              <th className="px-3 py-2 font-medium">node_name</th>
+              <th className="px-3 py-2 font-medium">node_id</th>
+              <th className="px-3 py-2 font-medium">detail</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row, i) => (
-              <tr key={`${row.timestamp}-${row.origin_host}-${i}`} className="border-t border-zinc-100">
+              <tr key={`${row.ts}-${i}`} className="border-t border-zinc-100">
                 <td className="px-3 py-2 font-mono text-xs text-zinc-800 whitespace-nowrap">
-                  {String(row.timestamp)}
+                  {String(row.ts ?? '—')}
                 </td>
-                <td className="px-3 py-2 text-zinc-800">{row.origin_host ?? '—'}</td>
-                <td className="px-3 py-2 text-zinc-800">{row.event_type ?? '—'}</td>
-                <td className="px-3 py-2">
-                  <button
-                    type="button"
-                    className="text-primary text-sm font-medium underline hover:opacity-80"
-                    onClick={() => setDetail(row)}
-                  >
-                    View detail
-                  </button>
+                <td className="px-3 py-2 text-zinc-800 font-mono text-xs">{row.alert_type ?? '—'}</td>
+                <td className="px-3 py-2 text-zinc-800">{row.node_name ?? '—'}</td>
+                <td className="px-3 py-2 font-mono text-xs text-zinc-600">{row.node_id ?? '—'}</td>
+                <td className="px-3 py-2 text-zinc-700 whitespace-pre-wrap break-words max-w-md">
+                  {row.detail ?? '—'}
                 </td>
               </tr>
             ))}
             {!loading && rows.length === 0 && !err && (
               <tr>
-                <td colSpan={4} className="px-3 py-8 text-center text-zinc-500">
+                <td colSpan={5} className="px-3 py-8 text-center text-zinc-500">
                   No rows.
                 </td>
               </tr>
@@ -317,8 +202,6 @@ export default function Alerts() {
           </tbody>
         </table>
       </div>
-
-      {detail && <DetailModal row={detail} onClose={() => setDetail(null)} />}
     </div>
   );
 }

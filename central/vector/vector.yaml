@@ -29,7 +29,7 @@ transforms:
       .timestamp = to_string(ts) ?? to_string(now())
       .origin_host = to_string(.origin_host) ?? "unknown"
 
-      type = to_string(.event_type) ?? to_string(.event_name) ?? "general"
+      type = to_string(.event_name) ?? "general"
       .event_type = type
       .message = to_string(.message) ?? ""
       .data = encode_json(raw_data)
@@ -70,7 +70,7 @@ sinks:
     type: http
     inputs:
       - format_for_clickhouse
-    uri: "https://localhost:4001/api/notifications/ingest
+    uri: "https://localhost:4001/api/notifications/ingest"
     method: post
     encoding:
       codec: json
