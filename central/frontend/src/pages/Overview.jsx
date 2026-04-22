@@ -1,11 +1,5 @@
 import { useEffect, useState } from 'react';
 import {
-  ComposableMap,
-  Geographies,
-  Geography,
-  Marker
-} from 'react-simple-maps';
-import {
   ResponsiveContainer,
   BarChart,
   Bar,
@@ -16,8 +10,6 @@ import {
   Legend
 } from 'recharts';
 import { apiFetch } from '../auth';
-
-const GEO_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
 
 const chartColors = {
   clientRx: 'rgba(134, 22, 24, 0.85)',
@@ -63,7 +55,21 @@ export default function Overview() {
   }
 
   const { totals, trafficSeries, nodes } = data;
-  const chartData = trafficSeries || [];
+  const chartData = Array.isArray(trafficSeries) ? trafficSeries.slice(-50) : [];
+  const onlineNodes = (nodes || []).filter((n) => n.online);
+  const nodeOrder = onlineNodes.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+  const size = 760;
+  const center = size / 2;
+  const radius = Math.max(120, center - 90);
+  const nodePositions = new Map();
+  nodeOrder.forEach((n, i) => {
+    const angle = (2 * Math.PI * i) / Math.max(1, nodeOrder.length);
+    nodePositions.set(n.id, {
+      x: center + radius * Math.cos(angle),
+      y: center + radius * Math.sin(angle)
+    });
+  });
+  const links = Array.isArray(data.siteLinks) ? data.siteLinks : [];
 
   return (
     <div className="space-y-8">
@@ -82,81 +88,92 @@ export default function Overview() {
         </div>
       </div>
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-        <h2 className="text-base font-semibold text-zinc-800 mb-3">Node map</h2>
-        <div className="w-full overflow-hidden rounded border border-zinc-100 bg-zinc-50">
-          <ComposableMap
-            projectionConfig={{ scale: 120, center: [0, 20] }}
-            width={800}
-            height={360}
-            style={{ width: '100%', height: 'auto' }}
-          >
-            <Geographies geography={GEO_URL}>
-              {({ geographies }) =>
-                geographies.map((geo) => (
-                  <Geography
-                    key={geo.rsmKey}
-                    geography={geo}
-                    fill="#e4e4e7"
-                    stroke="#d4d4d8"
-                    style={{
-                      default: { outline: 'none' },
-                      hover: { outline: 'none', fill: '#ddd' },
-                      pressed: { outline: 'none' }
-                    }}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm min-w-0">
+          <h2 className="text-base font-semibold text-zinc-800 mb-3">Site-to-site topology</h2>
+          <div className="relative w-full h-[42vh] max-h-[460px] overflow-hidden rounded border border-zinc-100 bg-zinc-50 p-2">
+            <svg viewBox={`0 0 ${size} ${size}`} className="w-full h-full">
+              {links.map((link, idx) => {
+                const a = nodePositions.get(link.source);
+                const b = nodePositions.get(link.target);
+                if (!a || !b) return null;
+                return (
+                  <line
+                    key={`${link.source}-${link.target}-${idx}`}
+                    x1={a.x}
+                    y1={a.y}
+                    x2={b.x}
+                    y2={b.y}
+                    stroke="#9ca3af"
+                    strokeWidth="2"
                   />
-                ))
-              }
-            </Geographies>
-            {(nodes || []).map(
-              (n) =>
-                n.lat != null &&
-                n.lon != null && (
-                  <Marker key={n.id} coordinates={[n.lon, n.lat]}>
-                    <circle r={5} fill="rgba(134, 22, 24, 1)" stroke="#fff" strokeWidth={1} />
-                    <title>
-                      {n.name}
-                      {n.publicIp ? ` — ${n.publicIp}` : ''}
-                    </title>
-                  </Marker>
-                )
-            )}
-          </ComposableMap>
-        </div>
-        <p className="text-xs text-zinc-500 mt-2">Geolocation from registered public IP.</p>
-      </section>
+                );
+              })}
+              {nodeOrder.map((n) => {
+                const p = nodePositions.get(n.id);
+                if (!p) return null;
+                return (
+                  <g key={n.id}>
+                    <circle cx={p.x} cy={p.y} r="22" fill="#861618" stroke="#ffffff" strokeWidth="2" />
+                  </g>
+                );
+              })}
+            </svg>
+            {nodeOrder.map((n) => {
+              const p = nodePositions.get(n.id);
+              if (!p) return null;
+              const hostLabel = n.name || n.id;
+              const endpointLabel = n.publicIp || 'no-endpoint';
+              const left = `${(p.x / size) * 100}%`;
+              const top = `${(p.y / size) * 100}%`;
+              return (
+                <div
+                  key={`label-${n.id}`}
+                  className="absolute pointer-events-none text-center"
+                  style={{ left, top, transform: 'translate(-50%, 20px)' }}
+                >
+                  <div className="text-[14px] leading-4 font-semibold text-zinc-900">{hostLabel}</div>
+                  <div className="text-[12px] leading-4 font-medium text-zinc-700">({endpointLabel})</div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-xs text-zinc-500 mt-2">
+            Edge is shown only when both nodes report each other as online site peers.
+          </p>
+        </section>
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-        <h2 className="text-base font-semibold text-zinc-800 mb-1">Aggregate traffic (per scrape)</h2>
-        <p className="text-xs text-zinc-500 mb-3">Stacked: client/site × RX/TX, all nodes.</p>
-        <div className="h-80 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-              <XAxis
-                dataKey="t"
-                tickFormatter={(ts) => new Date(ts * 1000).toLocaleTimeString()}
-                fontSize={11}
-              />
-              <YAxis
-                tickFormatter={(v) =>
-                  v >= 1e9 ? `${(v / 1e9).toFixed(1)}G` : v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : `${(v / 1e3).toFixed(0)}k`
-                }
-                fontSize={11}
-              />
-              <Tooltip
-                labelFormatter={(ts) => new Date(ts * 1000).toLocaleString()}
-                formatter={(value) => [`${Number(value).toLocaleString()} B`, '']}
-              />
-              <Legend />
-              <Bar dataKey="clientRx" name="Client RX" stackId="tr" fill={chartColors.clientRx} />
-              <Bar dataKey="clientTx" name="Client TX" stackId="tr" fill={chartColors.clientTx} />
-              <Bar dataKey="siteRx" name="Site RX" stackId="tr" fill={chartColors.siteRx} />
-              <Bar dataKey="siteTx" name="Site TX" stackId="tr" fill={chartColors.siteTx} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </section>
+        <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm min-w-0">
+          <h2 className="text-base font-semibold text-zinc-800 mb-1">Aggregate traffic</h2>
+          <div className="h-[42vh] max-h-[460px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                <XAxis
+                  dataKey="t"
+                  tickFormatter={(ts) => new Date(ts * 1000).toLocaleTimeString()}
+                  fontSize={11}
+                />
+                <YAxis
+                  tickFormatter={(v) =>
+                    v >= 1e9 ? `${(v / 1e9).toFixed(1)}G` : v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : `${(v / 1e3).toFixed(0)}k`
+                  }
+                  fontSize={11}
+                />
+                <Tooltip
+                  labelFormatter={(ts) => new Date(ts * 1000).toLocaleString()}
+                  formatter={(value) => [`${Number(value).toLocaleString()} B`, '']}
+                />
+                <Legend />
+                <Bar dataKey="clientRx" name="Client RX" stackId="tr" fill={chartColors.clientRx} />
+                <Bar dataKey="clientTx" name="Client TX" stackId="tr" fill={chartColors.clientTx} />
+                <Bar dataKey="siteRx" name="Site RX" stackId="tr" fill={chartColors.siteRx} />
+                <Bar dataKey="siteTx" name="Site TX" stackId="tr" fill={chartColors.siteTx} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

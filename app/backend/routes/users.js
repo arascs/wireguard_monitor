@@ -108,6 +108,18 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
     return { updated: true };
   }
 
+  function endpointHost(value) {
+    const s = String(value || '').trim();
+    if (!s) return '';
+    if (s.startsWith('[')) {
+      const idx = s.indexOf(']');
+      return idx > 1 ? s.slice(1, idx) : '';
+    }
+    const idx = s.lastIndexOf(':');
+    if (idx > 0) return s.slice(0, idx);
+    return s;
+  }
+
   // Identity management
   router.get('/users', requireAuth, async (req, res) => {
     let connection;
@@ -426,6 +438,48 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       res.json({ success: true, message: 'Device removed' });
     } catch (error) {
       console.error('Error deleting device by machine:', error);
+      res.status(500).json({ success: false, error: error.message });
+    } finally {
+      if (connection) {
+        await connection.end();
+      }
+    }
+  });
+
+  router.delete('/sites/by-endpoint', async (req, res) => {
+    const key = (req.header('x-register-key') || '').trim();
+    if (!process.env.CENTRAL_REGISTER_SECRET || key !== process.env.CENTRAL_REGISTER_SECRET) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+    const endpoint = req.body && req.body.endpoint != null ? String(req.body.endpoint).trim() : '';
+    const host = endpointHost(endpoint);
+    if (!host) {
+      return res.status(400).json({ success: false, error: 'endpoint required' });
+    }
+
+    let connection;
+    try {
+      connection = await mysql.createConnection(dbConfig);
+      const [rows] = await connection.execute(
+        'SELECT site_pubkey, `interface`, site_endpoint FROM sites WHERE site_endpoint LIKE ?',
+        [`${host}:%`]
+      );
+      if (!rows.length) {
+        return res.status(404).json({ success: false, error: 'Site not found' });
+      }
+
+      let removed = 0;
+      for (const row of rows) {
+        if (!row.site_pubkey || !row.interface) continue;
+        const result = deletePeerByPublicKey(row.interface, row.site_pubkey);
+        if (!result.updated) continue;
+        await connection.execute('DELETE FROM sites WHERE site_pubkey = ?', [row.site_pubkey]);
+        removed += 1;
+      }
+
+      res.json({ success: true, removed });
+    } catch (error) {
+      console.error('Error deleting site by endpoint:', error);
       res.status(500).json({ success: false, error: error.message });
     } finally {
       if (connection) {

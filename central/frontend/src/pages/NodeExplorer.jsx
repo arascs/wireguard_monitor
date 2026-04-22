@@ -25,6 +25,11 @@ function wgPairLabel(online, total) {
   return '—';
 }
 
+function listSitesText(sites) {
+  if (!Array.isArray(sites) || sites.length === 0) return '—';
+  return sites.join(', ');
+}
+
 function NodeServicesModal({ node, onClose }) {
   if (!node) return null;
   return (
@@ -89,6 +94,11 @@ function NodeServicesModal({ node, onClose }) {
             </span>
           </div>
         </div>
+
+        <p className="text-xs font-medium text-zinc-600 mt-6 mb-1">Sites</p>
+        <div className="rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700 break-all">
+          {listSitesText(node.sites)}
+        </div>
       </div>
     </div>
   );
@@ -101,6 +111,7 @@ export default function NodeExplorer() {
   const [region, setRegion] = useState('');
   const [err, setErr] = useState(null);
   const [detailNode, setDetailNode] = useState(null);
+  const [deletingNodeId, setDeletingNodeId] = useState(null);
 
   useEffect(() => {
     let cancel = false;
@@ -140,6 +151,29 @@ export default function NodeExplorer() {
       return name.includes(ql) || pip.includes(ql);
     });
   }, [rows, q, region]);
+
+  async function handleDeleteNode(node) {
+    if (!node || !node.id) return;
+    const ok = window.confirm(`Delete node "${node.name}"? This also requests peer cleanup on connected sites.`);
+    if (!ok) return;
+    setDeletingNodeId(node.id);
+    try {
+      const r = await apiFetch(`/api/nodes/${encodeURIComponent(node.id)}`, { method: 'DELETE' });
+      const payload = await r.json().catch(() => ({}));
+      if (!r.ok || payload.ok === false) {
+        throw new Error(payload.error || `HTTP ${r.status}`);
+      }
+      setRows((prev) => prev.filter((it) => it.id !== node.id));
+      if (detailNode && detailNode.id === node.id) setDetailNode(null);
+      if (payload.warnings && payload.warnings.length) {
+        window.alert(`Node removed with warnings:\n${payload.warnings.join('\n')}`);
+      }
+    } catch (e) {
+      window.alert(`Delete failed: ${e.message}`);
+    } finally {
+      setDeletingNodeId(null);
+    }
+  }
 
   function sitesLabel(n) {
     const on = n.sitesOnline;
@@ -261,13 +295,23 @@ export default function NodeExplorer() {
                   </span>
                 </td>
                 <td className="px-3 py-2">
-                  <button
-                    type="button"
-                    className="text-primary text-xs font-medium hover:underline"
-                    onClick={() => setDetailNode(n)}
-                  >
-                    View detail
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      className="text-primary text-xs font-medium hover:underline"
+                      onClick={() => setDetailNode(n)}
+                    >
+                      View detail
+                    </button>
+                    <button
+                      type="button"
+                      className="text-red-700 text-xs font-medium hover:underline disabled:text-zinc-400"
+                      disabled={deletingNodeId === n.id}
+                      onClick={() => handleDeleteNode(n)}
+                    >
+                      {deletingNodeId === n.id ? 'Deleting…' : 'Delete'}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

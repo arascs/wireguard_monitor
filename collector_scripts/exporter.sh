@@ -31,6 +31,8 @@ c_total=0; s_total=0
 c_active=0; s_active=0
 c_rx=0; c_tx=0  # Tổng traffic cho Client
 s_rx=0; s_tx=0  # Tổng traffic cho Site
+declare -A SITE_ALL_ENDPOINTS
+declare -A SITE_ONLINE_ENDPOINTS
 
 INTERFACES=$(sudo wg show interfaces 2>/dev/null || true)
 
@@ -53,6 +55,9 @@ for iface in $INTERFACES; do
             ((s_total++))
             s_rx=$((s_rx + rx))
             s_tx=$((s_tx + tx))
+            if [ -n "$end" ] && [ "$end" != "(none)" ]; then
+                SITE_ALL_ENDPOINTS["$end"]="$iface"
+            fi
         else
             ((c_total++))
             c_rx=$((c_rx + rx))
@@ -65,6 +70,9 @@ for iface in $INTERFACES; do
         if [ "$conn" -eq 1 ]; then
             if [ "$TYPE" == "site" ]; then
                 ((s_active++))
+                if [ -n "$end" ] && [ "$end" != "(none)" ]; then
+                    SITE_ONLINE_ENDPOINTS["$end"]="$iface"
+                fi
             else
                 ((c_active++))
             fi
@@ -92,6 +100,16 @@ echo "wireguard_traffic_receive_bytes_total{type=\"client\"} $c_rx"
 echo "wireguard_traffic_transmit_bytes_total{type=\"client\"} $c_tx"
 echo "wireguard_traffic_receive_bytes_total{type=\"site\"} $s_rx"
 echo "wireguard_traffic_transmit_bytes_total{type=\"site\"} $s_tx"
+
+# Danh sách đầy đủ các Site endpoint và danh sách online Site endpoint
+for endpoint in "${!SITE_ALL_ENDPOINTS[@]}"; do
+  iface="${SITE_ALL_ENDPOINTS[$endpoint]}"
+  echo "wireguard_site_endpoint_info{interface=\"$iface\",endpoint=\"$endpoint\",online=\"0\"} 1"
+done
+for endpoint in "${!SITE_ONLINE_ENDPOINTS[@]}"; do
+  iface="${SITE_ONLINE_ENDPOINTS[$endpoint]}"
+  echo "wireguard_site_endpoint_info{interface=\"$iface\",endpoint=\"$endpoint\",online=\"1\"} 1"
+done
 
 # --- 6. Trạng thái systemd (monitor services + mysql) ---
 for svc in endpoint_monitor wg_handshake_monitor services_monitor mysql; do

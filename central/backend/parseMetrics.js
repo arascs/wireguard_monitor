@@ -60,6 +60,33 @@ function getUnlabeledMetric(lines, metricName) {
   return undefined;
 }
 
+function parseLabelsMap(labels) {
+  const out = {};
+  const re = /([a-zA-Z_][a-zA-Z0-9_]*)="([^"]*)"/g;
+  let m;
+  while ((m = re.exec(labels || '')) !== null) {
+    out[m[1]] = m[2];
+  }
+  return out;
+}
+
+function getSiteEndpoints(lines) {
+  const all = new Set();
+  const online = new Set();
+  for (const line of lines) {
+    const p = parseLine(line);
+    if (!p || p.name !== 'wireguard_site_endpoint_info' || p.value < 1) continue;
+    const labels = parseLabelsMap(p.labels);
+    const endpoint = labels.endpoint || '';
+    if (!endpoint || endpoint === '(none)') continue;
+    all.add(endpoint);
+    if (labels.online === '1') {
+      online.add(endpoint);
+    }
+  }
+  return { all: Array.from(all), online: Array.from(online) };
+}
+
 function parseMetrics(text) {
   const lines = text.split('\n');
   const cpu = {};
@@ -81,6 +108,7 @@ function parseMetrics(text) {
   } else if (peersOnlineLegacy != null) {
     peersOnlineTotal = peersOnlineLegacy;
   }
+  const siteEndpoints = getSiteEndpoints(lines);
 
   return {
     memTotal: getLabeled(lines, 'node_memory_MemTotal_bytes', {}) || sumByName(lines, 'node_memory_MemTotal_bytes'),
@@ -98,6 +126,8 @@ function parseMetrics(text) {
     trafficTxClient: getLabeled(lines, 'wireguard_traffic_transmit_bytes_total', { type: 'client' }),
     trafficRxSite: getLabeled(lines, 'wireguard_traffic_receive_bytes_total', { type: 'site' }),
     trafficTxSite: getLabeled(lines, 'wireguard_traffic_transmit_bytes_total', { type: 'site' }),
+    sites: siteEndpoints.all,
+    onlineSites: siteEndpoints.online,
     cpu
   };
 }

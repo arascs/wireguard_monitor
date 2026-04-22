@@ -12,11 +12,11 @@ const PORT = 5000;
 const CONFIG_DIR = '/etc/wireguard/';
 const CLIENT_PRIVATE_KEY_FILE = path.join(CONFIG_DIR, 'wg_client.key');
 const CLIENT_PUBLIC_KEY_FILE = path.join(CONFIG_DIR, 'wg_client.pub');
-const VPN_SERVERS_FILE = path.join(process.cwd(), 'VPN_servers.json');
+const VPN_SERVERS_FILE = path.join(__dirname, 'VPN_servers.json');
 
 app.use(express.json());
 app.use(cors());
-app.use(express.static(path.join(process.cwd(), '../frontend')));
+app.use(express.static(path.join(__dirname, '../frontend')));
 
 function run(cmd) {
   try {

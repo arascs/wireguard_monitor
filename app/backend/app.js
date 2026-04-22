@@ -1095,6 +1095,15 @@ app.post('/api/add-peer', async (req, res) => {
     }
 
     try {
+      const status = run('wg show interfaces');
+      if (status.includes(INTERFACE)) {
+        run(`bash -c "wg syncconf ${INTERFACE} <(wg-quick strip ${INTERFACE})"`);
+      }
+    } catch (e) {
+      console.error('wg syncconf failed:', e.message);
+    }
+
+    try {
       const admin = req.session && req.session.user ? req.session.user : 'unknown';
       logAction(admin, 'create_peer', { peer });
     } catch (e) { }
@@ -1159,6 +1168,15 @@ app.delete('/api/delete-peer/:index', async (req, res) => {
       return res.status(403).json({
         success: false,
         error: 'Key has expired. Please generate new keys first.'
+      });
+    }
+
+    const ifaceType = config.interface.type || '';
+
+    if (ifaceType === 'Client') {
+      return res.status(400).json({
+        success: false,
+        error: 'Peer type Client can only be deleted by removing devices.'
       });
     }
 
@@ -1881,7 +1899,7 @@ function registerWithCentral() {
   };
   return fetch(`${base}/api/register`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Register-Key': register_secret },
     body: JSON.stringify(body)
   }).then(async (r) => {
     let payload = null;

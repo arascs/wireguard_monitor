@@ -4,7 +4,7 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
 
 ---
 
-## Features
+## Local management
 
 ### Admin
 
@@ -44,6 +44,7 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
 
 ### Audit logs
 - Support admin actions, session logging and security alerts on abnormal handshakes and peer endpoint changes.
+- Real-time notification on security alerts. 
 
 ---
 
@@ -58,6 +59,34 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
 - Data is stored in log files and metric exports for further integration with SOC systems
 
 ---
+
+## Central management
+
+### Dashboard
+- Overview of total nodes, online count, and estimated alerts in the last 24h
+- Site-to-site topology graph showing active links between online nodes
+- Aggregate traffic chart (client RX/TX and site RX/TX) per poll interval
+
+### Node Explorer
+- List all nodes with CPU, RAM, Disk, throughput, site-to-site peer count, last health check time, and online/offline status
+- Filter by name, public IP, and geographic region
+- View per-node service status and WireGuard peer details
+- Delete a node and automatically clean up peers on connected site-to-site nodes
+
+### Device Registry
+- Aggregate all client devices registered across VPN nodes
+- Search by machine ID, hostname, or node name
+- Delete a device from central and simultaneously remove it from all associated nodes
+
+### Logging
+- **Alerts**: browse security event logs pushed by the Vector pipeline into ClickHouse; filter by host, event type, time range, and keyword; view full JSON payload per event
+- **Operation Logs**: browse internal logs written by central (node offline, high resource usage, service down, site-to-site connection error); filter by alert type, node, and time range
+
+### Notifications
+- Automatic alerts when a node goes offline, resource usage exceeds 90%, a service stops, or a site-to-site peer goes offline
+- Bell icon with unread badge and notification panel, refreshed every 5 seconds
+
+
 
 ## Requirements
 

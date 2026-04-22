@@ -129,6 +129,57 @@ function normalizeBaseUrl(u) {
   return `https://${trimmed}`;
 }
 
+function endpointHost(endpoint) {
+  const s = String(endpoint || '').trim();
+  if (!s) return '';
+  if (s.startsWith('[')) {
+    const idx = s.indexOf(']');
+    return idx > 1 ? s.slice(1, idx) : '';
+  }
+  const idx = s.lastIndexOf(':');
+  if (idx > 0) return s.slice(0, idx);
+  return s;
+}
+
+function ipOnly(value) {
+  return endpointHost(value);
+}
+
+function buildSiteTopology() {
+  const ipToNode = new Map();
+  for (const n of nodes) {
+    const ip = ipOnly(n.publicIp);
+    if (ip) ipToNode.set(ip, n);
+  }
+  const pairs = new Map();
+  for (const n of nodes) {
+    const snap = latestByNode.get(n.id);
+    if (!snap || !snap.online) continue;
+    const onlineSites = Array.isArray(snap.onlineSites) ? snap.onlineSites : [];
+    for (const endpoint of onlineSites) {
+      const remoteHost = endpointHost(endpoint);
+      if (!remoteHost) continue;
+      const remoteNode = ipToNode.get(remoteHost);
+      if (!remoteNode || remoteNode.id === n.id) continue;
+      const key = [n.id, remoteNode.id].sort().join('__');
+      let pair = pairs.get(key);
+      if (!pair) {
+        pair = { source: n.id, target: remoteNode.id, hasAtoB: false, hasBtoA: false };
+        pairs.set(key, pair);
+      }
+      if (pair.source === n.id) pair.hasAtoB = true;
+      else pair.hasBtoA = true;
+    }
+  }
+  const links = [];
+  for (const p of pairs.values()) {
+    if (p.hasAtoB && p.hasBtoA) {
+      links.push({ source: p.source, target: p.target });
+    }
+  }
+  return links;
+}
+
 function countIncomingAlerts(payload) {
   if (Array.isArray(payload)) return payload.length;
   if (payload && Array.isArray(payload.events)) return payload.events.length;
@@ -393,6 +444,8 @@ app.get('/api/nodes', authMiddleware, async (req, res) => {
       clientsTotal: snap && snap.clientsTotal != null ? snap.clientsTotal : null,
       sitesOnline: snap && snap.sitesOnline != null ? snap.sitesOnline : null,
       sitesTotal: snap && snap.sitesTotal != null ? snap.sitesTotal : null,
+      sites: snap && Array.isArray(snap.sites) ? snap.sites : [],
+      onlineSites: snap && Array.isArray(snap.onlineSites) ? snap.onlineSites : [],
       services: snap && snap.services ? snap.services : {},
       lastHealthOkAt: lastOk != null ? lastOk : null,
       memTotal: m && m.memTotal,
@@ -440,6 +493,8 @@ app.get('/api/dashboard', authMiddleware, async (req, res) => {
       clientsTotal: snap && snap.clientsTotal != null ? snap.clientsTotal : null,
       sitesOnline: snap && snap.sitesOnline != null ? snap.sitesOnline : null,
       sitesTotal: snap && snap.sitesTotal != null ? snap.sitesTotal : null,
+      sites: snap && Array.isArray(snap.sites) ? snap.sites : [],
+      onlineSites: snap && Array.isArray(snap.onlineSites) ? snap.onlineSites : [],
       services: snap && snap.services ? snap.services : {},
       lastHealthOkAt: lastOk != null ? lastOk : null,
       memTotal: m && m.memTotal,
@@ -454,8 +509,60 @@ app.get('/api/dashboard', authMiddleware, async (req, res) => {
     },
     trafficSeries,
     nodes: list,
+    siteLinks: buildSiteTopology(),
     pollIntervalSec: POLL_MS / 1000
   });
+});
+
+app.delete('/api/nodes/:id', authMiddleware, async (req, res) => {
+  if (!SHARED_SECRET) {
+    return res.status(503).json({ ok: false, error: 'CENTRAL_SHARED_SECRET not configured' });
+  }
+  const nodeId = String(req.params.id || '').trim();
+  const idx = nodes.findIndex((n) => n.id === nodeId);
+  if (idx < 0) {
+    return res.status(404).json({ ok: false, error: 'Node not found' });
+  }
+  const targetNode = nodes[idx];
+  const snap = latestByNode.get(nodeId);
+  const siteEndpoints = Array.isArray(snap && snap.sites) ? snap.sites : [];
+  const warnings = [];
+
+  const peerBases = new Set();
+  for (const endpoint of siteEndpoints) {
+    const host = ipOnly(endpoint);
+    if (!host) continue;
+    const peerNode = nodes.find((n) => ipOnly(n.publicIp) === host);
+    if (!peerNode || !peerNode.baseUrl || peerNode.id === nodeId) continue;
+    peerBases.add(normalizeBaseUrl(peerNode.baseUrl));
+  }
+
+  for (const base of peerBases) {
+    try {
+      const r = await fetch(`${base}/api/sites/by-endpoint`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Register-Key': SHARED_SECRET
+        },
+        body: JSON.stringify({ endpoint: targetNode.publicIp }),
+        agent: base.startsWith('https') ? httpsAgent : undefined
+      });
+      if (!r.ok) {
+        const txt = await r.text();
+        warnings.push(`${base}: ${r.status} ${txt.slice(0, 120)}`);
+      }
+    } catch (e) {
+      warnings.push(`${base}: ${e.message}`);
+    }
+  }
+
+  nodes.splice(idx, 1);
+  saveNodes(nodes);
+  latestByNode.delete(nodeId);
+  lastHealthOkByNode.delete(nodeId);
+
+  res.json({ ok: true, warnings });
 });
 
 app.get('/api/alerts', authMiddleware, async (req, res) => {

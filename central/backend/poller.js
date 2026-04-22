@@ -119,6 +119,8 @@ function createPoller({ getNodes, onSnapshot }) {
       clientsTotal,
       sitesOnline,
       sitesTotal,
+      sites: Array.isArray(m.sites) ? m.sites : [],
+      onlineSites: Array.isArray(m.onlineSites) ? m.onlineSites : [],
       services: m.services || {},
       bandwidthDelta,
       traffic,
