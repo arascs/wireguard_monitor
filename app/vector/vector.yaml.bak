@@ -1,0 +1,55 @@
+sources:
+  json_logs:
+    type: file
+    include:
+      - /etc/wireguard/logs/endpoint_events.json
+    read_from: beginning
+
+transforms:
+  parse_and_clean:
+    type: remap
+    inputs:
+      - json_logs
+    source: |
+      parsed, err = parse_json(.message)
+      if err == null {
+          . = parsed
+      }
+      .origin_host = get_hostname!()
+      .ingest_timestamp = now()
+      # CHÈN API KEY ĐỂ CENTRAL XÁC THỰC
+      .push_api_key = "hungnlq_push"
+
+sinks:
+  out:
+    type: console
+    inputs:
+      - parse_and_clean
+    encoding:
+      codec: json
+
+  # GỬI ĐẾN CENTRAL SERVER
+  to_central:
+    type: vector
+    inputs:
+      - parse_and_clean
+    address: "160.250.65.230:6000"
+    tls:
+      enabled: true
+      ca_file: "/usr/local/share/ca-certificates/root-ca.crt"
+      verify_hostname: false
+
+  to_local_backend:
+    type: http
+    inputs:
+      - parse_and_clean
+    uri: "https://localhost:3000/api/notifications/ingest"
+    method: post
+    encoding:
+      codec: json
+    batch:
+      max_events: 10
+      timeout_secs: 1
+    tls:
+      verify_hostname: false
+      verify_certificate: false

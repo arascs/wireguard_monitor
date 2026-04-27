@@ -76,12 +76,47 @@ app.use(cors());
 const TLS_KEY_PATH = '/usr/local/share/ca-certificates/key.pem';
 const TLS_CERT_PATH = '/usr/local/share/ca-certificates/cert.pem';
 
-const POLL_API_KEY = "hungnlq_poll";
+const POLL_API_KEY = process.env.POLL_API_KEY || '';
+const BASHRC_FILE = path.join(process.env.HOME || '/root', '.bashrc');
+
+function readEnvValue(name) {
+  const val = process.env[name];
+  return val == null ? '' : String(val);
+}
+
+function parseBashrcEnv(content) {
+  const out = {};
+  const lines = String(content || '').split('\n');
+  for (const line of lines) {
+    const m = line.match(/^\s*export\s+([A-Za-z_][A-Za-z0-9_]*)=(.*)\s*$/);
+    if (!m) continue;
+    let v = m[2].trim();
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      v = v.slice(1, -1);
+    }
+    out[m[1]] = v;
+  }
+  return out;
+}
+
+function upsertBashrcEnv(updates) {
+  const old = fs.existsSync(BASHRC_FILE) ? fs.readFileSync(BASHRC_FILE, 'utf8') : '';
+  let lines = old.split('\n');
+  for (const [k, v] of Object.entries(updates)) {
+    const esc = String(v || '').replace(/"/g, '\\"');
+    const exportLine = `export ${k}="${esc}"`;
+    const idx = lines.findIndex((ln) => new RegExp(`^\\s*export\\s+${k}=`).test(ln));
+    if (idx >= 0) lines[idx] = exportLine;
+    else lines.push(exportLine);
+    process.env[k] = String(v || '');
+  }
+  fs.writeFileSync(BASHRC_FILE, lines.join('\n'), 'utf8');
+}
 
 // Prometheus-style metrics (no session auth; for central / monitoring)
 app.get('/metrics', (req, res) => {
   try {
-    if (req.headers['x-api-key'] !== POLL_API_KEY) {
+    if (POLL_API_KEY && req.headers['x-api-key'] !== POLL_API_KEY) {
       return res.status(403).json({ error: "Unauthorized" });
     }
 
@@ -791,7 +826,13 @@ app.delete('/api/delete-interface/:name', (req, res) => {
 app.get('/api/settings', (req, res) => {
   try {
     const settings = loadGlobalSettings();
-    res.json({ success: true, settings });
+    const bashrcEnv = parseBashrcEnv(fs.existsSync(BASHRC_FILE) ? fs.readFileSync(BASHRC_FILE, 'utf8') : '');
+    settings.apiKeys = {
+      registerKey: readEnvValue('CENTRAL_REGISTER_SECRET') || bashrcEnv.CENTRAL_REGISTER_SECRET || '',
+      pushKey: readEnvValue('CENTRAL_PUSH_API_KEY') || bashrcEnv.CENTRAL_PUSH_API_KEY || '',
+      pullKey: readEnvValue('CENTRAL_PULL_API_KEY') || bashrcEnv.CENTRAL_PULL_API_KEY || ''
+    };
+    return res.json({ success: true, settings });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -838,6 +879,13 @@ app.post('/api/settings', (req, res) => {
       const admin = req.session && req.session.user ? req.session.user : 'unknown';
       logAction(admin, 'update_settings', newSettings);
     } catch (e) { }
+
+    const apiKeys = req.body && req.body.apiKeys ? req.body.apiKeys : {};
+    upsertBashrcEnv({
+      CENTRAL_REGISTER_SECRET: apiKeys.registerKey || readEnvValue('CENTRAL_REGISTER_SECRET'),
+      CENTRAL_PUSH_API_KEY: apiKeys.pushKey || readEnvValue('CENTRAL_PUSH_API_KEY'),
+      CENTRAL_PULL_API_KEY: apiKeys.pullKey || readEnvValue('CENTRAL_PULL_API_KEY')
+    });
 
     res.json({ success: true, settings: newSettings });
   } catch (error) {
@@ -1893,13 +1941,14 @@ function registerWithCentral() {
     `http://127.0.0.1:${PORT}`;
   const body = {
     name: process.env.CENTRAL_NODE_NAME || HOSTNAME,
+    machineId: HOSTNAME,
     baseUrl: pollBase.replace(/\/+$/, ''),
     publicIp: process.env.CENTRAL_PUBLIC_IP || '',
-    secret
+    registerKey: secret
   };
   return fetch(`${base}/api/register`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Register-Key': register_secret },
+    headers: { 'Content-Type': 'application/json', 'X-Register-Key': secret },
     body: JSON.stringify(body)
   }).then(async (r) => {
     let payload = null;

@@ -4,7 +4,7 @@ const fs = require('fs');
 const cors = require('cors');
 const fetch = require('node-fetch');
 const https = require('https');
-const { loadNodes, saveNodes, nodeIdFor } = require('./state');
+const { loadNodes, saveNodes, loadNodeKeys, saveNodeKeys, nodeIdFor } = require('./state');
 const { createPoller } = require('./poller');
 const {
   fetchLogs,
@@ -14,7 +14,8 @@ const {
   deleteDeviceRow,
   deleteAllDeviceRowsForMachine,
   fetchDistinctBaseUrlsForMachine,
-  fetchDevicesAggregated
+  fetchDevicesAggregated,
+  insertWireguardLogs
 } = require('./clickhouseLogs');
 const {
   ensureCredentials,
@@ -47,8 +48,10 @@ const SHARED_SECRET = process.env.CENTRAL_SHARED_SECRET || '';
 const POLL_MS = parseInt(process.env.POLL_INTERVAL_MS || '30000', 10);
 const GEO_DISABLED = process.env.GEO_LOOKUP === '0';
 const ALERT_INGEST_KEY = process.env.ALERT_INGEST_KEY || '';
+const BASHRC_FILE = path.join(process.env.HOME || '/root', '.bashrc');
 
 let nodes = loadNodes();
+let nodeKeys = loadNodeKeys();
 const geoCache = new Map();
 const latestByNode = new Map();
 const lastHealthOkByNode = new Map();
@@ -127,6 +130,56 @@ function normalizeBaseUrl(u) {
   if (/^https:\/\//i.test(trimmed)) return trimmed;
   if (/^http:\/\//i.test(trimmed)) return trimmed.replace(/^http:\/\//i, 'https://');
   return `https://${trimmed}`;
+}
+
+function randomApiKey(prefix) {
+  return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function stripKeyMeta(row) {
+  if (!row) return null;
+  return {
+    registerKey: row.registerKey || '',
+    pushKey: row.pushKey || '',
+    pullKey: row.pullKey || '',
+    machineId: row.machineId || '',
+    usedAt: row.usedAt || null,
+    updatedAt: row.updatedAt || null
+  };
+}
+
+function findNodeKeyByRegisterKey(key) {
+  return nodeKeys.find((k) => k.registerKey === key) || null;
+}
+
+function findNodeKeyByPushKey(key) {
+  return nodeKeys.find((k) => k.pushKey === key) || null;
+}
+
+function findNodeKeyByMachineId(machineId) {
+  return nodeKeys.find((k) => k.machineId === machineId) || null;
+}
+
+function isValidRegisterKey(key) {
+  const k = String(key || '').trim();
+  if (!k) return false;
+  if (SHARED_SECRET && k === SHARED_SECRET) return true;
+  const row = findNodeKeyByRegisterKey(k);
+  return Boolean(row);
+}
+
+function upsertBashrcEnv(updates) {
+  const old = fs.existsSync(BASHRC_FILE) ? fs.readFileSync(BASHRC_FILE, 'utf8') : '';
+  let lines = old.split('\n');
+  for (const [k, v] of Object.entries(updates)) {
+    const esc = String(v || '').replace(/"/g, '\\"');
+    const exportLine = `export ${k}="${esc}"`;
+    const idx = lines.findIndex((ln) => new RegExp(`^\\s*export\\s+${k}=`).test(ln));
+    if (idx >= 0) lines[idx] = exportLine;
+    else lines.push(exportLine);
+    process.env[k] = String(v || '');
+  }
+  fs.writeFileSync(BASHRC_FILE, lines.join('\n'), 'utf8');
 }
 
 function endpointHost(endpoint) {
@@ -338,11 +391,24 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.post('/api/register', async (req, res) => {
-  if (!SHARED_SECRET) {
-    return res.status(503).json({ ok: false, error: 'CENTRAL_SHARED_SECRET not configured' });
+  const registerKey = String(req.body.registerKey || req.body.secret || '').trim();
+  const machineId = String(req.body.machineId || req.body.nodeMachineId || '').trim();
+  if (!registerKey || !machineId) {
+    return res.status(400).json({ ok: false, error: 'registerKey and machineId required' });
   }
-  if (req.body.secret !== SHARED_SECRET) {
+  const keyRow = findNodeKeyByRegisterKey(registerKey);
+  if (!keyRow) {
+    if (SHARED_SECRET && registerKey === SHARED_SECRET) {
+      return res.status(409).json({
+        ok: false,
+        error:
+          'Legacy CENTRAL_SHARED_SECRET is no longer accepted for new nodes. Create node keys from the Nodes tab.'
+      });
+    }
     return res.status(401).json({ ok: false, error: 'unauthorized' });
+  }
+  if (keyRow.machineId && keyRow.machineId !== machineId) {
+    return res.status(409).json({ ok: false, error: 'registerKey already used' });
   }
   const name = String(req.body.name || '').trim() || 'node';
   const baseUrl = normalizeBaseUrl(String(req.body.baseUrl || '').trim());
@@ -360,6 +426,7 @@ app.post('/api/register', async (req, res) => {
   const row = {
     id,
     name,
+    machineId,
     baseUrl,
     publicIp,
     region: geo ? geo.country : (idx >= 0 ? nodes[idx].region : '') || '',
@@ -368,8 +435,12 @@ app.post('/api/register', async (req, res) => {
   };
   if (idx >= 0) nodes[idx] = { ...nodes[idx], ...row };
   else nodes.push(row);
+  keyRow.machineId = machineId;
+  keyRow.usedAt = keyRow.usedAt || new Date().toISOString();
+  keyRow.updatedAt = new Date().toISOString();
   saveNodes(nodes);
-  res.json({ ok: true, id });
+  saveNodeKeys(nodeKeys);
+  res.json({ ok: true, id, apiKeys: stripKeyMeta(keyRow) });
 });
 
 app.post('/api/notifications/ingest', (req, res) => {
@@ -385,6 +456,46 @@ app.post('/api/notifications/ingest', (req, res) => {
 
   pushNotification('ingest', { detail: '' });
   res.json({ ok: true, added: count, unread: getUnreadCount() });
+});
+
+app.post('/api/logs/push', async (req, res) => {
+  const providedKey = String(req.header('x-push-api-key') || req.header('x-api-key') || '').trim();
+  if (!providedKey) {
+    return res.status(401).json({ ok: false, error: 'missing push key' });
+  }
+  const keyRow = findNodeKeyByPushKey(providedKey);
+  if (!keyRow || !keyRow.machineId) {
+    return res.status(401).json({ ok: false, error: 'invalid push key' });
+  }
+
+  const incoming = Array.isArray(req.body) ? req.body : [req.body];
+  const cleaned = incoming
+    .map((raw) => {
+      if (!raw || typeof raw !== 'object') return null;
+      const nowIso = new Date().toISOString();
+      const ts = raw.timestamp || raw.ingest_timestamp || nowIso;
+      const eventType = String(raw.event_name || raw.event_type || 'general');
+      const msg = String(raw.message || '');
+      return {
+        timestamp: String(ts).replace('T', ' ').replace('Z', ''),
+        origin_host: String(raw.origin_host || keyRow.machineId || 'unknown'),
+        event_type: eventType,
+        message: msg,
+        data: JSON.stringify(raw)
+      };
+    })
+    .filter(Boolean);
+
+  if (cleaned.length === 0) {
+    return res.status(400).json({ ok: false, error: 'empty payload' });
+  }
+  try {
+    await insertWireguardLogs(cleaned);
+    pushNotification('ingest', { detail: '' });
+    res.json({ ok: true, inserted: cleaned.length, unread: getUnreadCount() });
+  } catch (e) {
+    res.status(503).json({ ok: false, error: e.message || 'ClickHouse unavailable' });
+  }
 });
 
 app.get('/api/notifications/unread', authMiddleware, (req, res) => {
@@ -424,9 +535,11 @@ app.get('/api/nodes', authMiddleware, async (req, res) => {
     const bps = snap ? snap.bandwidthDelta / dt : 0;
     const { memUsedPct, diskUsedPct } = usageFromMetrics(m);
     const lastOk = lastHealthOkByNode.get(n.id);
+    const nodeKey = findNodeKeyByMachineId(n.machineId || n.name || '');
     enriched.push({
       id: n.id,
       name: n.name,
+      machineId: n.machineId || '',
       baseUrl: n.baseUrl,
       publicIp: n.publicIp,
       region,
@@ -449,10 +562,58 @@ app.get('/api/nodes', authMiddleware, async (req, res) => {
       services: snap && snap.services ? snap.services : {},
       lastHealthOkAt: lastOk != null ? lastOk : null,
       memTotal: m && m.memTotal,
-      memAvail: m && m.memAvail
+      memAvail: m && m.memAvail,
+      apiKeys: stripKeyMeta(nodeKey)
     });
   }
   res.json({ nodes: enriched });
+});
+
+app.get('/api/node-keys', authMiddleware, (req, res) => {
+  const rows = nodeKeys.map((row) => ({
+    machineId: row.machineId || '',
+    updatedAt: row.updatedAt || null,
+    usedAt: row.usedAt || null,
+    apiKeys: stripKeyMeta(row)
+  }));
+  res.json({ ok: true, rows });
+});
+
+app.post('/api/node-keys', authMiddleware, (req, res) => {
+  const body = req.body || {};
+  const registerKey =
+    body.registerKey && String(body.registerKey).trim()
+      ? String(body.registerKey).trim()
+      : randomApiKey('reg');
+  const pushKey =
+    body.pushKey && String(body.pushKey).trim() ? String(body.pushKey).trim() : randomApiKey('push');
+  const pullKey =
+    body.pullKey && String(body.pullKey).trim() ? String(body.pullKey).trim() : randomApiKey('pull');
+  const machineId = body.machineId ? String(body.machineId).trim() : '';
+  const row = {
+    registerKey,
+    pushKey,
+    pullKey,
+    machineId,
+    usedAt: machineId ? new Date().toISOString() : null,
+    updatedAt: new Date().toISOString()
+  };
+  const oldIdx = nodeKeys.findIndex((k) => k.registerKey === registerKey);
+  if (oldIdx >= 0) {
+    if (nodeKeys[oldIdx].machineId && nodeKeys[oldIdx].machineId !== machineId) {
+      return res.status(409).json({ ok: false, error: 'registerKey already in use' });
+    }
+    nodeKeys[oldIdx] = row;
+  } else {
+    nodeKeys.unshift(row);
+  }
+  upsertBashrcEnv({
+    CENTRAL_REGISTER_SECRET: row.registerKey,
+    CENTRAL_PUSH_API_KEY: row.pushKey,
+    CENTRAL_PULL_API_KEY: row.pullKey
+  });
+  saveNodeKeys(nodeKeys);
+  res.json({ ok: true, row: stripKeyMeta(row) });
 });
 
 app.get('/api/dashboard', authMiddleware, async (req, res) => {
@@ -596,7 +757,7 @@ app.get('/api/operation-logs', authMiddleware, async (req, res) => {
 
 app.post('/api/devices/sync', async (req, res) => {
   const key = (req.header('x-register-key') || '').trim();
-  if (!SHARED_SECRET || key !== SHARED_SECRET) {
+  if (!isValidRegisterKey(key)) {
     return res.status(401).json({ ok: false, error: 'unauthorized' });
   }
   const b = req.body || {};
@@ -625,7 +786,7 @@ app.post('/api/devices/sync', async (req, res) => {
 
 app.post('/api/devices/unsync', async (req, res) => {
   const key = (req.header('x-register-key') || '').trim();
-  if (!SHARED_SECRET || key !== SHARED_SECRET) {
+  if (!isValidRegisterKey(key)) {
     return res.status(401).json({ ok: false, error: 'unauthorized' });
   }
   const machine_id = req.body && req.body.machine_id != null ? String(req.body.machine_id).trim() : '';

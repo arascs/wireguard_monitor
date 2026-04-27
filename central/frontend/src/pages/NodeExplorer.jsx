@@ -30,8 +30,57 @@ function listSitesText(sites) {
   return sites.join(', ');
 }
 
+function MaskedKeyInput({ label, value, reveal, setReveal, onChange }) {
+  return (
+    <div className="space-y-1">
+      <label className="text-xs font-medium text-zinc-600">{label}</label>
+      <div className="flex items-center gap-2">
+        <input
+          className="flex-1 rounded border border-zinc-300 px-2 py-1.5 text-xs font-mono"
+          type={reveal ? 'text' : 'password'}
+          value={value}
+          onChange={onChange}
+        />
+        <button type="button" className="text-zinc-600 hover:text-zinc-900" onClick={() => setReveal(!reveal)}>
+          {reveal ? '🙈' : '👁'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function NodeServicesModal({ node, onClose }) {
+  const [keys, setKeys] = useState({
+    registerKey: node?.apiKeys?.registerKey || '',
+    pushKey: node?.apiKeys?.pushKey || '',
+    pullKey: node?.apiKeys?.pullKey || ''
+  });
+  const [reveal, setReveal] = useState({ reg: false, push: false, pull: false });
+  const [saving, setSaving] = useState(false);
   if (!node) return null;
+  async function saveKeys() {
+    setSaving(true);
+    try {
+      const r = await apiFetch('/api/node-keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          machineId: node.machineId || node.name || '',
+          registerKey: keys.registerKey,
+          pushKey: keys.pushKey,
+          pullKey: keys.pullKey
+        })
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      window.alert('Saved API keys');
+      onClose();
+    } catch (e) {
+      window.alert(e.message || 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
   return (
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50"
@@ -99,6 +148,82 @@ function NodeServicesModal({ node, onClose }) {
         <div className="rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700 break-all">
           {listSitesText(node.sites)}
         </div>
+        <div className="mt-6 space-y-3">
+          <p className="text-xs font-medium text-zinc-600">API Keys</p>
+          <MaskedKeyInput
+            label="Register key"
+            value={keys.registerKey}
+            reveal={reveal.reg}
+            setReveal={(v) => setReveal((p) => ({ ...p, reg: v }))}
+            onChange={(e) => setKeys((p) => ({ ...p, registerKey: e.target.value }))}
+          />
+          <MaskedKeyInput
+            label="Push key"
+            value={keys.pushKey}
+            reveal={reveal.push}
+            setReveal={(v) => setReveal((p) => ({ ...p, push: v }))}
+            onChange={(e) => setKeys((p) => ({ ...p, pushKey: e.target.value }))}
+          />
+          <MaskedKeyInput
+            label="Pull key"
+            value={keys.pullKey}
+            reveal={reveal.pull}
+            setReveal={(v) => setReveal((p) => ({ ...p, pull: v }))}
+            onChange={(e) => setKeys((p) => ({ ...p, pullKey: e.target.value }))}
+          />
+          <button
+            type="button"
+            className="px-3 py-1.5 rounded bg-primary text-white text-xs disabled:opacity-60"
+            onClick={saveKeys}
+            disabled={saving}
+          >
+            {saving ? 'Saving…' : 'Save keys'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AddNodeModal({ onClose, onCreated }) {
+  const [row, setRow] = useState({ registerKey: '', pushKey: '', pullKey: '' });
+  const [loading, setLoading] = useState(false);
+  async function generate() {
+    setLoading(true);
+    try {
+      const r = await apiFetch('/api/node-keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setRow(j.row || {});
+      onCreated && onCreated();
+    } catch (e) {
+      window.alert(e.message || 'Generate failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+      <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-5 border border-zinc-200" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-start gap-2 mb-4">
+          <h2 className="text-lg font-semibold text-primary">Add node</h2>
+          <button type="button" className="text-zinc-500 hover:text-zinc-800 text-sm" onClick={onClose}>Close</button>
+        </div>
+        <p className="text-xs text-zinc-600 mb-3">Generate API keys and copy them to local node settings.</p>
+        <button type="button" className="px-3 py-1.5 rounded bg-primary text-white text-xs" onClick={generate} disabled={loading}>
+          {loading ? 'Generating…' : 'Generate API keys'}
+        </button>
+        {!!row.registerKey && (
+          <div className="mt-4 space-y-2 text-xs">
+            <div><span className="font-medium">Register:</span> <span className="font-mono break-all">{row.registerKey}</span></div>
+            <div><span className="font-medium">Push:</span> <span className="font-mono break-all">{row.pushKey}</span></div>
+            <div><span className="font-medium">Pull:</span> <span className="font-mono break-all">{row.pullKey}</span></div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -112,6 +237,7 @@ export default function NodeExplorer() {
   const [err, setErr] = useState(null);
   const [detailNode, setDetailNode] = useState(null);
   const [deletingNodeId, setDeletingNodeId] = useState(null);
+  const [showAddNode, setShowAddNode] = useState(false);
 
   useEffect(() => {
     let cancel = false;
@@ -186,6 +312,17 @@ export default function NodeExplorer() {
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold text-zinc-900">Node Explorer</h1>
+      {section === 'nodes' && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            className="px-3 py-1.5 rounded bg-primary text-white text-xs"
+            onClick={() => setShowAddNode(true)}
+          >
+            Add node
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2 border-b border-zinc-200 pb-2">
         <button
@@ -327,6 +464,7 @@ export default function NodeExplorer() {
       </div>
 
       {detailNode && <NodeServicesModal node={detailNode} onClose={() => setDetailNode(null)} />}
+      {showAddNode && <AddNodeModal onClose={() => setShowAddNode(false)} onCreated={() => {}} />}
         </>
       )}
     </div>

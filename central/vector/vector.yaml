@@ -10,28 +10,34 @@ sources:
       key_file: "/etc/vector/certs/central.key"
 
 transforms:
-  # BƯỚC XÁC THỰC API KEY
-  auth_filter:
-    type: filter
+  route_auth:
+    type: route
     inputs:
       - from_local
-    condition: '.push_api_key == "hungnlq_push"'
+    route:
+      valid: '.push_api_key == "hungnlq_push"'
+      invalid: 'true'
 
   format_for_clickhouse:
     type: remap
     inputs:
-      - auth_filter
+      - route_auth.valid
     source: |
       raw_data = .
+
+      # bỏ api key khỏi payload
       del(.push_api_key)
 
       ts = .timestamp || now()
       .timestamp = to_string(ts) ?? to_string(now())
+
       .origin_host = to_string(.origin_host) ?? "unknown"
 
       type = to_string(.event_name) ?? "general"
       .event_type = type
+
       .message = to_string(.message) ?? ""
+
       .data = encode_json(raw_data)
 
       . = {
@@ -50,7 +56,14 @@ sinks:
     encoding:
       codec: json
 
-  # GỬI VÀO CLICKHOUSE
+  invalid_to_file:
+    type: file
+    inputs:
+      - route_auth.invalid
+    path: "/var/log/vector/invalid_api_key.log"
+    encoding:
+      codec: json
+
   to_clickhouse:
     type: clickhouse
     inputs:
@@ -59,24 +72,40 @@ sinks:
     database: "vpn_monitoring"
     table: "wireguard_logs"
     skip_unknown_fields: true
+
     auth:
       strategy: basic
       user: default
       password: root
-    batch:
-      max_events: 1
 
-  to_central_backend:
+    batch:
+      max_events: 100
+      timeout_secs: 2
+
+    request:
+      timeout_secs: 5
+
+  to_notify_backend:
     type: http
     inputs:
       - format_for_clickhouse
     uri: "https://localhost:4001/api/notifications/ingest"
     method: post
+
     encoding:
       codec: json
+
+    headers:
+      Content-Type: application/json
+
     batch:
       max_events: 10
       timeout_secs: 1
+
+    request:
+      timeout_secs: 5
+      retry_attempts: 3
+
     tls:
-      enabled: true
       verify_certificate: false
+      verify_hostname: false

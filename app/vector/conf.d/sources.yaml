@@ -1,0 +1,24 @@
+sources:
+  src_admin:
+    type: file
+    include:
+      - /etc/wireguard/logs/audit_log.json
+    read_from: beginning
+    decoding:
+      codec: json
+
+  src_security:
+    type: file
+    include:
+      - /etc/wireguard/logs/endpoint_events.json
+    read_from: beginning
+    decoding:
+      codec: json
+
+  src_session:
+    type: file
+    include:
+      - /etc/wireguard/logs/vpn_history/vpn_sessions_*.json
+    read_from: beginning
+    decoding:
+      codec: json

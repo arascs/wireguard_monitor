@@ -10,6 +10,9 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('keyExpiryDays').value = data.settings.keyExpiryDays;
         document.getElementById('peerDisableHours').value = data.settings.peerDisableHours;
         document.getElementById('keyRenewalTime').value = data.settings.keyRenewalTime;
+        document.getElementById('registerApiKey').value = (data.settings.apiKeys && data.settings.apiKeys.registerKey) || '';
+        document.getElementById('pushApiKey').value = (data.settings.apiKeys && data.settings.apiKeys.pushKey) || '';
+        document.getElementById('pullApiKey').value = (data.settings.apiKeys && data.settings.apiKeys.pullKey) || '';
         document.getElementById('enforceKernelCheck').checked = data.settings.enforceKernelCheck !== false;
         document.getElementById('minKernelVersion').value = data.settings.minKernelVersion !== undefined ? data.settings.minKernelVersion : 4;
         document.getElementById('enforceNoRootLogin').checked = data.settings.enforceNoRootLogin !== false;
@@ -32,6 +35,11 @@ document.addEventListener('DOMContentLoaded', () => {
       keyExpiryDays: document.getElementById('keyExpiryDays').value,
       peerDisableHours: document.getElementById('peerDisableHours').value,
       keyRenewalTime: document.getElementById('keyRenewalTime').value,
+      apiKeys: {
+        registerKey: document.getElementById('registerApiKey').value,
+        pushKey: document.getElementById('pushApiKey').value,
+        pullKey: document.getElementById('pullApiKey').value
+      },
       enforceKernelCheck: document.getElementById('enforceKernelCheck').checked,
       minKernelVersion: document.getElementById('minKernelVersion').value,
       enforceNoRootLogin: document.getElementById('enforceNoRootLogin').checked,

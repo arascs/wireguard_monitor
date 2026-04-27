@@ -1,0 +1,131 @@
+transforms:
+  # =========================
+  # 1. ADMIN ACTIONS (Audit Log)
+  # =========================
+  fmt_admin_json:
+    type: remap
+    inputs: ["src_admin"]
+    source: |
+      . = parse_json!(.message)
+
+      # timestamp chuẩn SIEM
+      .timestamp = to_timestamp!(.timestamp, "milliseconds")
+
+  fmt_admin_syslog:
+    type: remap
+    inputs: ["fmt_admin_json"]
+    source: |
+      target = to_string(.details.interface ?? .details.peer.name ?? "unknown")
+
+      .message = format!(
+        "<134>1 {} {} vpn-manager - - - admin={} action={} target={}",
+        to_rfc3339(.timestamp),
+        hostname() ?? "peerA",
+        .admin,
+        .action,
+        target
+      )
+
+  fmt_admin_cef:
+    type: remap
+    inputs: ["fmt_admin_json"]
+    source: |
+      target = replace!(to_string(.details.interface ?? .details.peer.name ?? "unknown"), r"[=|\\]", "_")
+
+      .message = format!(
+        "CEF:0|WireGuard|VPN-Manager|1.0|{}|{}|5|rt={} suser={} cs1Label=target cs1={}",
+        .action,
+        .action,
+        to_unix_timestamp(.timestamp),
+        .admin,
+        target
+      )
+
+  # =========================
+  # 2. SECURITY EVENTS
+  # =========================
+  fmt_security_json:
+    type: remap
+    inputs: ["src_security"]
+    source: |
+      . = parse_json!(.message)
+
+      # đảm bảo timestamp đúng kiểu
+      .timestamp = to_timestamp!(.timestamp)
+
+  fmt_security_syslog:
+    type: remap
+    inputs: ["fmt_security_json"]
+    source: |
+      endpoint = to_string(.details.endpoint ?? .details.new_endpoint ?? "unknown")
+
+      .message = format!(
+        "<131>1 {} {} vpn-manager - - - event={} iface={} endpoint={}",
+        to_rfc3339(.timestamp),
+        hostname() ?? "peerA",
+        .event_name,
+        .details.interface ?? "unknown",
+        endpoint
+      )
+
+  fmt_security_cef:
+    type: remap
+    inputs: ["fmt_security_json"]
+    source: |
+      endpoint = replace!(to_string(.details.endpoint ?? .details.new_endpoint ?? "unknown"), r"[=|\\]", "_")
+
+      .message = format!(
+        "CEF:0|WireGuard|VPN-Manager|1.0|{}|Security Alert|10|rt={} msg={} cs1Label=endpoint cs1={}",
+        .event_name,
+        to_unix_timestamp(.timestamp),
+        .event_name,
+        endpoint
+      )
+
+  # =========================
+  # 3. SESSION LOGS
+  # =========================
+  fmt_session_json:
+    type: remap
+    inputs: ["src_session"]
+    source: |
+      . = parse_json!(.message)
+
+      # dùng start_time làm timestamp chuẩn
+      .timestamp = to_timestamp!(.start_time)
+
+      # flatten để dễ query nếu đẩy sang SIEM
+      .bytes_in = .direction1.bytes
+      .bytes_out = .direction2.bytes
+
+  fmt_session_syslog:
+    type: remap
+    inputs: ["fmt_session_json"]
+    source: |
+      .message = format!(
+        "<134>1 {} {} vpn-manager - - - user={} src={} dst={} bytes={} duration={}",
+        to_rfc3339(.timestamp),
+        hostname() ?? "peerA",
+        .peer_name,
+        .source,
+        .resource,
+        .total_bytes,
+        .duration_sec
+      )
+
+  fmt_session_cef:
+    type: remap
+    inputs: ["fmt_session_json"]
+    source: |
+      src = replace!(to_string(.source), r"[=|\\]", "_")
+      dst = replace!(to_string(.resource), r"[=|\\]", "_")
+
+      .message = format!(
+        "CEF:0|WireGuard|VPN-Manager|1.0|vpn_session|Session End|1|rt={} suser={} src={} dst={} out={} duration={}",
+        to_unix_timestamp(.timestamp),
+        .peer_name,
+        src,
+        dst,
+        .total_bytes,
+        .duration_sec
+      )

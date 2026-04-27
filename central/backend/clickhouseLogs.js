@@ -242,6 +242,27 @@ async function fetchDevicesAggregated() {
     .filter(Boolean);
 }
 
+async function insertWireguardLogs(rows) {
+  const ch = getClient();
+  if (!ch) throw new Error('ClickHouse unavailable');
+  const normalized = (Array.isArray(rows) ? rows : [])
+    .map((row) => ({
+      timestamp: String(row.timestamp || ''),
+      origin_host: String(row.origin_host || 'unknown'),
+      event_type: String(row.event_type || 'general'),
+      message: String(row.message || ''),
+      data: typeof row.data === 'string' ? row.data : JSON.stringify(row.data || {})
+    }))
+    .filter((row) => row.timestamp);
+  if (normalized.length === 0) return 0;
+  await ch.insert({
+    table: TABLE,
+    values: normalized,
+    format: 'JSONEachRow'
+  });
+  return normalized.length;
+}
+
 async function fetchLogs(q) {
   const ch = getClient();
   if (!ch) {
@@ -351,6 +372,7 @@ module.exports = {
   deleteAllDeviceRowsForMachine,
   fetchDistinctBaseUrlsForMachine,
   fetchDevicesAggregated,
+  insertWireguardLogs,
   OPERATION_LOGS_TABLE,
   DEVICES_TABLE
 };
