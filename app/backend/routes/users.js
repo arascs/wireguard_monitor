@@ -3,10 +3,12 @@ const fs = require('fs');
 const path = require('path');
 const { logAction } = require('../auditLogger');
 const { notifyDeviceApproved, notifyDeviceRemoved } = require('../centralSync');
+const { createDeviceHeartbeatManager, HEARTBEAT_TTL_SECONDS } = require('../deviceHeartbeat');
 
 function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authenticateToken }) {
   const router = express.Router();
   const CONFIG_DIR = '/etc/wireguard/';
+  let heartbeatManager;
 
   function getPeerLatestHandshakeEpochSeconds(interfaceName, publicKey) {
     if (!interfaceName || !publicKey) {
@@ -107,6 +109,46 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
     return { updated: true };
   }
+
+  async function disconnectDeviceNow(username, deviceName) {
+    if (!username || !deviceName) return { disconnected: false, reason: 'Missing username/deviceName' };
+    let connection;
+    try {
+      connection = await mysql.createConnection(dbConfig);
+      const [rows] = await connection.execute(
+        'SELECT public_key, interface FROM devices WHERE device_name = ? AND username = ? ORDER BY id DESC LIMIT 1',
+        [deviceName, username]
+      );
+      if (rows.length === 0 || !rows[0].public_key || !rows[0].interface) {
+        return { disconnected: false, reason: 'Device not found' };
+      }
+      const result = deletePeerByPublicKey(rows[0].interface, rows[0].public_key);
+      return { disconnected: !!result.updated, reason: result.reason || '' };
+    } finally {
+      if (connection) {
+        await connection.end();
+      }
+    }
+  }
+
+  async function initHeartbeat() {
+    if (heartbeatManager) return;
+    heartbeatManager = createDeviceHeartbeatManager({
+      onExpiredDeviceKey: async (deviceKey) => {
+        const idx = deviceKey.indexOf(':');
+        if (idx < 1) return;
+        const username = deviceKey.slice(0, idx);
+        const deviceName = deviceKey.slice(idx + 1);
+        if (!username || !deviceName) return;
+        await disconnectDeviceNow(username, deviceName);
+      }
+    });
+    await heartbeatManager.start();
+  }
+
+  initHeartbeat().catch((e) => {
+    console.error('[heartbeat] init failed:', e.message);
+  });
 
   function endpointHost(value) {
     const s = String(value || '').trim();
@@ -617,6 +659,33 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
     }
   });
 
+  router.post('/device-heartbeat', authenticateToken, async (req, res) => {
+    const username = req.user.username;
+    const { deviceName, jwtToken, securityInfo, hostname, machineId } = req.body || {};
+    const authHeader = req.headers['authorization'] || '';
+    const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+
+    if (!deviceName) {
+      return res.status(400).json({ success: false, error: 'Missing deviceName' });
+    }
+
+    const hasIdentity = !!(hostname && String(hostname).trim()) && !!(machineId && String(machineId).trim());
+    const hasSecurity = !!securityInfo && securityInfo.sshRootLogin === false && securityInfo.firewallActive === true && securityInfo.kernelVersion !== null;
+    const jwtOk = !!jwtToken && jwtToken === bearerToken;
+
+    if (!jwtOk || !hasSecurity || !hasIdentity) {
+      await disconnectDeviceNow(username, deviceName);
+      if (heartbeatManager) {
+        await heartbeatManager.clear(username, deviceName);
+      }
+      return res.status(403).json({ success: false, error: 'Heartbeat validation failed, device disconnected' });
+    }
+
+    await initHeartbeat();
+    const touched = await heartbeatManager.touch(username, deviceName);
+    res.json({ success: true, key: touched.key, ttl: touched.ttl });
+  });
+
   router.post('/disable-device/:id', requireAuth, async (req, res) => {
     const { id } = req.params;
     if (!id || isNaN(id)) {
@@ -775,6 +844,10 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       const result = deletePeerByPublicKey(iface, publicKey);
       if (!result.updated) {
         return res.status(404).json({ success: false, error: result.reason || 'Cannot disable peer' });
+      }
+
+      if (heartbeatManager) {
+        await heartbeatManager.clear(username, deviceName);
       }
 
       res.json({ success: true, active: true, disabled: true });
