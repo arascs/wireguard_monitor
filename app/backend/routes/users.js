@@ -8,7 +8,25 @@ const { createDeviceHeartbeatManager, HEARTBEAT_TTL_SECONDS } = require('../devi
 function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authenticateToken }) {
   const router = express.Router();
   const CONFIG_DIR = '/etc/wireguard/';
+  const SETTINGS_FILE = path.join(__dirname, '../settings.json');
   let heartbeatManager;
+
+  function loadSecuritySettings() {
+    const defaults = {
+      enforceKernelCheck: true,
+      minKernelVersion: 4,
+      enforceNoRootLogin: true,
+      enforceFirewall: true
+    };
+    try {
+      if (!fs.existsSync(SETTINGS_FILE)) return defaults;
+      const raw = fs.readFileSync(SETTINGS_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      return { ...defaults, ...parsed };
+    } catch (_) {
+      return defaults;
+    }
+  }
 
   function getPeerLatestHandshakeEpochSeconds(interfaceName, publicKey) {
     if (!interfaceName || !publicKey) {
@@ -661,29 +679,67 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
   router.post('/device-heartbeat', authenticateToken, async (req, res) => {
     const username = req.user.username;
-    const { deviceName, jwtToken, securityInfo, hostname, machineId } = req.body || {};
-    const authHeader = req.headers['authorization'] || '';
-    const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    const { deviceName, securityInfo, machineId } = req.body || {};
 
     if (!deviceName) {
       return res.status(400).json({ success: false, error: 'Missing deviceName' });
     }
 
-    const hasIdentity = !!(hostname && String(hostname).trim()) && !!(machineId && String(machineId).trim());
-    const hasSecurity = !!securityInfo && securityInfo.sshRootLogin === false && securityInfo.firewallActive === true && securityInfo.kernelVersion !== null;
-    const jwtOk = !!jwtToken && jwtToken === bearerToken;
+    let connection;
+    try {
+      const settings = loadSecuritySettings();
+      const issues = [];
 
-    if (!jwtOk || !hasSecurity || !hasIdentity) {
-      await disconnectDeviceNow(username, deviceName);
-      if (heartbeatManager) {
-        await heartbeatManager.clear(username, deviceName);
+      if (!securityInfo) {
+        issues.push('Missing securityInfo');
+      } else {
+        if (settings.enforceKernelCheck && securityInfo.kernelVersion !== null) {
+          if (securityInfo.kernelVersion <= settings.minKernelVersion) {
+            issues.push('Kernel version too old');
+          }
+        }
+        if (settings.enforceNoRootLogin && securityInfo.sshRootLogin === true) {
+          issues.push('SSH PermitRootLogin is yes');
+        }
+        if (settings.enforceFirewall && securityInfo.firewallActive === false) {
+          issues.push('Firewall inactive');
+        }
       }
-      return res.status(403).json({ success: false, error: 'Heartbeat validation failed, device disconnected' });
-    }
 
-    await initHeartbeat();
-    const touched = await heartbeatManager.touch(username, deviceName);
-    res.json({ success: true, key: touched.key, ttl: touched.ttl });
+      connection = await mysql.createConnection(dbConfig);
+      const [rows] = await connection.execute(
+        'SELECT machine_id FROM devices WHERE username = ? AND device_name = ? ORDER BY id DESC LIMIT 1',
+        [username, deviceName]
+      );
+      if (rows.length === 0) {
+        issues.push('Device not found');
+      } else {
+        const dbMachineId = String(rows[0].machine_id || '').trim();
+        const providedMachineId = String(machineId || '').trim();
+        if (!dbMachineId || !providedMachineId || dbMachineId !== providedMachineId) {
+          issues.push('Machine ID mismatch');
+        }
+      }
+
+      if (issues.length > 0) {
+        await disconnectDeviceNow(username, deviceName);
+        if (heartbeatManager) {
+          await heartbeatManager.clear(username, deviceName);
+        }
+        return res.status(403).json({ success: false, error: 'Heartbeat validation failed, device disconnected', issues });
+      }
+
+      await initHeartbeat();
+      const touched = await heartbeatManager.touch(username, deviceName);
+      res.json({ success: true, key: touched.key, ttl: touched.ttl });
+    } catch (error) {
+      console.error('Heartbeat error:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    } finally {
+      if (connection) {
+        await connection.end();
+      }
+    }
   });
 
   router.post('/disable-device/:id', requireAuth, async (req, res) => {

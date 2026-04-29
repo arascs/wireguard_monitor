@@ -1,6 +1,3 @@
--- Chạy trong clickhouse-client hoặc gửi qua HTTP /?query=
--- clickhouse-client -q "$(cat clickhouse_schema.sql)"
-
 CREATE DATABASE IF NOT EXISTS vpn_monitoring;
 
 CREATE TABLE IF NOT EXISTS vpn_monitoring.operation_logs
