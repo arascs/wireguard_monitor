@@ -10,6 +10,7 @@ async function loadApprovedDevices() {
     tbody.innerHTML = '';
     (data.devices || []).forEach(device => {
       const expireDateStr = device.expire_date ? new Date(device.expire_date * 1000).toLocaleDateString() : 'Never';
+      const lastSeenStr = device.last_seen ? new Date(device.last_seen * 1000).toLocaleString() : 'Never';
       const statusText = device.status === 1 ? 'Enabled' : 'Disabled';
       const tr = document.createElement('tr');
       let actions = '';
@@ -29,6 +30,7 @@ async function loadApprovedDevices() {
         <td>${device.public_key || ''}</td>
         <td>${device.machine_id || ''}</td>
         <td>${expireDateStr}</td>
+        <td>${lastSeenStr}</td>
         <td>${statusText}</td>
         <td>${actions}</td>
       `;
@@ -298,5 +300,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (tabRequests) {
     tabRequests.addEventListener('click', () => switchTab('requests'));
+  }
+
+  const btnExport = document.getElementById('btn-export-devices');
+  if (btnExport) {
+    btnExport.addEventListener('click', () => {
+      const rows = [];
+      const trs = document.querySelectorAll('#approved-devices-body tr');
+      trs.forEach(tr => {
+        const tds = tr.querySelectorAll('td');
+        if (tds.length >= 9) {
+          rows.push([
+            tds[0].innerText, tds[1].innerText, tds[2].innerText,
+            tds[3].innerText, tds[4].innerText, tds[5].innerText,
+            tds[6].innerText, tds[7].innerText, tds[8].innerText
+          ]);
+        }
+      });
+      if (window.openExportModal) {
+        window.openExportModal({
+          title: 'Approved Devices',
+          filename: 'approved_devices_report',
+          headers: ['Username', 'Device', 'Interface', 'Allowed IPs', 'Public Key', 'Machine ID', 'Expire Date', 'Last seen', 'Status'],
+          rows: rows
+        });
+      }
+    });
   }
 });

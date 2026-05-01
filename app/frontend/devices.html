@@ -185,7 +185,10 @@
         </div>
 
         <div id="approved-view">
-            <h2 class="section-title">Approved Devices</h2>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <h2 class="section-title" style="margin:0;">Approved Devices</h2>
+                <button id="btn-export-devices" type="button">&#8681; Export</button>
+            </div>
             <table class="simple-table" id="approved-devices-table">
                 <thead>
                     <tr>
@@ -196,6 +199,7 @@
                         <th>Public Key</th>
                         <th>Machine ID</th>
                         <th>Expire Date</th>
+                        <th>Last seen</th>
                         <th>Status</th>
                         <th>Actions</th>
                     </tr>
@@ -211,6 +215,7 @@
     </div>
 
     <script src="/js/navbar.js"></script>
+    <script src="/js/export.js"></script>
     <script src="/js/devices.js"></script>
 </body>
 

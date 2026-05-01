@@ -333,8 +333,9 @@
         <h2 class="section-title" id="section-title">Admin actions</h2>
 
         <!-- Filter toggle toolbar -->
-        <div class="filter-toolbar">
+        <div class="filter-toolbar" style="display:flex;justify-content:space-between;width:100%;">
             <button class="btn-filter-toggle" id="btn-toggle-filter">&#x25BC; Filter</button>
+            <button id="btn-export-log" type="button" style="background-color:rgba(134,22,24,0.8);color:white;border:none;padding:6px 14px;border-radius:5px;cursor:pointer;font-weight:600;font-size:0.88rem;">&#8681; Export</button>
         </div>
 
         <!-- Audit Log filters -->
@@ -494,6 +495,7 @@
     </div>
 
     <script src="/js/navbar.js"></script>
+    <script src="/js/export.js"></script>
     <script src="/js/audit.js"></script>
 </body>
 

@@ -93,5 +93,27 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+  
+  const btnExport = document.getElementById('btn-export-users');
+  if (btnExport) {
+    btnExport.addEventListener('click', () => {
+      const rows = [];
+      const trs = document.querySelectorAll('#users-tbody tr');
+      trs.forEach(tr => {
+        const tds = tr.querySelectorAll('td');
+        if (tds.length >= 3) {
+          rows.push([tds[0].innerText, tds[1].innerText, tds[2].innerText]);
+        }
+      });
+      if (window.openExportModal) {
+        window.openExportModal({
+          title: 'Users List',
+          filename: 'users_report',
+          headers: ['Username', 'Create Day', 'Expire Day'],
+          rows: rows
+        });
+      }
+    });
+  }
 });
 

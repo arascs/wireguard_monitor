@@ -46,6 +46,9 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
 - Support admin actions, session logging and security alerts on abnormal handshakes and peer endpoint changes.
 - Real-time notification on security alerts. 
 
+### Periodical attestation check
+- Requires connected device to approve validity by checking JWT token, security settings and device identity on regular basis. 
+
 ---
 
 ### Data Collection
@@ -94,6 +97,7 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
   - WireGuard installed
   - Root or sudo privileges
 - **NodeJS**
+- redis
 - `bash`
 - python
 - mysql

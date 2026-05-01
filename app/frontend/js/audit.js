@@ -415,6 +415,47 @@ document.addEventListener('DOMContentLoaded', () => {
   // Load application list for session filter dropdown
   loadAppOptions();
 
+  document.getElementById('btn-export-log')?.addEventListener('click', () => {
+    let headers = [];
+    let rows = [];
+    let title = '';
+    let filename = '';
+
+    if (currentTab === 'audit') {
+      title = 'Admin Actions Report';
+      filename = 'admin_actions';
+      headers = ['Timestamp', 'Admin', 'Action'];
+      rows = filteredRows.map(e => [
+        new Date(e.timestamp).toLocaleString(),
+        e.admin,
+        e.action
+      ]);
+    } else if (currentTab === 'sessions') {
+      title = 'Peer Sessions Report';
+      filename = 'peer_sessions';
+      headers = ['Start Time', 'End Time', 'Peer IP', 'Peer Name', 'App'];
+      rows = filteredRows.map(e => [
+        new Date(e.start_time).toLocaleString(),
+        new Date(e.end_time).toLocaleString(),
+        e.source ? e.source.split(':')[0] : '',
+        e.peer_name || '',
+        e.service || ''
+      ]);
+    } else {
+      title = 'Security Events Report';
+      filename = 'security_events';
+      headers = ['Timestamp', 'Event'];
+      rows = filteredRows.map(e => [
+        new Date(e.timestamp).toLocaleString(),
+        e.event_name
+      ]);
+    }
+
+    if (window.openExportModal) {
+      window.openExportModal({ title, filename, headers, rows });
+    }
+  });
+
   // Initial load
   switchTo('audit');
 });

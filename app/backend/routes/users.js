@@ -302,7 +302,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       connection = await mysql.createConnection(dbConfig);
       // include status so frontend can know whether a device is enabled or disabled
       const [rows] = await connection.execute(
-        'SELECT id, device_name, username, interface, allowed_ips, public_key, machine_id, expire_date, status FROM devices ORDER BY id DESC'
+        'SELECT id, device_name, username, interface, allowed_ips, public_key, machine_id, expire_date, status, last_seen FROM devices ORDER BY id DESC'
       );
       res.json({ success: true, devices: rows });
     } catch (error) {

@@ -1782,7 +1782,7 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
       if (settings.enforceFirewall && securityInfo.firewallActive === false) {
         issues.push('Firewall is inactive or missing');
       }
-      
+
       if (issues.length > 0) {
         return res.status(403).json({ success: false, error: 'Security policy violation', issues });
       }
@@ -1795,6 +1795,10 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
       [username, deviceName]
     );
 
+    await connection.execute(
+      'UPDATE devices SET last_seen = ? WHERE username = ? AND device_name = ?',
+      [Math.floor(Date.now() / 1000), username, deviceName]
+    );
     await connection.end();
 
     if (devices.length === 0) {
