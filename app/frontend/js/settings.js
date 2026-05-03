@@ -1,7 +1,21 @@
+function wireSecretToggles() {
+  document.querySelectorAll('.btn-toggle-secret').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-target');
+      const input = id ? document.getElementById(id) : null;
+      if (!input) return;
+      const plain = input.type === 'password';
+      input.type = plain ? 'text' : 'password';
+      btn.setAttribute('aria-pressed', plain ? 'true' : 'false');
+    });
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const form = document.getElementById('settings-form');
   const btn = document.getElementById('save-settings-btn');
-  
+  wireSecretToggles();
+
   // Fetch and display
   fetch('/api/settings')
     .then(res => res.json())

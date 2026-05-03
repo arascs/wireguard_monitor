@@ -30,21 +30,21 @@ transforms:
       - vector_internal_logs
     source: |
       if .level != "error" {
-        drop()
+        abort
       }
 
       if !exists(.component_id) {
-        drop()
+        abort
       }
 
       . = {
         "timestamp": to_string(now()),
         "event_name": "vector_error",
         "details": {
-          "component": .component_id ?? "unknown",
-          "message": .message ?? "",
-          "error_type": .error_type ?? "",
-          "stage": .stage ?? ""
+          "component": .component_id,
+          "message": .message,
+          "error_type": .error_type,
+          "stage": .stage
         }
       }
 
@@ -66,20 +66,18 @@ sinks:
     encoding:
       codec: json
 
-    headers:
-      Content-Type: application/json
-      X-Push-API-Key: "hungnlq_push"
+    request:
+      headers:
+        Content-Type: application/json
+        X-Push-API-Key: "push_emtjs83a5q29kjoa"
+      timeout_secs: 5
+      retry_attempts: 5
 
     batch:
       max_events: 20
       timeout_secs: 2
 
-    request:
-      timeout_secs: 5
-      retry_attempts: 5
-
     tls:
-      enabled: true
       verify_certificate: false
       verify_hostname: false
 
@@ -93,17 +91,16 @@ sinks:
     encoding:
       codec: json
 
-    headers:
-      Content-Type: application/json
-      X-Push-API-Key: "hungnlq_push"
+    request:
+      headers:
+        Content-Type: application/json
+        X-Push-API-Key: "push_emtjs83a5q29kjoa"
+      timeout_secs: 5
+      retry_attempts: 3
 
     batch:
       max_events: 10
       timeout_secs: 1
-
-    request:
-      timeout_secs: 5
-      retry_attempts: 3
 
     tls:
       verify_hostname: false

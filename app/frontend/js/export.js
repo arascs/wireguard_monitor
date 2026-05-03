@@ -1,10 +1,3 @@
-/**
- * export.js – Shared export helper (CSV + PDF via print)
- * Usage: openExportModal({ title, headers, rows })
- *   headers: string[]
- *   rows: (string|number|null)[][]
- */
-
 (function () {
   // ── Inject modal HTML once ──────────────────────────────────
   const MODAL_ID = 'export-modal';

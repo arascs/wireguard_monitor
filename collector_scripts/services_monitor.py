@@ -62,7 +62,10 @@ class VPNMonitor:
                             'network': network,
                             'id': str(site.get('id', '')),
                             'name': site['site_name'],
-                            'interface': site.get('interface', 'unknown')
+                            'interface': site.get('interface', 'unknown'),
+                            'peer_kind': 'site',
+                            'username': '',
+                            'device_name': ''
                         })
                     except ValueError: continue
 
@@ -80,7 +83,10 @@ class VPNMonitor:
                             'network': network,
                             'id': str(dev.get('id', '')),
                             'name': combined_name,
-                            'interface': dev.get('interface', 'unknown')
+                            'interface': dev.get('interface', 'unknown'),
+                            'peer_kind': 'device',
+                            'username': (dev.get('username') or '').strip(),
+                            'device_name': (dev.get('device_name') or '').strip()
                         })
                     except ValueError: continue
 
@@ -134,6 +140,8 @@ class VPNMonitor:
                 "interface": session_data['interface'],
                 "peer_id": session_data['peer_id'],
                 "peer_name": session_data['peer_name'],
+                "username": session_data.get('username', ''),
+                "device_name": session_data.get('device_name', ''),
                 "source": f"{session_data['peer_ip']}:{session_data['peer_port']}",
                 "resource": f"{session_data['resource_ip']}:{session_data['resource_port']}",
                 "service": session_data['service'],
@@ -221,6 +229,8 @@ class VPNMonitor:
                                 'interface': peer_info['interface'],
                                 'peer_id': peer_info['id'],
                                 'peer_name': peer_info['name'],
+                                'username': peer_info.get('username', ''),
+                                'device_name': peer_info.get('device_name', ''),
                                 'peer_ip': src_ip,
                                 'peer_port': sport,
                                 'resource_ip': dst_ip,
@@ -264,6 +274,8 @@ class VPNMonitor:
                 "interface": s['interface'],
                 "peer_id": s['peer_id'],
                 "peer_name": s['peer_name'],
+                "username": s.get('username', ''),
+                "device_name": s.get('device_name', ''),
                 "source": f"{s['peer_ip']}:{s['peer_port']}",
                 "resource_ip_port": f"{s['resource_ip']}:{s['resource_port']}",
                 "service": s['service'],

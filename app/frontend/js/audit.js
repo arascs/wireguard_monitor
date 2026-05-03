@@ -13,6 +13,99 @@ let filteredRows = []; // holds result of current filter pass
 function toMs(v) { return v ? new Date(v).getTime() : null; }
 function containsCI(str, q) { return !q || String(str || '').toLowerCase().includes(q.toLowerCase().trim()); }
 
+function detailValueToExportCell(v) {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+}
+
+function collectSortedDetailKeys(rows) {
+  const keys = new Set();
+  rows.forEach((e) => {
+    const d = e.details;
+    if (d && typeof d === 'object' && !Array.isArray(d)) {
+      Object.keys(d).forEach((k) => keys.add(k));
+    }
+  });
+  return [...keys].sort();
+}
+
+function buildAuditExport(rows) {
+  const detailKeys = collectSortedDetailKeys(rows);
+  const headers = ['Timestamp', 'Admin', 'Action', ...detailKeys.map((k) => `details.${k}`)];
+  const out = rows.map((e) => {
+    const base = [
+      new Date(e.timestamp).toLocaleString(),
+      e.admin,
+      e.action
+    ];
+    detailKeys.forEach((k) => {
+      base.push(detailValueToExportCell(e.details ? e.details[k] : undefined));
+    });
+    return base;
+  });
+  return { headers, rows: out };
+}
+
+function buildSecurityExport(rows) {
+  const detailKeys = collectSortedDetailKeys(rows);
+  const headers = ['Timestamp', 'Event', ...detailKeys.map((k) => `details.${k}`)];
+  const out = rows.map((e) => {
+    const base = [new Date(e.timestamp).toLocaleString(), e.event_name];
+    detailKeys.forEach((k) => {
+      base.push(detailValueToExportCell(e.details ? e.details[k] : undefined));
+    });
+    return base;
+  });
+  return { headers, rows: out };
+}
+
+function buildSessionExport(rows) {
+  const headers = [
+    'Start Time',
+    'End Time',
+    'Interface',
+    'Peer ID',
+    'Peer Name',
+    'Username',
+    'Device name',
+    'Source',
+    'Resource',
+    'Service',
+    'Protocol',
+    'Duration (sec)',
+    'Total bytes',
+    'Direction1 packets',
+    'Direction1 bytes',
+    'Direction2 packets',
+    'Direction2 bytes'
+  ];
+  const out = rows.map((e) => {
+    const d1 = e.direction1 || {};
+    const d2 = e.direction2 || {};
+    return [
+      new Date(e.start_time).toLocaleString(),
+      new Date(e.end_time).toLocaleString(),
+      e.interface || '',
+      e.peer_id || '',
+      e.peer_name || '',
+      e.username || '',
+      e.device_name || '',
+      e.source || '',
+      e.resource || '',
+      e.service || '',
+      e.protocol || '',
+      e.duration_sec != null ? e.duration_sec : '',
+      e.total_bytes != null ? e.total_bytes : '',
+      d1.packets != null ? d1.packets : '',
+      d1.bytes != null ? d1.bytes : '',
+      d2.packets != null ? d2.packets : '',
+      d2.bytes != null ? d2.bytes : ''
+    ];
+  });
+  return { headers, rows: out };
+}
+
 // ── Combo-box (dropdown + free-text) ─────────────────────────
 function initCombo(inputId, dropdownId, onSelect) {
   const input = document.getElementById(inputId);
@@ -73,7 +166,7 @@ function showDetail(title, obj) {
       body.appendChild(value);
     });
   }
-  document.getElementById('detail-modal').style.display = 'block';
+  document.getElementById('detail-modal').style.display = 'flex';
 }
 
 // ── Pagination render ─────────────────────────────────────────
@@ -170,9 +263,15 @@ function renderSessionRows() {
     `;
     tr.querySelector('.btn-view-details').addEventListener('click', () =>
       showDetail('Session details', {
+        interface:    entry.interface,
+        peer_id:      entry.peer_id,
         peer_name:    entry.peer_name,
+        username:     entry.username,
+        device_name:  entry.device_name,
         source:       entry.source,
+        resource:     entry.resource,
         service:      entry.service,
+        protocol:     entry.protocol,
         start_time:   entry.start_time,
         end_time:     entry.end_time,
         duration_sec: entry.duration_sec,
@@ -407,15 +506,20 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('detail-modal-close')?.addEventListener('click', () => {
     document.getElementById('detail-modal').style.display = 'none';
   });
-  document.getElementById('detail-modal')?.addEventListener('click', e => {
-    if (e.target === document.getElementById('detail-modal'))
+  document.getElementById('detail-modal')?.addEventListener('click', (e) => {
+    if (e.target === document.getElementById('detail-modal')) {
       document.getElementById('detail-modal').style.display = 'none';
+    }
   });
 
   // Load application list for session filter dropdown
   loadAppOptions();
 
   document.getElementById('btn-export-log')?.addEventListener('click', () => {
+    if (currentTab === 'audit') filterAudit();
+    else if (currentTab === 'sessions') filterSession();
+    else filterSecurity();
+
     let headers = [];
     let rows = [];
     let title = '';
@@ -424,31 +528,21 @@ document.addEventListener('DOMContentLoaded', () => {
     if (currentTab === 'audit') {
       title = 'Admin Actions Report';
       filename = 'admin_actions';
-      headers = ['Timestamp', 'Admin', 'Action'];
-      rows = filteredRows.map(e => [
-        new Date(e.timestamp).toLocaleString(),
-        e.admin,
-        e.action
-      ]);
+      const built = buildAuditExport(filteredRows);
+      headers = built.headers;
+      rows = built.rows;
     } else if (currentTab === 'sessions') {
       title = 'Peer Sessions Report';
       filename = 'peer_sessions';
-      headers = ['Start Time', 'End Time', 'Peer IP', 'Peer Name', 'App'];
-      rows = filteredRows.map(e => [
-        new Date(e.start_time).toLocaleString(),
-        new Date(e.end_time).toLocaleString(),
-        e.source ? e.source.split(':')[0] : '',
-        e.peer_name || '',
-        e.service || ''
-      ]);
+      const built = buildSessionExport(filteredRows);
+      headers = built.headers;
+      rows = built.rows;
     } else {
       title = 'Security Events Report';
       filename = 'security_events';
-      headers = ['Timestamp', 'Event'];
-      rows = filteredRows.map(e => [
-        new Date(e.timestamp).toLocaleString(),
-        e.event_name
-      ]);
+      const built = buildSecurityExport(filteredRows);
+      headers = built.headers;
+      rows = built.rows;
     }
 
     if (window.openExportModal) {

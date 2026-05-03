@@ -84,6 +84,44 @@
             background-color: #ccc;
             cursor: not-allowed;
         }
+
+        .secret-input-row {
+            display: flex;
+            align-items: stretch;
+            gap: 8px;
+            width: 100%;
+        }
+
+        .secret-input-row input {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .btn-toggle-secret {
+            flex-shrink: 0;
+            width: 44px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #f0f0f0;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            cursor: pointer;
+            color: #444;
+            transition: background 0.2s, border-color 0.2s;
+        }
+
+        .btn-toggle-secret:hover {
+            background: #e8e8e8;
+            border-color: rgba(134, 22, 24, 0.45);
+            color: rgba(134, 22, 24, 1);
+        }
+
+        .btn-toggle-secret svg {
+            width: 20px;
+            height: 20px;
+        }
     </style>
 </head>
 
@@ -119,18 +157,41 @@
 
                 <div class="form-group">
                     <label for="registerApiKey">Register API key</label>
-                    <input type="text" id="registerApiKey" placeholder="reg_xxx">
+                    <div class="secret-input-row">
+                        <input type="password" id="registerApiKey" placeholder="reg_xxx" autocomplete="off">
+                        <button type="button" class="btn-toggle-secret" data-target="registerApiKey" title="Show or hide key" aria-label="Show or hide key">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/>
+                                <circle cx="12" cy="12" r="3"/>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
 
                 <div class="form-group">
                     <label for="pushApiKey">Push API key</label>
-                    <input type="text" id="pushApiKey" placeholder="push_xxx">
+                    <div class="secret-input-row">
+                        <input type="password" id="pushApiKey" placeholder="push_xxx" autocomplete="off">
+                        <button type="button" class="btn-toggle-secret" data-target="pushApiKey" title="Show or hide key" aria-label="Show or hide key">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/>
+                                <circle cx="12" cy="12" r="3"/>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
 
                 <div class="form-group">
                     <label for="pullApiKey">Pull API key</label>
-                    <input type="text" id="pullApiKey" placeholder="pull_xxx">
-                    <span class="form-text">Saved to ~/.bashrc and used by backend from process.env after restart/reload shell.</span>
+                    <div class="secret-input-row">
+                        <input type="password" id="pullApiKey" placeholder="pull_xxx" autocomplete="off">
+                        <button type="button" class="btn-toggle-secret" data-target="pullApiKey" title="Show or hide key" aria-label="Show or hide key">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/>
+                                <circle cx="12" cy="12" r="3"/>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
 
                 <hr style="border:0; border-top:1px solid #eee; margin:30px 0;">

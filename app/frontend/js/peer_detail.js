@@ -158,7 +158,7 @@ function renderSkeleton(peer) {
                 </table>
             </div>
 
-            <!-- Active Connections -->
+            <!-- Active Sessions -->
             <div id="connections-section" class="detail-section" style="box-shadow:0 1px 4px rgba(0,0,0,.07);background:#fff;border-radius:6px;padding:14px;margin-bottom:10px;"></div>
 
             <!-- Peer Statistics Charts -->
@@ -274,7 +274,7 @@ async function loadPeerConnections(interfaceId, peerName) {
         
         // Build connections table
         let tableHTML = `
-            <h3>Active Connections</h3>
+            <h3>Active Sessions</h3>
             <div style="margin-bottom: 10px; font-size: 0.9em; color: #666;">
                 Last updated: ${data.last_updated ? formatDateTime(data.last_updated) : 'N/A'} | 
                 Active connections: ${data.active_connections_count || 0}

@@ -172,6 +172,171 @@
             color: #666;
             font-style: italic;
         }
+
+        .filter-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .btn-filter-toggle {
+            background: none;
+            border: 1px solid rgba(134, 22, 24, 0.6);
+            color: rgba(134, 22, 24, 1);
+            padding: 6px 14px;
+            border-radius: 5px;
+            font-size: 0.88rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-family: inherit;
+        }
+
+        .btn-filter-toggle:hover {
+            background: rgba(134, 22, 24, 0.07);
+        }
+
+        .filter-panel {
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 14px 18px;
+            margin-bottom: 14px;
+            display: none;
+            flex-wrap: wrap;
+            gap: 14px;
+            align-items: flex-end;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+
+        .filter-panel.open {
+            display: flex;
+        }
+
+        .filter-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 140px;
+        }
+
+        .filter-field label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .filter-field input,
+        .filter-field select {
+            padding: 6px 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 0.88rem;
+            font-family: inherit;
+        }
+
+        .btn-filter-reset {
+            background: none;
+            border: 1px solid #bbb;
+            color: #555;
+            padding: 6px 14px;
+            border-radius: 5px;
+            font-size: 0.88rem;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        .btn-filter-reset:hover {
+            background: #f0f0f0;
+        }
+
+        .btn-icon {
+            background: none;
+            border: 1px solid #ccc;
+            color: #444;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            vertical-align: middle;
+        }
+
+        .btn-icon:hover {
+            background: rgba(134, 22, 24, 0.07);
+            border-color: rgba(134, 22, 24, 0.4);
+            color: rgba(134, 22, 24, 1);
+        }
+
+        /* Detail modal (approved devices) */
+        .modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.45);
+            z-index: 8000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.open {
+            display: flex;
+        }
+
+        .modal-content.device-detail-modal {
+            position: relative;
+            width: 520px;
+            max-width: 94vw;
+            padding: 28px 32px;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+        }
+
+        .modal-content.device-detail-modal h3 {
+            margin: 0 0 18px;
+            color: rgba(134, 22, 24, 1);
+            font-size: 1.1rem;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 14px;
+            right: 18px;
+            background: none;
+            border: none;
+            font-size: 1.3rem;
+            color: #888;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+
+        .modal-close:hover {
+            color: #333;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 140px 1fr;
+            gap: 8px 12px;
+            font-size: 0.9rem;
+        }
+
+        .detail-label {
+            font-weight: 600;
+            color: #555;
+            padding-top: 2px;
+        }
+
+        .detail-value {
+            color: #222;
+            word-break: break-all;
+        }
     </style>
 </head>
 
@@ -187,20 +352,57 @@
         <div id="approved-view">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
                 <h2 class="section-title" style="margin:0;">Approved Devices</h2>
-                <button id="btn-export-devices" type="button">&#8681; Export</button>
+                <button id="btn-export-devices" type="button">Export</button>
+            </div>
+            <div class="filter-toolbar">
+                <button type="button" class="btn-filter-toggle" id="btn-dev-filter-toggle">&#x25BC; Filter</button>
+            </div>
+            <div class="filter-panel" id="approved-filter-panel">
+                <div class="filter-field">
+                    <label>Username</label>
+                    <input type="text" id="dev-filter-username" placeholder="Search…" autocomplete="off">
+                </div>
+                <div class="filter-field">
+                    <label>Device</label>
+                    <input type="text" id="dev-filter-device" placeholder="Search…" autocomplete="off">
+                </div>
+                <div class="filter-field">
+                    <label>Status</label>
+                    <select id="dev-filter-status">
+                        <option value="">All</option>
+                        <option value="1">Enabled</option>
+                        <option value="0">Disabled</option>
+                    </select>
+                </div>
+                <div class="filter-field">
+                    <label>Expire from</label>
+                    <input type="datetime-local" id="dev-filter-expire-from">
+                </div>
+                <div class="filter-field">
+                    <label>Expire to</label>
+                    <input type="datetime-local" id="dev-filter-expire-to">
+                </div>
+                <div class="filter-field">
+                    <label>Last seen from</label>
+                    <input type="datetime-local" id="dev-filter-lastseen-from">
+                </div>
+                <div class="filter-field">
+                    <label>Last seen to</label>
+                    <input type="datetime-local" id="dev-filter-lastseen-to">
+                </div>
+                <div class="filter-field" style="align-self:flex-end;">
+                    <button type="button" class="btn-filter-reset" id="dev-filter-reset">Reset</button>
+                </div>
             </div>
             <table class="simple-table" id="approved-devices-table">
                 <thead>
                     <tr>
                         <th>Username</th>
                         <th>Device</th>
-                        <th>Interface</th>
-                        <th>Allowed IPs</th>
-                        <th>Public Key</th>
-                        <th>Machine ID</th>
                         <th>Expire Date</th>
                         <th>Last seen</th>
                         <th>Status</th>
+                        <th>Details</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -211,6 +413,14 @@
         <div id="requests-view" style="display: none;">
             <h2 class="section-title">Device Enrollment Requests</h2>
             <div id="devices-container"></div>
+        </div>
+    </div>
+
+    <div id="device-detail-modal" class="modal">
+        <div class="modal-content device-detail-modal">
+            <button type="button" class="modal-close" id="device-detail-modal-close" aria-label="Close">&times;</button>
+            <h3 id="device-detail-modal-title">Device details</h3>
+            <div class="detail-grid" id="device-detail-modal-body"></div>
         </div>
     </div>
 

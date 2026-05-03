@@ -3,13 +3,12 @@ const fs = require('fs');
 const path = require('path');
 const { logAction } = require('../auditLogger');
 const { notifyDeviceApproved, notifyDeviceRemoved } = require('../centralSync');
-const { createDeviceHeartbeatManager, HEARTBEAT_TTL_SECONDS } = require('../deviceHeartbeat');
+const { registerExpireHandler, touch: heartbeatTouch, clear: heartbeatClear } = require('../deviceHeartbeat');
 
 function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authenticateToken }) {
   const router = express.Router();
   const CONFIG_DIR = '/etc/wireguard/';
   const SETTINGS_FILE = path.join(__dirname, '../settings.json');
-  let heartbeatManager;
 
   function loadSecuritySettings() {
     const defaults = {
@@ -149,23 +148,13 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
     }
   }
 
-  async function initHeartbeat() {
-    if (heartbeatManager) return;
-    heartbeatManager = createDeviceHeartbeatManager({
-      onExpiredDeviceKey: async (deviceKey) => {
-        const idx = deviceKey.indexOf(':');
-        if (idx < 1) return;
-        const username = deviceKey.slice(0, idx);
-        const deviceName = deviceKey.slice(idx + 1);
-        if (!username || !deviceName) return;
-        await disconnectDeviceNow(username, deviceName);
-      }
-    });
-    await heartbeatManager.start();
-  }
-
-  initHeartbeat().catch((e) => {
-    console.error('[heartbeat] init failed:', e.message);
+  registerExpireHandler(async (deviceKey) => {
+    const idx = deviceKey.indexOf(':');
+    if (idx < 1) return;
+    const username = deviceKey.slice(0, idx);
+    const deviceName = deviceKey.slice(idx + 1);
+    if (!username || !deviceName) return;
+    await disconnectDeviceNow(username, deviceName);
   });
 
   function endpointHost(value) {
@@ -723,14 +712,11 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
       if (issues.length > 0) {
         await disconnectDeviceNow(username, deviceName);
-        if (heartbeatManager) {
-          await heartbeatManager.clear(username, deviceName);
-        }
+        await heartbeatClear(username, deviceName);
         return res.status(403).json({ success: false, error: 'Heartbeat validation failed, device disconnected', issues });
       }
 
-      await initHeartbeat();
-      const touched = await heartbeatManager.touch(username, deviceName);
+      const touched = await heartbeatTouch(username, deviceName);
       res.json({ success: true, key: touched.key, ttl: touched.ttl });
     } catch (error) {
       console.error('Heartbeat error:', error);
@@ -902,9 +888,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
         return res.status(404).json({ success: false, error: result.reason || 'Cannot disable peer' });
       }
 
-      if (heartbeatManager) {
-        await heartbeatManager.clear(username, deviceName);
-      }
+      await heartbeatClear(username, deviceName);
 
       res.json({ success: true, active: true, disabled: true });
     } catch (error) {

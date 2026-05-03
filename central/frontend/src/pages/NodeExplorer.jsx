@@ -312,41 +312,41 @@ export default function NodeExplorer() {
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold text-zinc-900">Node Explorer</h1>
-      {section === 'nodes' && (
-        <div className="flex justify-end">
+
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-zinc-200 pb-2">
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            className="px-3 py-1.5 rounded bg-primary text-white text-xs"
+            className={`px-4 py-2 text-sm rounded-t-md border-b-2 -mb-px transition-colors ${
+              section === 'nodes'
+                ? 'border-primary text-primary font-medium'
+                : 'border-transparent text-zinc-600 hover:text-zinc-900'
+            }`}
+            onClick={() => setSection('nodes')}
+          >
+            Nodes
+          </button>
+          <button
+            type="button"
+            className={`px-4 py-2 text-sm rounded-t-md border-b-2 -mb-px transition-colors ${
+              section === 'devices'
+                ? 'border-primary text-primary font-medium'
+                : 'border-transparent text-zinc-600 hover:text-zinc-900'
+            }`}
+            onClick={() => setSection('devices')}
+          >
+            Devices
+          </button>
+        </div>
+        {section === 'nodes' && (
+          <button
+            type="button"
+            className="px-3 py-1.5 rounded bg-primary text-white text-xs shrink-0"
             onClick={() => setShowAddNode(true)}
           >
             Add node
           </button>
-        </div>
-      )}
-
-      <div className="flex flex-wrap gap-2 border-b border-zinc-200 pb-2">
-        <button
-          type="button"
-          className={`px-4 py-2 text-sm rounded-t-md border-b-2 -mb-px transition-colors ${
-            section === 'nodes'
-              ? 'border-primary text-primary font-medium'
-              : 'border-transparent text-zinc-600 hover:text-zinc-900'
-          }`}
-          onClick={() => setSection('nodes')}
-        >
-          Nodes
-        </button>
-        <button
-          type="button"
-          className={`px-4 py-2 text-sm rounded-t-md border-b-2 -mb-px transition-colors ${
-            section === 'devices'
-              ? 'border-primary text-primary font-medium'
-              : 'border-transparent text-zinc-600 hover:text-zinc-900'
-          }`}
-          onClick={() => setSection('devices')}
-        >
-          Devices
-        </button>
+        )}
       </div>
 
       {section === 'devices' && <NodeRegistry />}

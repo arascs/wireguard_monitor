@@ -21,6 +21,7 @@ const createMainDashboardRoutes = require('./routes/main_dashboard');
 const { HOSTNAME } = require('./config');
 const mysql = require('mysql2/promise');
 const { logAction, getLogs, getSecurityEvents } = require('./auditLogger');
+const { touch: redisHeartbeatTouch } = require('./deviceHeartbeat');
 
 const dbConfig = {
   host: 'localhost',
@@ -1889,6 +1890,12 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
       } catch (e) {
         console.error('systemd-run schedule error:', e.message);
       }
+    }
+
+    try {
+      await redisHeartbeatTouch(username, deviceName);
+    } catch (e) {
+      console.error('[heartbeat] connect-vpn touch:', e.message);
     }
 
     res.json({
