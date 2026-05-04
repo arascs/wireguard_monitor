@@ -17,7 +17,13 @@ function formatLastSeen(ts) {
   }
 }
 
-const SERVICE_KEYS = ['endpoint_monitor', 'wg_handshake_monitor', 'services_monitor', 'mysql'];
+const SERVICE_KEYS = [
+  'endpoint_monitor',
+  'wg_handshake_monitor',
+  'services_monitor',
+  'mysql',
+  'vector'
+];
 
 function wgPairLabel(online, total) {
   if (online != null && total != null) return `${online} / ${total}`;

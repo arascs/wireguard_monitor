@@ -112,7 +112,7 @@ for endpoint in "${!SITE_ONLINE_ENDPOINTS[@]}"; do
 done
 
 # --- 6. Trạng thái systemd (monitor services + mysql) ---
-for svc in endpoint_monitor wg_handshake_monitor services_monitor mysql; do
+for svc in endpoint_monitor wg_handshake_monitor services_monitor mysql vector; do
   av="$(systemctl is-active "$svc" 2>/dev/null || echo inactive)"
   v=0
   [ "$av" = "active" ] && v=1

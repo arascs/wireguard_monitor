@@ -77,7 +77,10 @@ app.use(cors());
 const TLS_KEY_PATH = '/usr/local/share/ca-certificates/key.pem';
 const TLS_CERT_PATH = '/usr/local/share/ca-certificates/cert.pem';
 
-const POLL_API_KEY = process.env.POLL_API_KEY || '';
+/** Đọc mỗi lần request để sau khi save settings không cần restart process. */
+function getPollApiKey() {
+  return process.env.POLL_API_KEY || '';
+}
 const BASHRC_FILE = path.join(process.env.HOME || '/root', '.bashrc');
 
 function readEnvValue(name) {
@@ -117,7 +120,8 @@ function upsertBashrcEnv(updates) {
 // Prometheus-style metrics (no session auth; for central / monitoring)
 app.get('/metrics', (req, res) => {
   try {
-    if (POLL_API_KEY && req.headers['x-api-key'] !== POLL_API_KEY) {
+    const pollKey = getPollApiKey();
+    if (pollKey && req.headers['x-api-key'] !== pollKey) {
       return res.status(403).json({ error: "Unauthorized" });
     }
 
@@ -888,7 +892,15 @@ app.post('/api/settings', (req, res) => {
       CENTRAL_PULL_API_KEY: apiKeys.pullKey || readEnvValue('CENTRAL_PULL_API_KEY')
     });
 
-    res.json({ success: true, settings: newSettings });
+    const settingsOut = {
+      ...newSettings,
+      apiKeys: {
+        registerKey: readEnvValue('CENTRAL_REGISTER_SECRET'),
+        pushKey: readEnvValue('CENTRAL_PUSH_API_KEY'),
+        pullKey: readEnvValue('CENTRAL_PULL_API_KEY')
+      }
+    };
+    res.json({ success: true, settings: settingsOut });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

@@ -95,7 +95,13 @@ function parseMetrics(text) {
     if (v !== undefined) cpu[mode] = v;
   }
   const services = {};
-  for (const svc of ['endpoint_monitor', 'wg_handshake_monitor', 'services_monitor', 'mysql']) {
+  for (const svc of [
+    'endpoint_monitor',
+    'wg_handshake_monitor',
+    'services_monitor',
+    'mysql',
+    'vector'
+  ]) {
     const v = getLabeled(lines, 'wireguard_monitor_service_active', { service: svc });
     if (v !== undefined) services[svc] = v >= 1 ? 1 : 0;
   }
