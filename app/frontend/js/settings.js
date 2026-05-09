@@ -16,44 +16,35 @@ document.addEventListener('DOMContentLoaded', () => {
   const btn = document.getElementById('save-settings-btn');
   wireSecretToggles();
 
-  // Fetch and display
-  fetch('/api/settings')
-    .then(res => res.json())
-    .then(data => {
+  fetch('/api/settings', { credentials: 'same-origin' })
+    .then((res) => res.json())
+    .then((data) => {
       if (data.success && data.settings) {
-        document.getElementById('keyExpiryDays').value = data.settings.keyExpiryDays;
-        document.getElementById('peerDisableHours').value = data.settings.peerDisableHours;
-        document.getElementById('keyRenewalTime').value = data.settings.keyRenewalTime;
-        document.getElementById('registerApiKey').value = (data.settings.apiKeys && data.settings.apiKeys.registerKey) || '';
-        document.getElementById('pushApiKey').value = (data.settings.apiKeys && data.settings.apiKeys.pushKey) || '';
-        document.getElementById('pullApiKey').value = (data.settings.apiKeys && data.settings.apiKeys.pullKey) || '';
-        document.getElementById('enforceKernelCheck').checked = data.settings.enforceKernelCheck !== false;
-        document.getElementById('minKernelVersion').value = data.settings.minKernelVersion !== undefined ? data.settings.minKernelVersion : 4;
-        document.getElementById('enforceNoRootLogin').checked = data.settings.enforceNoRootLogin !== false;
-        document.getElementById('enforceFirewall').checked = data.settings.enforceFirewall !== false;
+        const s = data.settings;
+        document.getElementById('keyExpiryDays').value = s.keyExpiryDays;
+        document.getElementById('peerDisableHours').value = s.peerDisableHours;
+        document.getElementById('keyRenewalTime').value = s.keyRenewalTime;
+        document.getElementById('nodeApiKey').value = s.apiKey || '';
+        document.getElementById('enforceKernelCheck').checked = s.enforceKernelCheck !== false;
+        document.getElementById('minKernelVersion').value = s.minKernelVersion !== undefined ? s.minKernelVersion : 4;
+        document.getElementById('enforceNoRootLogin').checked = s.enforceNoRootLogin !== false;
+        document.getElementById('enforceFirewall').checked = s.enforceFirewall !== false;
       } else {
         alert('Failed to load settings: ' + (data.error || 'Unknown error'));
       }
     })
-    .catch(err => {
-      alert('Error fetching settings: ' + err.message);
-    });
+    .catch((err) => alert('Error fetching settings: ' + err.message));
 
-  // Save
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     btn.disabled = true;
     btn.textContent = 'Saving...';
-    
+
     const payload = {
       keyExpiryDays: document.getElementById('keyExpiryDays').value,
       peerDisableHours: document.getElementById('peerDisableHours').value,
       keyRenewalTime: document.getElementById('keyRenewalTime').value,
-      apiKeys: {
-        registerKey: document.getElementById('registerApiKey').value,
-        pushKey: document.getElementById('pushApiKey').value,
-        pullKey: document.getElementById('pullApiKey').value
-      },
+      apiKey: document.getElementById('nodeApiKey').value,
       enforceKernelCheck: document.getElementById('enforceKernelCheck').checked,
       minKernelVersion: document.getElementById('minKernelVersion').value,
       enforceNoRootLogin: document.getElementById('enforceNoRootLogin').checked,
@@ -62,23 +53,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     fetch('/api/settings', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
-    .then(res => res.json())
-    .then(data => {
-      if (data.success) {
-        alert('Settings saved successfully!');
-      } else {
-        alert('Failed to save settings: ' + (data.error || 'Unknown error'));
-      }
-    })
-    .catch(err => {
-      alert('Error saving settings: ' + err.message);
-    })
-    .finally(() => {
-      btn.disabled = false;
-      btn.textContent = 'Save Settings';
-    });
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          alert('Settings saved successfully!');
+        } else {
+          alert('Failed to save settings: ' + (data.error || 'Unknown error'));
+        }
+      })
+      .catch((err) => alert('Error saving settings: ' + err.message))
+      .finally(() => {
+        btn.disabled = false;
+        btn.textContent = 'Save Settings';
+      });
   });
 });

@@ -34,7 +34,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
     let out = '';
     try {
-      out = run(`wg show ${interfaceName} latest-handshakes`).trim();
+      out = run('wg', ['show', interfaceName, 'latest-handshakes']).trim();
     } catch (e) {
       return null;
     }
@@ -116,9 +116,16 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
     fs.writeFileSync(configFile, lines.join('\n'), { mode: 0o600 });
 
     try {
-      const interfaces = run('wg show interfaces').trim();
+      const { spawnSync } = require('child_process');
+      const interfaces = run('wg', ['show', 'interfaces']).trim();
       if (interfaces.split(/\s+/).includes(interfaceName)) {
-        run(`bash -c "wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName})"`);
+        const strip = spawnSync('wg-quick', ['strip', interfaceName], { encoding: 'utf8' });
+        if (strip.status === 0) {
+          spawnSync('wg', ['syncconf', interfaceName, '/dev/stdin'], {
+            input: strip.stdout,
+            encoding: 'utf8'
+          });
+        }
       }
     } catch (e) {
       // ignore sync errors; config file already updated

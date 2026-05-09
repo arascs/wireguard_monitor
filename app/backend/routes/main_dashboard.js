@@ -221,12 +221,17 @@ router.post('/disable-peer', (req, res) => {
 
         fs.writeFileSync(confPath, lines.join('\n'), { mode: 0o600 });
 
-        // Sync if running
         try {
-            const { execSync } = require('child_process');
-            const running = execSync('wg show interfaces', { encoding: 'utf8' }).trim();
+            const { spawnSync, execFileSync } = require('child_process');
+            const running = execFileSync('wg', ['show', 'interfaces'], { encoding: 'utf8' }).trim();
             if (running.split(/\s+/).includes(interfaceName)) {
-                execSync(`bash -c "wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName})"`);
+                const strip = spawnSync('wg-quick', ['strip', interfaceName], { encoding: 'utf8' });
+                if (strip.status === 0) {
+                    spawnSync('wg', ['syncconf', interfaceName, '/dev/stdin'], {
+                        input: strip.stdout,
+                        encoding: 'utf8'
+                    });
+                }
             }
         } catch (_) { /* ignore sync errors */ }
 

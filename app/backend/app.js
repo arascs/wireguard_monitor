@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 
+require('dotenv').config();
+
 const express = require('express');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const session = require('express-session');
 const bcrypt = require('bcrypt');
-const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const fetch = require('node-fetch');
 const https = require('https');
+const crypto = require('crypto');
 const dashboardRoutes = require('./routes/dashboard');
 const createUserRoutes = require('./routes/users');
 const createApplicationRoutes = require('./routes/applications');
@@ -20,18 +22,55 @@ const createBackupRoutes = require('./routes/backups');
 const createMainDashboardRoutes = require('./routes/main_dashboard');
 const { HOSTNAME } = require('./config');
 const mysql = require('mysql2/promise');
-const { logAction, getLogs, getSecurityEvents } = require('./auditLogger');
+const { logAction, logSecurityEvent, getLogs, getSecurityEvents } = require('./auditLogger');
 const { touch: redisHeartbeatTouch } = require('./deviceHeartbeat');
+const { run, tryRun } = require('./runCmd');
+const {
+  corsMiddleware,
+  loginLimiter,
+  isAdminIp,
+  clientIp
+} = require('./security');
+const { getApiKey, authHeaders, httpsAgent: centralAgent } = require('./centralSync');
 
 const dbConfig = {
-  host: 'localhost',
-  user: 'root',
-  password: 'root',
-  database: 'wg_monitor'
+  host: process.env.WG_DB_HOST || 'localhost',
+  user: process.env.WG_DB_USER || 'root',
+  password: process.env.WG_DB_PASSWORD || 'root',
+  database: process.env.WG_DB_NAME || 'wg_monitor'
 };
 
-const JWT_SECRET = process.env.JWT_SECRET || 'please_change_this_secret';
-const ALERT_INGEST_KEY = process.env.ALERT_INGEST_KEY || '';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('[FATAL] JWT_SECRET is required (set it in .env)');
+  process.exit(1);
+}
+const SESSION_SECRET = process.env.SESSION_SECRET;
+if (!SESSION_SECRET) {
+  console.error('[FATAL] SESSION_SECRET is required (set it in .env)');
+  process.exit(1);
+}
+
+/** Same contract as central: Bearer or X-Api-Key vs NODE_API_KEY. */
+function apiKeyAuth(req, res, next) {
+  const expected = (process.env.NODE_API_KEY || '').trim();
+  if (!expected) {
+    return res.status(503).json({ success: false, error: 'node not provisioned' });
+  }
+  const auth = req.header('authorization') || '';
+  const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+  const provided = bearer || String(req.header('x-api-key') || '').trim();
+  if (!provided) {
+    return res.status(401).json({ success: false, error: 'missing api key' });
+  }
+  const a = Buffer.from(provided, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return res.status(401).json({ success: false, error: 'invalid api key' });
+  }
+  next();
+}
+
 const notificationState = {
   total: 0,
   readTotal: 0,
@@ -69,84 +108,53 @@ function authenticateToken(req, res, next) {
 }
 
 const app = express();
-const PORT = 3000;
-const EXPORTER_SCRIPT = "/usr/local/bin/exporter.sh";
+app.set('trust proxy', true);
+const PORT = parseInt(process.env.PORT || '3000', 10);
+const EXPORTER_SCRIPT = '/usr/local/bin/exporter.sh';
 
-app.use(cors());
+app.use(corsMiddleware());
 
-const TLS_KEY_PATH = '/usr/local/share/ca-certificates/key.pem';
-const TLS_CERT_PATH = '/usr/local/share/ca-certificates/cert.pem';
+const TLS_KEY_PATH = process.env.TLS_KEY_PATH || '/usr/local/share/ca-certificates/key.pem';
+const TLS_CERT_PATH = process.env.TLS_CERT_PATH || '/usr/local/share/ca-certificates/cert.pem';
 
-/** Đọc mỗi lần request để sau khi save settings không cần restart process. */
-function getPollApiKey() {
-  return process.env.POLL_API_KEY || '';
-}
-const BASHRC_FILE = path.join(process.env.HOME || '/root', '.bashrc');
-
-function readEnvValue(name) {
-  const val = process.env[name];
-  return val == null ? '' : String(val);
+/** Run a binary via execFile with stdin (used for `wg pubkey`). */
+function wgPubkey(privateKey) {
+  const r = spawnSync('wg', ['pubkey'], { input: privateKey, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error(r.stderr || 'wg pubkey failed');
+  return r.stdout.trim();
 }
 
-function parseBashrcEnv(content) {
-  const out = {};
-  const lines = String(content || '').split('\n');
-  for (const line of lines) {
-    const m = line.match(/^\s*export\s+([A-Za-z_][A-Za-z0-9_]*)=(.*)\s*$/);
-    if (!m) continue;
-    let v = m[2].trim();
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-      v = v.slice(1, -1);
-    }
-    out[m[1]] = v;
-  }
-  return out;
+/** `wg syncconf <iface> <(wg-quick strip <iface>)` without invoking a shell. */
+function wgSyncconf(iface) {
+  const strip = spawnSync('wg-quick', ['strip', iface], { encoding: 'utf8' });
+  if (strip.status !== 0) throw new Error(strip.stderr || `wg-quick strip ${iface} failed`);
+  const sync = spawnSync('wg', ['syncconf', iface, '/dev/stdin'], {
+    input: strip.stdout,
+    encoding: 'utf8'
+  });
+  if (sync.status !== 0) throw new Error(sync.stderr || `wg syncconf ${iface} failed`);
 }
 
-function upsertBashrcEnv(updates) {
-  const old = fs.existsSync(BASHRC_FILE) ? fs.readFileSync(BASHRC_FILE, 'utf8') : '';
-  let lines = old.split('\n');
-  for (const [k, v] of Object.entries(updates)) {
-    const esc = String(v || '').replace(/"/g, '\\"');
-    const exportLine = `export ${k}="${esc}"`;
-    const idx = lines.findIndex((ln) => new RegExp(`^\\s*export\\s+${k}=`).test(ln));
-    if (idx >= 0) lines[idx] = exportLine;
-    else lines.push(exportLine);
-    process.env[k] = String(v || '');
-  }
-  fs.writeFileSync(BASHRC_FILE, lines.join('\n'), 'utf8');
-}
-
-// Prometheus-style metrics (no session auth; for central / monitoring)
+// Prometheus-style metrics — kept for local debugging only. Restricted to the
+// admin CIDR (loopback always allowed). Metrics are pushed to central via
+// pushMetricsToCentral() at startup.
 app.get('/metrics', (req, res) => {
+  if (!isAdminIp(req)) {
+    return res.status(403).type('text/plain').send('forbidden');
+  }
   try {
-    const pollKey = getPollApiKey();
-    if (pollKey && req.headers['x-api-key'] !== pollKey) {
-      return res.status(403).json({ error: "Unauthorized" });
-    }
-
-    const out = execSync(`bash "${EXPORTER_SCRIPT}"`, {
-      encoding: 'utf8',
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 120000
-    });
+    const out = run('bash', [EXPORTER_SCRIPT], { timeout: 120000 });
     res.type('text/plain; version=0.0.4').send(out);
   } catch (e) {
     res.status(500).type('text/plain').send(`# exporter error: ${e.message || e}\n`);
   }
 });
 
-// Local WireGuard availability (wg show)
+// Local WireGuard availability (wg show). Returns "ok" if wg responds.
 app.get('/health', (req, res) => {
-  try {
-    const out = execSync('bash -c "wg show > /dev/null 2>&1 && echo ok || echo fail"', {
-      encoding: 'utf8'
-    }).trim();
-    const ok = out === 'ok';
-    res.status(ok ? 200 : 503).type('text/plain').send(ok ? 'ok' : 'fail');
-  } catch {
-    res.status(503).type('text/plain').send('fail');
-  }
+  const r = tryRun('wg', ['show']);
+  const ok = r.status === 0;
+  res.status(ok ? 200 : 503).type('text/plain').send(ok ? 'ok' : 'fail');
 });
 
 const CONFIG_DIR = '/etc/wireguard/';
@@ -206,19 +214,52 @@ let config = {
 
 app.use(express.json());
 app.use(session({
-  secret: 'wireguard-secret-key',
+  secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 3600000 }
+  cookie: {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'strict',
+    maxAge: 3600000
+  }
 }));
 
-function run(cmd) {
-  try {
-    return execSync(cmd, { encoding: 'utf8' });
-  } catch (error) {
-    throw new Error(error.stderr || error.message);
-  }
+// ── global guard: every /api/* call (other than the explicit allow-list)
+// must come from the admin CIDR; admin endpoints additionally require an
+// authenticated session. The allow-list covers public/device/internal callers.
+const ADMIN_BYPASS_PATHS = new Set([
+  '/api/admin-login',
+  '/api/login',
+  '/api/logout',
+  '/api/connect-vpn',
+  '/api/disconnect-vpn',
+  '/api/device-heartbeat',
+  '/api/check-device-enroll',
+  '/api/enroll-device',
+  '/api/update-key',
+  '/api/notifications/ingest',
+  '/api/sites/by-endpoint',
+  '/api/hostname'
+]);
+
+function pathAllowsBypass(p) {
+  if (ADMIN_BYPASS_PATHS.has(p)) return true;
+  if (p.startsWith('/api/devices/by-machine/')) return true;
+  return false;
 }
+
+app.use((req, res, next) => {
+  // Non-API requests handled later by static + page routes (which have their
+  // own requireAuth where needed).
+  if (!req.path.startsWith('/api/')) return next();
+  if (pathAllowsBypass(req.path)) return next();
+  if (!isAdminIp(req)) {
+    return res.status(403).json({ success: false, error: 'forbidden network' });
+  }
+  if (req.session && req.session.user) return next();
+  return res.status(401).json({ success: false, error: 'Authentication required' });
+});
 
 // Check if key is expired
 function isKeyExpired() {
@@ -254,9 +295,9 @@ function getRemainingDays() {
 async function checkAndDisconnectIfExpired() {
   if (isKeyExpired()) {
     try {
-      const status = run('wg show interfaces');
+      const status = run('wg', ['show', 'interfaces']);
       if (status.includes(INTERFACE)) {
-        run(`wg-quick down ${INTERFACE}`);
+        run('wg-quick', ['down', INTERFACE]);
         console.log(`[INFO] VPN ${INTERFACE} automatically disconnected due to expired key`);
       }
     } catch (e) {
@@ -443,8 +484,7 @@ function loadConfigFromFile() {
           config.interface[propertyName] = value;
           if (lowerKey === 'privatekey') {
             try {
-              const pubKey = run(`echo "${value}" | wg pubkey`).trim();
-              config.interface.publicKey = pubKey;
+              config.interface.publicKey = wgPubkey(value);
             } catch (e) {
               console.error('Error generating public key:', e.message);
             }
@@ -486,7 +526,7 @@ function loadConfigFromFile() {
 
 function getActiveInterfaces() {
   try {
-    const interfacesOutput = run('wg show interfaces').trim();
+    const interfacesOutput = run('wg', ['show', 'interfaces']).trim();
     if (!interfacesOutput) {
       return [];
     }
@@ -536,7 +576,7 @@ function parseInterfaceSummary(filePath) {
           summary.publicKey = value;
         } else if (key === 'privatekey' && !summary.publicKey) {
           try {
-            summary.publicKey = run(`echo "${value}" | wg pubkey`).trim();
+            summary.publicKey = wgPubkey(value);
           } catch (error) {
             // ignore pubkey calculation errors
           }
@@ -684,15 +724,12 @@ app.get('/api/interface-log/:interfaceName', (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid interface name' });
     }
     const LOG_FILE = '/etc/wireguard/logs/wg_systemd.log';
-    let lines;
+    let lines = '';
     try {
-      // grep lines matching the interface name, then take last 50
-      lines = execSync(
-        `grep -F "${interfaceName}" "${LOG_FILE}" | tail -n 50`,
-        { encoding: 'utf8' }
-      );
+      const content = fs.existsSync(LOG_FILE) ? fs.readFileSync(LOG_FILE, 'utf8') : '';
+      const matched = content.split('\n').filter((l) => l.includes(interfaceName));
+      lines = matched.slice(-50).join('\n');
     } catch (e) {
-      // grep returns exit code 1 if no matches — treat as empty
       lines = '';
     }
     res.json({ success: true, log: lines });
@@ -749,8 +786,8 @@ app.post('/api/add-interface', async (req, res) => {
     }
 
     // Generate keys
-    const privateKey = run('wg genkey').trim();
-    const publicKey = run(`echo "${privateKey}" | wg pubkey`).trim();
+    const privateKey = run('wg', ['genkey']).trim();
+    const publicKey = wgPubkey(privateKey);
 
     // Build conf content — Type comment is the very first line
     let content = `# Type = ${interfaceType}\n`;
@@ -800,9 +837,9 @@ app.delete('/api/delete-interface/:name', (req, res) => {
 
     // Disconnect interface if running
     try {
-      const status = run('wg show interfaces');
+      const status = run('wg', ['show', 'interfaces']);
       if (status.includes(interfaceName)) {
-        run(`wg-quick down ${interfaceName}`);
+        run('wg-quick', ['down', interfaceName]);
       }
     } catch (e) {
       // Interface not running, continue
@@ -827,23 +864,38 @@ app.delete('/api/delete-interface/:name', (req, res) => {
   }
 });
 
-// Get global settings
+// API key persistence: stored in a private file, mirrored into process.env so
+// the rest of the app and outbound calls (centralSync) pick it up immediately.
+const NODE_KEY_FILE = path.join(__dirname, 'node_api_key.txt');
+
+function loadNodeApiKeyFromDisk() {
+  try {
+    if (fs.existsSync(NODE_KEY_FILE)) {
+      const k = fs.readFileSync(NODE_KEY_FILE, 'utf8').trim();
+      if (k) process.env.NODE_API_KEY = k;
+    }
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+function saveNodeApiKey(plain) {
+  fs.writeFileSync(NODE_KEY_FILE, String(plain || ''), { mode: 0o600 });
+  process.env.NODE_API_KEY = String(plain || '');
+}
+
+loadNodeApiKeyFromDisk();
+
 app.get('/api/settings', (req, res) => {
   try {
     const settings = loadGlobalSettings();
-    const bashrcEnv = parseBashrcEnv(fs.existsSync(BASHRC_FILE) ? fs.readFileSync(BASHRC_FILE, 'utf8') : '');
-    settings.apiKeys = {
-      registerKey: readEnvValue('CENTRAL_REGISTER_SECRET') || bashrcEnv.CENTRAL_REGISTER_SECRET || '',
-      pushKey: readEnvValue('CENTRAL_PUSH_API_KEY') || bashrcEnv.CENTRAL_PUSH_API_KEY || '',
-      pullKey: readEnvValue('CENTRAL_PULL_API_KEY') || bashrcEnv.CENTRAL_PULL_API_KEY || ''
-    };
+    settings.apiKey = process.env.NODE_API_KEY || '';
     return res.json({ success: true, settings });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Update global settings
 app.post('/api/settings', (req, res) => {
   try {
     const currentSettings = loadGlobalSettings();
@@ -857,50 +909,37 @@ app.post('/api/settings', (req, res) => {
       enforceFirewall: req.body.enforceFirewall !== undefined ? req.body.enforceFirewall : currentSettings.enforceFirewall
     };
 
-    // Save to settings.json
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(newSettings, null, 2), 'utf8');
 
-    // If time changed, rewrite timer and reload
     if (newSettings.keyRenewalTime !== currentSettings.keyRenewalTime) {
       const timerPath = '/etc/systemd/system/wg-key-renewal.timer';
       if (fs.existsSync(timerPath)) {
         let timerContent = fs.readFileSync(timerPath, 'utf8');
-        // Replace OnCalendar line
         timerContent = timerContent.replace(/^OnCalendar=.*$/m, `OnCalendar=*-*-* ${newSettings.keyRenewalTime}:00`);
         fs.writeFileSync(timerPath, timerContent, 'utf8');
         try {
-          run('systemctl daemon-reload');
-          run('systemctl reenable wg-key-renewal.timer');
-          run('systemctl restart wg-key-renewal.timer');
-          console.log(`[INFO] wg-key-renewal.timer updated to ${newSettings.keyRenewalTime}`);
+          run('systemctl', ['daemon-reload']);
+          run('systemctl', ['reenable', 'wg-key-renewal.timer']);
+          run('systemctl', ['restart', 'wg-key-renewal.timer']);
         } catch (e) {
           console.error('[ERROR] Failed to restart systemd timer:', e.message);
         }
       }
     }
 
-    // Audit log
+    if (req.body && typeof req.body.apiKey === 'string' && req.body.apiKey.trim()) {
+      saveNodeApiKey(req.body.apiKey.trim());
+    }
+
     try {
       const admin = req.session && req.session.user ? req.session.user : 'unknown';
-      logAction(admin, 'update_settings', newSettings);
+      logAction(admin, 'update_settings', { ...newSettings, apiKey: '***' });
     } catch (e) { }
 
-    const apiKeys = req.body && req.body.apiKeys ? req.body.apiKeys : {};
-    upsertBashrcEnv({
-      CENTRAL_REGISTER_SECRET: apiKeys.registerKey || readEnvValue('CENTRAL_REGISTER_SECRET'),
-      CENTRAL_PUSH_API_KEY: apiKeys.pushKey || readEnvValue('CENTRAL_PUSH_API_KEY'),
-      CENTRAL_PULL_API_KEY: apiKeys.pullKey || readEnvValue('CENTRAL_PULL_API_KEY')
+    res.json({
+      success: true,
+      settings: { ...newSettings, apiKey: process.env.NODE_API_KEY || '' }
     });
-
-    const settingsOut = {
-      ...newSettings,
-      apiKeys: {
-        registerKey: readEnvValue('CENTRAL_REGISTER_SECRET'),
-        pushKey: readEnvValue('CENTRAL_PUSH_API_KEY'),
-        pullKey: readEnvValue('CENTRAL_PULL_API_KEY')
-      }
-    };
-    res.json({ success: true, settings: settingsOut });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -922,8 +961,8 @@ app.post('/api/generate-keys', async (req, res) => {
 
     const oldPrivateKey = config.interface.privateKey || '';
     const oldPublicKey = config.interface.publicKey || '';
-    const newPrivateKey = run('wg genkey').trim();
-    const newPublicKey = run(`echo "${newPrivateKey}" | wg pubkey`).trim();
+    const newPrivateKey = run('wg', ['genkey']).trim();
+    const newPublicKey = wgPubkey(newPrivateKey);
 
     config.interface.privateKey = newPrivateKey;
     config.interface.publicKey = newPublicKey;
@@ -942,9 +981,9 @@ app.post('/api/generate-keys', async (req, res) => {
     fs.writeFileSync(CONFIG_FILE, content, { mode: 0o600 });
 
     try {
-      const status = run('wg show interfaces');
+      const status = run('wg', ['show', 'interfaces']);
       if (status.includes(INTERFACE)) {
-        run(`bash -c "wg syncconf ${INTERFACE} <(wg-quick strip ${INTERFACE})"`);
+        wgSyncconf(INTERFACE);
       }
     } catch (e) {
       // Interface not running
@@ -1123,7 +1162,7 @@ app.post('/api/add-peer', async (req, res) => {
     };
 
     if (req.body.generatePsk) {
-      peer.presharedKey = run('wg genpsk').trim();
+      peer.presharedKey = run('wg', ['genpsk']).trim();
     }
 
     config.peers.push(peer);
@@ -1156,9 +1195,9 @@ app.post('/api/add-peer', async (req, res) => {
     }
 
     try {
-      const status = run('wg show interfaces');
+      const status = run('wg', ['show', 'interfaces']);
       if (status.includes(INTERFACE)) {
-        run(`bash -c "wg syncconf ${INTERFACE} <(wg-quick strip ${INTERFACE})"`);
+        wgSyncconf(INTERFACE);
       }
     } catch (e) {
       console.error('wg syncconf failed:', e.message);
@@ -1422,9 +1461,9 @@ app.post('/api/update-key', (req, res) => {
 
     // Sync interface if running
     try {
-      const status = run('wg show interfaces');
+      const status = run('wg', ['show', 'interfaces']);
       if (status.includes(foundInterface)) {
-        run(`bash -c "wg syncconf ${foundInterface} <(wg-quick strip ${foundInterface})"`);
+        wgSyncconf(foundInterface);
       }
     } catch (e) {
       // Interface not running
@@ -1467,10 +1506,10 @@ app.post('/api/save-config', (req, res) => {
     const content = saveConfigToFile();
     // Restart interface if running to apply new config
     try {
-      const status = run('wg show interfaces');
+      const status = run('wg', ['show', 'interfaces']);
       if (status.includes(INTERFACE)) {
-        run(`wg-quick down ${INTERFACE}`);
-        run(`wg-quick up ${INTERFACE}`);
+        run('wg-quick', ['down', INTERFACE]);
+        run('wg-quick', ['up', INTERFACE]);
       }
     } catch (e) {
       // Interface not running, no need to restart
@@ -1501,7 +1540,7 @@ app.post('/api/connect', (req, res) => {
     }
 
     try {
-      const status = run('wg show interfaces');
+      const status = run('wg', ['show', 'interfaces']);
       if (status.includes(INTERFACE)) {
         return res.status(400).json({
           success: false,
@@ -1517,7 +1556,7 @@ app.post('/api/connect', (req, res) => {
       });
     }
 
-    run(`wg-quick up ${INTERFACE}`);
+    run('wg-quick', ['up', INTERFACE]);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -1533,7 +1572,7 @@ app.post('/api/disconnect', (req, res) => {
       logAction(admin, 'stop_interface', { interface: INTERFACE });
     } catch (e) { }
 
-    run(`wg-quick down ${INTERFACE}`);
+    run('wg-quick', ['down', INTERFACE]);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -1573,7 +1612,7 @@ app.get('/api/hostname', (req, res) => res.json({ success: true, hostname: HOSTN
 // Get VPN status
 app.get('/api/vpn-status', (req, res) => {
   try {
-    const status = run('wg show interfaces');
+    const status = run('wg', ['show', 'interfaces']);
     const isConnected = status.includes(INTERFACE);
     res.json({ success: true, connected: isConnected });
   } catch (error) {
@@ -1601,15 +1640,15 @@ app.get('/login', (req, res) => {
   res.send(html);
 });
 
-app.post('/api/admin-login', async (req, res) => {
-  const { username, password } = req.body;
+app.post('/api/admin-login', loginLimiter('local-admin'), async (req, res) => {
+  const { username, password } = req.body || {};
   const creds = loadCredentials();
   if (username === creds.username && await bcrypt.compare(password, creds.passwordHash)) {
     req.session.user = username;
-    res.json({ success: true });
-  } else {
-    res.status(401).json({ success: false, error: 'Invalid credentials' });
+    return res.json({ success: true });
   }
+  res.status(401).json({ success: false, error: 'Invalid credentials' });
+
 });
 
 app.post('/api/change-password', requireAuth, async (req, res) => {
@@ -1629,12 +1668,7 @@ app.post('/api/logout', (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/api/notifications/ingest', (req, res) => {
-  const providedKey = (req.header('x-alert-key') || '').trim();
-  if (ALERT_INGEST_KEY && providedKey !== ALERT_INGEST_KEY) {
-    return res.status(401).json({ success: false, error: 'Unauthorized' });
-  }
-
+app.post('/api/notifications/ingest', apiKeyAuth, (req, res) => {
   const count = countIncomingAlerts(req.body);
   if (count <= 0) {
     return res.status(400).json({ success: false, error: 'Empty payload' });
@@ -1756,16 +1790,6 @@ app.use(
   })
 );
 
-// Synchronize keys
-app.post('/api/sync-keys', (req, res) => {
-  try {
-    run('python3 /usr/local/bin/wg-sync-key.py');
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
 app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
   const originalInterface = INTERFACE;
   const originalConfigFile = CONFIG_FILE;
@@ -1878,26 +1902,30 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
     if (needSave) {
       saveConfigToFile();
       try {
-        const status = run('wg show interfaces');
+        const status = run('wg', ['show', 'interfaces']);
         if (status.includes(targetIface)) {
-          run(`bash -c "wg syncconf ${targetIface} <(wg-quick strip ${targetIface})"`);
+          wgSyncconf(targetIface);
         }
       } catch (e) {
         console.error(`Error syncing ${targetIface}:`, e.message);
       }
 
       // Schedule auto-disable after specified hours via systemd-run
-      // If a timer unit already exists for this peer, stop and reset it first
       try {
         const currentSettings = loadGlobalSettings();
         const disableHours = currentSettings.peerDisableHours || 12;
         const unitName = `wg-peer-expire-${username}-${deviceName}`;
-        const escapedKey = publicKey.replace(/"/g, '\\"');
 
-        try { run(`systemctl stop ${unitName}.timer`); } catch (_) { /* unit may not exist */ }
-        try { run(`systemctl stop ${unitName}.service`); } catch (_) { /* unit may not exist */ }
-        try { run(`systemctl reset-failed ${unitName}.service`); } catch (_) { /* ignore */ }
-        run(`systemd-run --on-active=${disableHours}h --unit=${unitName} /usr/local/bin/wg_disable_peer.sh "${targetIface}" "${escapedKey}"`);
+        tryRun('systemctl', ['stop', `${unitName}.timer`]);
+        tryRun('systemctl', ['stop', `${unitName}.service`]);
+        tryRun('systemctl', ['reset-failed', `${unitName}.service`]);
+        run('systemd-run', [
+          `--on-active=${disableHours}h`,
+          `--unit=${unitName}`,
+          '/usr/local/bin/wg_disable_peer.sh',
+          targetIface,
+          publicKey
+        ]);
         console.log(`[INFO] Scheduled peer disable in ${disableHours}h for ${username}/${deviceName} on ${targetIface}`);
       } catch (e) {
         console.error('systemd-run schedule error:', e.message);
@@ -1947,43 +1975,40 @@ function normalizeCentralUrl(u) {
   if (!u) return '';
   const t = String(u).trim().replace(/\/+$/, '');
   if (/^https?:\/\//i.test(t)) return t;
-  return `http://${t}`;
+  return `https://${t}`;
+}
+
+function getCentralBase() {
+  const central = process.env.CENTRAL_URL;
+  return central ? normalizeCentralUrl(central) : '';
 }
 
 function registerWithCentral() {
-  const centralBase = process.env.CENTRAL_URL;
-  const secret = process.env.CENTRAL_REGISTER_SECRET;
-  if (!centralBase || !secret) {
-    return Promise.reject(new Error('CENTRAL_URL hoặc CENTRAL_REGISTER_SECRET chưa set'));
+  const base = getCentralBase();
+  const apiKey = getApiKey();
+  if (!base || !apiKey) {
+    return Promise.reject(new Error('CENTRAL_URL or NODE_API_KEY not set'));
   }
-  const base = normalizeCentralUrl(centralBase);
-  // baseUrl gửi lên central = URL mà central dùng để poll /metrics (thường là SSH tunnel, ví dụ http://127.0.0.1:4000)
   const pollBase =
     process.env.CENTRAL_POLL_BASE_URL ||
     process.env.PUBLIC_BASE_URL ||
-    `http://127.0.0.1:${PORT}`;
+    `https://127.0.0.1:${PORT}`;
   const body = {
     name: process.env.CENTRAL_NODE_NAME || HOSTNAME,
     machineId: HOSTNAME,
     baseUrl: pollBase.replace(/\/+$/, ''),
-    publicIp: process.env.CENTRAL_PUBLIC_IP || '',
-    registerKey: secret
+    publicIp: process.env.CENTRAL_PUBLIC_IP || ''
   };
   return fetch(`${base}/api/register`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Register-Key': secret },
-    body: JSON.stringify(body)
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(body),
+    agent: base.startsWith('https') ? centralAgent : undefined
   }).then(async (r) => {
     let payload = null;
-    try {
-      payload = await r.json();
-    } catch {
-      /* ignore */
-    }
+    try { payload = await r.json(); } catch { /* ignore */ }
     if (!r.ok) {
-      const msg =
-        (payload && (payload.error || payload.message)) ||
-        `central trả ${r.status} ${r.statusText}`;
+      const msg = (payload && (payload.error || payload.message)) || `central returned ${r.status}`;
       const err = new Error(msg);
       err.status = r.status;
       throw err;
@@ -1992,27 +2017,8 @@ function registerWithCentral() {
   });
 }
 
-function allowCentralRegister(req, res, next) {
-  const headerKey = req.header('x-register-key') || '';
-  const bodySecret =
-    req.body && typeof req.body.secret === 'string' ? req.body.secret : '';
-  const provided = headerKey || bodySecret;
-  const hook = process.env.LOCAL_REGISTER_HOOK_KEY;
-  const regSecret = process.env.CENTRAL_REGISTER_SECRET;
-  if (hook && provided && provided === hook) return next();
-  if (regSecret && provided && provided === regSecret) return next();
-  if (req.session && req.session.user) return next();
-  return res.status(401).json({
-    success: false,
-    error: 'Authentication required',
-    hint:
-      'Không khớp secret hoặc process Node không có CENTRAL_REGISTER_SECRET trong env. ' +
-      'Dừng app, rồi chạy lại cùng lúc với biến: CENTRAL_REGISTER_SECRET=... node app.js ' +
-      'Hoặc gửi header X-Register-Key / JSON {"secret":"..."} đúng secret. Đặt CENTRAL_URL dạng http://host:port'
-  });
-}
-
-app.post('/api/central-register', allowCentralRegister, (req, res) => {
+// Trigger a register from the admin UI (already gated by global auth guard).
+app.post('/api/central-register', (req, res) => {
   registerWithCentral()
     .then((payload) => res.json({ success: true, central: payload }))
     .catch((e) => {
@@ -2021,24 +2027,52 @@ app.post('/api/central-register', allowCentralRegister, (req, res) => {
     });
 });
 
+async function pushMetricsToCentral() {
+  const base = getCentralBase();
+  if (!base || !getApiKey()) return;
+  let body;
+  try {
+    body = run('bash', [EXPORTER_SCRIPT], { timeout: 60000 });
+  } catch (e) {
+    console.error('[metrics push] exporter failed:', e.message);
+    return;
+  }
+  try {
+    const r = await fetch(`${base}/api/metrics/push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain', ...authHeaders() },
+      body,
+      agent: base.startsWith('https') ? centralAgent : undefined
+    });
+    if (!r.ok) {
+      console.error('[metrics push] central responded', r.status);
+    }
+  } catch (e) {
+    console.error('[metrics push] network error:', e.message);
+  }
+}
+
 const httpsOptions = {
   key: fs.readFileSync(TLS_KEY_PATH),
   cert: fs.readFileSync(TLS_CERT_PATH)
 };
 
 https.createServer(httpsOptions, app).listen(PORT, () => {
-  // Load config from file on startup
   loadConfigFromFile();
-  // Initialize shared config
   updateSharedConfig();
   console.log(`WireGuard VPN Manager running on https://localhost:${PORT}`);
-  registerWithCentral().catch((e) => {
-    console.error('[central register lúc khởi động]', e.message);
-  });
+  registerWithCentral().catch((e) => console.error('[central register]', e.message));
+
   const regMs = parseInt(process.env.CENTRAL_REGISTER_INTERVAL_MS || '300000', 10);
   if (regMs > 0) {
     setInterval(() => {
-      registerWithCentral().catch((e) => console.error('[central register định kỳ]', e.message));
+      registerWithCentral().catch((e) => console.error('[central register]', e.message));
     }, regMs);
+  }
+
+  const pushMs = parseInt(process.env.METRICS_PUSH_INTERVAL_MS || '30000', 10);
+  if (pushMs > 0) {
+    setInterval(() => { pushMetricsToCentral(); }, pushMs);
+    pushMetricsToCentral();
   }
 });

@@ -263,6 +263,29 @@ async function insertWireguardLogs(rows) {
   return normalized.length;
 }
 
+/** Returns total rows in `wireguard_logs` + `operation_logs` for the last 24h.
+ *  Returns 0 when ClickHouse is disabled or unreachable (caller decides UI). */
+async function countAlertsLast24h() {
+  const ch = getClient();
+  if (!ch) return 0;
+  const sql = `
+    SELECT
+      (SELECT count() FROM ${TABLE}
+        WHERE parseDateTimeBestEffortOrNull(timestamp) >= now() - INTERVAL 24 HOUR) AS logs,
+      (SELECT count() FROM ${OPERATION_LOGS_TABLE}
+        WHERE ts >= now() - INTERVAL 24 HOUR) AS ops
+  `;
+  const rs = await ch.query({ query: sql, format: 'JSONEachRow' });
+  const text = await rs.text();
+  if (!text.trim()) return 0;
+  try {
+    const row = JSON.parse(text.trim().split('\n')[0]);
+    return Number(row.logs || 0) + Number(row.ops || 0);
+  } catch {
+    return 0;
+  }
+}
+
 async function fetchLogs(q) {
   const ch = getClient();
   if (!ch) {
@@ -373,6 +396,7 @@ module.exports = {
   fetchDistinctBaseUrlsForMachine,
   fetchDevicesAggregated,
   insertWireguardLogs,
+  countAlertsLast24h,
   OPERATION_LOGS_TABLE,
   DEVICES_TABLE
 };

@@ -20,7 +20,7 @@ router.get('/peers', async (req, res) => {
     
     if (interfaceId) {
         try {
-            const { execSync } = require('child_process');
+            const { spawnSync } = require('child_process');
             const path = require('path');
             const fs = require('fs');
             const CONFIG_DIR = '/etc/wireguard/';
@@ -123,8 +123,8 @@ router.get('/peers', async (req, res) => {
                             config.interface[propertyName] = value;
                             if (lowerKey === 'privatekey') {
                                 try {
-                                    const pubKey = execSync(`echo "${value}" | wg pubkey`, { encoding: 'utf8' }).trim();
-                                    config.interface.publicKey = pubKey;
+                                    const r = spawnSync('wg', ['pubkey'], { input: value, encoding: 'utf8' });
+                                    if (r.status === 0) config.interface.publicKey = (r.stdout || '').trim();
                                 } catch (e) {
                                     console.error('Error generating public key:', e.message);
                                 }
@@ -195,7 +195,7 @@ router.get('/peer/:id', async (req, res) => {
         let interfaceId = req.query.interface;
     if (interfaceId) {
         try {
-            const { execSync } = require('child_process');
+            const { spawnSync } = require('child_process');
             const path = require('path');
             const fs = require('fs');
             const CONFIG_DIR = '/etc/wireguard/';
@@ -297,8 +297,8 @@ router.get('/peer/:id', async (req, res) => {
                             config.interface[propertyName] = value;
                             if (lowerKey === 'privatekey') {
                                 try {
-                                    const pubKey = execSync(`echo "${value}" | wg pubkey`, { encoding: 'utf8' }).trim();
-                                    config.interface.publicKey = pubKey;
+                                    const r = spawnSync('wg', ['pubkey'], { input: value, encoding: 'utf8' });
+                                    if (r.status === 0) config.interface.publicKey = (r.stdout || '').trim();
                                 } catch (e) {
                                     console.error('Error generating public key:', e.message);
                                 }

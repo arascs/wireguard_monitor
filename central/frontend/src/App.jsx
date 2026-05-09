@@ -1,16 +1,34 @@
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import AppShell from './components/AppShell';
 import Login from './pages/Login';
 import Overview from './pages/Overview';
 import NodeExplorer from './pages/NodeExplorer';
 import Logging from './pages/Logging';
-import { getToken } from './auth';
+import { markAuthenticated } from './auth';
 
 function RequireAuth({ children }) {
   const loc = useLocation();
-  if (!getToken()) {
-    return <Navigate to="/login" replace state={{ from: loc }} />;
-  }
+  const [state, setState] = useState('checking'); // checking | ok | denied
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/notifications/unread', { credentials: 'include' })
+      .then((r) => {
+        if (cancelled) return;
+        if (r.ok) {
+          markAuthenticated(true);
+          setState('ok');
+        } else {
+          setState('denied');
+        }
+      })
+      .catch(() => !cancelled && setState('denied'));
+    return () => { cancelled = true; };
+  }, []);
+
+  if (state === 'checking') return null;
+  if (state === 'denied') return <Navigate to="/login" replace state={{ from: loc }} />;
   return children;
 }
 

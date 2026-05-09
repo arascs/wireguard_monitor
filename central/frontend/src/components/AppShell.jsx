@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { apiFetch } from '../auth';
+import { apiFetch, logout as doLogout } from '../auth';
 
 function navCls({ isActive }) {
   return `block px-4 py-2 text-sm rounded-r-md border-l-4 ${
@@ -63,8 +63,8 @@ export default function AppShell() {
     else setOpenBell(true);
   }
 
-  function logout() {
-    localStorage.removeItem('central_token');
+  async function logout() {
+    await doLogout();
     nav('/login', { replace: true });
   }
 

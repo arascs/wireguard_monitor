@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useNavigate, useLocation, Navigate } from 'react-router-dom';
-import { setToken, getToken } from '../auth';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { markAuthenticated } from '../auth';
 
 export default function Login() {
   const [username, setUsername] = useState('admin');
@@ -11,10 +11,6 @@ export default function Login() {
   const loc = useLocation();
   const from = loc.state?.from?.pathname || '/';
 
-  if (getToken()) {
-    return <Navigate to="/" replace />;
-  }
-
   async function submit(e) {
     e.preventDefault();
     setErr('');
@@ -22,6 +18,7 @@ export default function Login() {
     try {
       const r = await fetch('/api/login', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       });
@@ -29,7 +26,7 @@ export default function Login() {
       if (!r.ok) {
         throw new Error(j.error || 'Authentication failed');
       }
-      setToken(j.token);
+      markAuthenticated(true);
       nav(from, { replace: true });
     } catch (e) {
       setErr(e.message || 'Login failed');

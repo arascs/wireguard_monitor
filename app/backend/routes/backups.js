@@ -2,7 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const mysql = require('mysql2/promise');
 
 module.exports = ({ requireAuth, BACKUP_DIR, CONFIG_DIR, dbConfig }) => {
@@ -10,9 +10,61 @@ module.exports = ({ requireAuth, BACKUP_DIR, CONFIG_DIR, dbConfig }) => {
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
-  /**
-   * Parse a WireGuard .conf file and return interface info + peer list.
-   */
+  /** Run a binary via execFile/spawnSync (no shell). Throws on non-zero exit. */
+  function exec(file, args = [], opts = {}) {
+    const r = spawnSync(file, args, { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024, ...opts });
+    if (r.status !== 0) {
+      throw new Error(r.stderr || `${file} exited with status ${r.status}`);
+    }
+    return r.stdout || '';
+  }
+
+  /** mysqldump <db> > out.sql, no shell redirection. */
+  function dumpDatabase(dest) {
+    const r = spawnSync(
+      'mysqldump',
+      ['-h', dbConfig.host, '-u', dbConfig.user, `-p${dbConfig.password}`, dbConfig.database],
+      { encoding: 'utf8', maxBuffer: 200 * 1024 * 1024 }
+    );
+    if (r.status !== 0) {
+      throw new Error(r.stderr || `mysqldump exited with status ${r.status}`);
+    }
+    fs.writeFileSync(dest, r.stdout || '');
+  }
+
+  /** mysql <db> < in.sql, using stdin. */
+  function restoreDatabase(srcSqlFile) {
+    const sql = fs.readFileSync(srcSqlFile, 'utf8');
+    const r = spawnSync(
+      'mysql',
+      ['-h', dbConfig.host, '-u', dbConfig.user, `-p${dbConfig.password}`, dbConfig.database],
+      { encoding: 'utf8', input: sql, maxBuffer: 200 * 1024 * 1024 }
+    );
+    if (r.status !== 0) {
+      throw new Error(r.stderr || `mysql exited with status ${r.status}`);
+    }
+  }
+
+  /** Recursively copy directory contents using node fs (no `cp -a`). */
+  function copyDir(src, dest) {
+    fs.mkdirSync(dest, { recursive: true });
+    for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+      const s = path.join(src, entry.name);
+      const d = path.join(dest, entry.name);
+      if (entry.isDirectory()) copyDir(s, d);
+      else if (entry.isSymbolicLink()) fs.symlinkSync(fs.readlinkSync(s), d);
+      else fs.copyFileSync(s, d);
+    }
+  }
+
+  function tarCreate(archive, fromDir) {
+    exec('tar', ['-czf', archive, '-C', fromDir, '.']);
+  }
+
+  function tarExtract(archive, intoDir) {
+    exec('tar', ['-xzf', archive, '-C', intoDir]);
+  }
+
   function parseConfFile(filePath, interfaceName) {
     const result = {
       name: interfaceName,
@@ -39,7 +91,6 @@ module.exports = ({ requireAuth, BACKUP_DIR, CONFIG_DIR, dbConfig }) => {
         const cleanLine = isCommented ? trimmed.substring(1).trim() : trimmed;
         if (!cleanLine) continue;
 
-        // Custom comment metadata
         if (isCommented) {
           const lower = cleanLine.toLowerCase();
           if (lower.startsWith('type =')) {
@@ -50,13 +101,9 @@ module.exports = ({ requireAuth, BACKUP_DIR, CONFIG_DIR, dbConfig }) => {
             pendingPeerName = cleanLine.split('=').slice(1).join('=').trim();
             continue;
           }
-          // Skip other comments in interface section; but handle commented peers
         }
 
-        if (cleanLine === '[Interface]') {
-          section = 'interface';
-          continue;
-        }
+        if (cleanLine === '[Interface]') { section = 'interface'; continue; }
         if (cleanLine === '[Peer]') {
           section = 'peer';
           currentPeer = {
@@ -98,21 +145,18 @@ module.exports = ({ requireAuth, BACKUP_DIR, CONFIG_DIR, dbConfig }) => {
     return result;
   }
 
-  /**
-   * Collect all WireGuard interface info from CONFIG_DIR.
-   */
   function collectInterfaces() {
     if (!fs.existsSync(CONFIG_DIR)) return [];
-    let activeSet = new Set();
+    const activeSet = new Set();
     try {
-      const out = execSync('wg show interfaces', { encoding: 'utf8' }).trim();
-      if (out) out.split(/\s+/).filter(Boolean).forEach(i => activeSet.add(i));
-    } catch (e) { /* wg not running or no interfaces */ }
+      const out = exec('wg', ['show', 'interfaces']).trim();
+      if (out) out.split(/\s+/).filter(Boolean).forEach((i) => activeSet.add(i));
+    } catch (_) { /* wg not running */ }
 
     return fs.readdirSync(CONFIG_DIR)
-      .filter(f => f.endsWith('.conf'))
+      .filter((f) => f.endsWith('.conf'))
       .sort()
-      .map(f => {
+      .map((f) => {
         const name = path.basename(f, '.conf');
         const info = parseConfFile(path.join(CONFIG_DIR, f), name);
         info.status = activeSet.has(name) ? 'connected' : 'disconnected';
@@ -120,10 +164,6 @@ module.exports = ({ requireAuth, BACKUP_DIR, CONFIG_DIR, dbConfig }) => {
       });
   }
 
-  /**
-   * Collect DB tables and their rows (capped at 200 rows/table).
-   */
-  // Columns that should never be exposed in snapshots
   const SENSITIVE_COLUMNS = new Set([
     'private_key', 'password', 'password_hash', 'preshared_key',
     'privateKey', 'presharedKey', 'passwordHash'
@@ -140,8 +180,7 @@ module.exports = ({ requireAuth, BACKUP_DIR, CONFIG_DIR, dbConfig }) => {
         const tableName = row[tableKey];
         try {
           const [rows] = await connection.execute(`SELECT * FROM \`${tableName}\` LIMIT 200`);
-          // Strip sensitive columns from every row
-          const sanitized = rows.map(r => {
+          const sanitized = rows.map((r) => {
             const clean = {};
             for (const [k, v] of Object.entries(r)) {
               if (!SENSITIVE_COLUMNS.has(k)) clean[k] = v;
@@ -156,14 +195,11 @@ module.exports = ({ requireAuth, BACKUP_DIR, CONFIG_DIR, dbConfig }) => {
     } catch (e) {
       // DB not accessible
     } finally {
-      if (connection) { try { await connection.end(); } catch (e) { } }
+      if (connection) { try { await connection.end(); } catch (_) { /* ignore */ } }
     }
     return tables;
   }
 
-  /**
-   * Build and write snapshot.json to a directory.
-   */
   async function writeSnapshot(dir, type) {
     const snapshot = { createdAt: new Date().toISOString() };
     if (type === 'wg_config' || type === 'full') {
@@ -179,18 +215,16 @@ module.exports = ({ requireAuth, BACKUP_DIR, CONFIG_DIR, dbConfig }) => {
 
   router.get('/backups', requireAuth, (req, res) => {
     try {
-      if (!fs.existsSync(BACKUP_DIR)) {
-        return res.json({ success: true, backups: [] });
-      }
-      const files = fs.readdirSync(BACKUP_DIR).filter(f => f.endsWith('.tar.gz'));
-      const backups = files.map(f => {
+      if (!fs.existsSync(BACKUP_DIR)) return res.json({ success: true, backups: [] });
+      const files = fs.readdirSync(BACKUP_DIR).filter((f) => f.endsWith('.tar.gz'));
+      const backups = files.map((f) => {
         const full = path.join(BACKUP_DIR, f);
         const stat = fs.statSync(full);
         let type = 'unknown';
         let hasSnapshot = false;
         try {
           const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bk-'));
-          execSync(`tar -xzf ${full} -C ${tmp}`);
+          tarExtract(full, tmp);
           const metaPath = path.join(tmp, 'metadata.json');
           if (fs.existsSync(metaPath)) {
             const meta = JSON.parse(fs.readFileSync(metaPath));
@@ -223,18 +257,14 @@ module.exports = ({ requireAuth, BACKUP_DIR, CONFIG_DIR, dbConfig }) => {
       fs.writeFileSync(path.join(tmp, 'metadata.json'), JSON.stringify(metadata));
 
       if (type === 'db' || type === 'full') {
-        execSync(`mysqldump -u ${dbConfig.user} -p${dbConfig.password} ${dbConfig.database} > ${path.join(tmp, 'database.sql')}`);
+        dumpDatabase(path.join(tmp, 'database.sql'));
       }
       if (type === 'wg_config' || type === 'full') {
-        const wgdir = path.join(tmp, 'wireguard_configs');
-        fs.mkdirSync(wgdir);
-        execSync(`cp -a ${CONFIG_DIR}/* ${wgdir}/`);
+        copyDir(CONFIG_DIR, path.join(tmp, 'wireguard_configs'));
       }
 
-      // Generate snapshot.json for preview
       await writeSnapshot(tmp, type);
-
-      execSync(`tar -czf ${filePath} -C ${tmp} .`);
+      tarCreate(filePath, tmp);
       fs.rmSync(tmp, { recursive: true, force: true });
       res.json({ success: true, filename: fname });
     } catch (e) {
@@ -250,7 +280,7 @@ module.exports = ({ requireAuth, BACKUP_DIR, CONFIG_DIR, dbConfig }) => {
     }
     try {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bk-'));
-      execSync(`tar -xzf ${fullPath} -C ${tmp}`);
+      tarExtract(fullPath, tmp);
       const metaPath = path.join(tmp, 'metadata.json');
       const meta = fs.existsSync(metaPath) ? JSON.parse(fs.readFileSync(metaPath)) : {};
       const type = meta.type;
@@ -263,24 +293,22 @@ module.exports = ({ requireAuth, BACKUP_DIR, CONFIG_DIR, dbConfig }) => {
         const metadata2 = { type, timestamp: ts2 };
         fs.writeFileSync(path.join(tmp2, 'metadata.json'), JSON.stringify(metadata2));
         if (type === 'db' || type === 'full') {
-          execSync(`mysqldump -u ${dbConfig.user} -p${dbConfig.password} ${dbConfig.database} > ${path.join(tmp2, 'database.sql')}`);
+          dumpDatabase(path.join(tmp2, 'database.sql'));
         }
         if (type === 'wg_config' || type === 'full') {
-          const wgdir = path.join(tmp2, 'wireguard_configs');
-          fs.mkdirSync(wgdir);
-          execSync(`cp -a ${CONFIG_DIR}/* ${wgdir}/`);
+          copyDir(CONFIG_DIR, path.join(tmp2, 'wireguard_configs'));
         }
-        execSync(`tar -czf ${prePath} -C ${tmp2} .`);
+        tarCreate(prePath, tmp2);
         fs.rmSync(tmp2, { recursive: true, force: true });
       } catch (e) {
         console.error('pre-restore backup failed', e);
       }
 
       if (type === 'db' || type === 'full') {
-        execSync(`mysql -u ${dbConfig.user} -p${dbConfig.password} ${dbConfig.database} < ${path.join(tmp, 'database.sql')}`);
+        restoreDatabase(path.join(tmp, 'database.sql'));
       }
       if (type === 'wg_config' || type === 'full') {
-        execSync(`cp -a ${path.join(tmp, 'wireguard_configs')}/* ${CONFIG_DIR}`);
+        copyDir(path.join(tmp, 'wireguard_configs'), CONFIG_DIR);
       }
       fs.rmSync(tmp, { recursive: true, force: true });
       res.json({ success: true });
@@ -289,10 +317,8 @@ module.exports = ({ requireAuth, BACKUP_DIR, CONFIG_DIR, dbConfig }) => {
     }
   });
 
-  // Preview snapshot: extract snapshot.json from archive and return it
   router.get('/backups/snapshot/:name', requireAuth, (req, res) => {
     const name = req.params.name;
-    // Sanitize: only allow safe filenames
     if (!/^[\w\-\.]+\.tar\.gz$/.test(name)) {
       return res.status(400).json({ success: false, error: 'invalid filename' });
     }
@@ -303,17 +329,17 @@ module.exports = ({ requireAuth, BACKUP_DIR, CONFIG_DIR, dbConfig }) => {
     let tmp;
     try {
       tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bk-'));
-      execSync(`tar -xzf ${fullPath} -C ${tmp}`);
+      tarExtract(fullPath, tmp);
       const snapPath = path.join(tmp, 'snapshot.json');
       if (!fs.existsSync(snapPath)) {
-        return res.status(404).json({ success: false, error: 'No snapshot data in this backup (it may have been created before this feature was added).' });
+        return res.status(404).json({ success: false, error: 'No snapshot data in this backup.' });
       }
       const snapshot = JSON.parse(fs.readFileSync(snapPath, 'utf8'));
       res.json({ success: true, snapshot });
     } catch (e) {
       res.status(500).json({ success: false, error: e.message });
     } finally {
-      if (tmp) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { } }
+      if (tmp) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) { /* ignore */ } }
     }
   });
 

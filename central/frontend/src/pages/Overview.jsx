@@ -83,7 +83,7 @@ export default function Overview() {
           <div className="text-2xl font-semibold text-primary mt-1">{totals.online}</div>
         </div>
         <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-          <div className="text-sm text-zinc-500">Alerts (24h est.)</div>
+          <div className="text-sm text-zinc-500">Alerts (Last 24h)</div>
           <div className="text-2xl font-semibold text-primary mt-1">{totals.alerts24h}</div>
         </div>
       </div>

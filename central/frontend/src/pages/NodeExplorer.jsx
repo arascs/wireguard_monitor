@@ -36,57 +36,8 @@ function listSitesText(sites) {
   return sites.join(', ');
 }
 
-function MaskedKeyInput({ label, value, reveal, setReveal, onChange }) {
-  return (
-    <div className="space-y-1">
-      <label className="text-xs font-medium text-zinc-600">{label}</label>
-      <div className="flex items-center gap-2">
-        <input
-          className="flex-1 rounded border border-zinc-300 px-2 py-1.5 text-xs font-mono"
-          type={reveal ? 'text' : 'password'}
-          value={value}
-          onChange={onChange}
-        />
-        <button type="button" className="text-zinc-600 hover:text-zinc-900" onClick={() => setReveal(!reveal)}>
-          {reveal ? '🙈' : '👁'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function NodeServicesModal({ node, onClose }) {
-  const [keys, setKeys] = useState({
-    registerKey: node?.apiKeys?.registerKey || '',
-    pushKey: node?.apiKeys?.pushKey || '',
-    pullKey: node?.apiKeys?.pullKey || ''
-  });
-  const [reveal, setReveal] = useState({ reg: false, push: false, pull: false });
-  const [saving, setSaving] = useState(false);
   if (!node) return null;
-  async function saveKeys() {
-    setSaving(true);
-    try {
-      const r = await apiFetch('/api/node-keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          machineId: node.machineId || node.name || '',
-          registerKey: keys.registerKey,
-          pushKey: keys.pushKey,
-          pullKey: keys.pullKey
-        })
-      });
-      const j = await r.json();
-      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
-      window.alert('Saved API keys');
-      onClose();
-    } catch (e) {
-      window.alert(e.message || 'Save failed');
-    } finally {
-      setSaving(false);
-    }
-  }
   return (
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50"
@@ -154,57 +105,36 @@ function NodeServicesModal({ node, onClose }) {
         <div className="rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700 break-all">
           {listSitesText(node.sites)}
         </div>
-        <div className="mt-6 space-y-3">
-          <p className="text-xs font-medium text-zinc-600">API Keys</p>
-          <MaskedKeyInput
-            label="Register key"
-            value={keys.registerKey}
-            reveal={reveal.reg}
-            setReveal={(v) => setReveal((p) => ({ ...p, reg: v }))}
-            onChange={(e) => setKeys((p) => ({ ...p, registerKey: e.target.value }))}
-          />
-          <MaskedKeyInput
-            label="Push key"
-            value={keys.pushKey}
-            reveal={reveal.push}
-            setReveal={(v) => setReveal((p) => ({ ...p, push: v }))}
-            onChange={(e) => setKeys((p) => ({ ...p, pushKey: e.target.value }))}
-          />
-          <MaskedKeyInput
-            label="Pull key"
-            value={keys.pullKey}
-            reveal={reveal.pull}
-            setReveal={(v) => setReveal((p) => ({ ...p, pull: v }))}
-            onChange={(e) => setKeys((p) => ({ ...p, pullKey: e.target.value }))}
-          />
-          <button
-            type="button"
-            className="px-3 py-1.5 rounded bg-primary text-white text-xs disabled:opacity-60"
-            onClick={saveKeys}
-            disabled={saving}
-          >
-            {saving ? 'Saving…' : 'Save keys'}
-          </button>
-        </div>
+
+        {node.nodeKey && (
+          <div className="mt-6 text-xs text-zinc-600">
+            <p className="font-medium mb-1">Node key</p>
+            <p>id: <span className="font-mono">{node.nodeKey.id}</span></p>
+            <p>created: {node.nodeKey.createdAt || '—'}</p>
+            <p>last seen: {node.nodeKey.lastSeenAt || '—'}</p>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 function AddNodeModal({ onClose, onCreated }) {
-  const [row, setRow] = useState({ registerKey: '', pushKey: '', pullKey: '' });
+  const [name, setName] = useState('');
+  const [apiKey, setApiKey] = useState('');
   const [loading, setLoading] = useState(false);
+
   async function generate() {
     setLoading(true);
     try {
       const r = await apiFetch('/api/node-keys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
+        body: JSON.stringify({ name: name.trim() || 'node' })
       });
       const j = await r.json();
       if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
-      setRow(j.row || {});
+      setApiKey(j.apiKey || '');
       onCreated && onCreated();
     } catch (e) {
       window.alert(e.message || 'Generate failed');
@@ -212,6 +142,15 @@ function AddNodeModal({ onClose, onCreated }) {
       setLoading(false);
     }
   }
+
+  async function copyKey() {
+    try {
+      await navigator.clipboard.writeText(apiKey);
+    } catch {
+      /* ignore */
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
       <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-5 border border-zinc-200" onClick={(e) => e.stopPropagation()}>
@@ -219,15 +158,34 @@ function AddNodeModal({ onClose, onCreated }) {
           <h2 className="text-lg font-semibold text-primary">Add node</h2>
           <button type="button" className="text-zinc-500 hover:text-zinc-800 text-sm" onClick={onClose}>Close</button>
         </div>
-        <p className="text-xs text-zinc-600 mb-3">Generate API keys and copy them to local node settings.</p>
-        <button type="button" className="px-3 py-1.5 rounded bg-primary text-white text-xs" onClick={generate} disabled={loading}>
-          {loading ? 'Generating…' : 'Generate API keys'}
-        </button>
-        {!!row.registerKey && (
-          <div className="mt-4 space-y-2 text-xs">
-            <div><span className="font-medium">Register:</span> <span className="font-mono break-all">{row.registerKey}</span></div>
-            <div><span className="font-medium">Push:</span> <span className="font-mono break-all">{row.pushKey}</span></div>
-            <div><span className="font-medium">Pull:</span> <span className="font-mono break-all">{row.pullKey}</span></div>
+        <p className="text-xs text-zinc-600 mb-3">
+          Generate a single API key for the new node. Copy it now — central stores only its hash and never displays the
+          plaintext again.
+        </p>
+        <input
+          className="w-full mb-3 rounded border border-zinc-300 px-3 py-2 text-sm"
+          placeholder="Node display name (optional)"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          disabled={!!apiKey}
+        />
+        {!apiKey && (
+          <button type="button" className="px-3 py-1.5 rounded bg-primary text-white text-xs" onClick={generate} disabled={loading}>
+            {loading ? 'Generating…' : 'Generate API key'}
+          </button>
+        )}
+        {apiKey && (
+          <div className="mt-2 space-y-2">
+            <p className="text-xs font-medium text-zinc-700">API key (copy once):</p>
+            <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs font-mono break-all">{apiKey}</div>
+            <div className="flex gap-2">
+              <button type="button" className="px-3 py-1.5 rounded bg-primary text-white text-xs" onClick={copyKey}>
+                Copy
+              </button>
+              <button type="button" className="px-3 py-1.5 rounded border text-xs" onClick={onClose}>
+                Done
+              </button>
+            </div>
           </div>
         )}
       </div>

@@ -69,7 +69,7 @@ sinks:
     request:
       headers:
         Content-Type: application/json
-        X-Push-API-Key: "push_emtjs83a5q29kjoa"
+        Authorization: "Bearer eb4a69a2958cc7287b6c67f91fd00ea770ba11c8cc795405df5117619536df94"
       timeout_secs: 5
       retry_attempts: 5
 
@@ -94,7 +94,7 @@ sinks:
     request:
       headers:
         Content-Type: application/json
-        X-Push-API-Key: "push_emtjs83a5q29kjoa"
+        Authorization: "Bearer eb4a69a2958cc7287b6c67f91fd00ea770ba11c8cc795405df5117619536df94"
       timeout_secs: 5
       retry_attempts: 3
 

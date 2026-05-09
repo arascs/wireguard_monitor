@@ -1,5 +1,5 @@
 const express = require('express');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
   const router = express.Router();
@@ -35,25 +35,20 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
     return { type: 'ip', sources: [] };
   }
 
-  // Helper: determine iptables chain from destination IP
   function resolveChain(destIp) {
-    try {
-      const routeOutput = execSync(`ip route get ${destIp}`).toString();
-      return routeOutput.includes('local') ? 'INPUT' : 'FORWARD';
-    } catch (err) {
-      return null;
-    }
+    const r = spawnSync('ip', ['route', 'get', destIp], { encoding: 'utf8' });
+    if (r.status !== 0) return null;
+    return (r.stdout || '').includes('local') ? 'INPUT' : 'FORWARD';
   }
 
-  // Helper: apply or remove iptables rules
   function applyIptables(action, chain, source, destIp, destPort, target) {
-    // action: '-A' to add, '-D' to delete
+    const baseTail = ['-d', destIp, '-p', 'tcp', '--dport', String(destPort), '-j', target];
     if (source.type === 'ip') {
       source.sources.forEach((src) => {
-        run(`iptables ${action} ${chain} -s ${src} -d ${destIp} -p tcp --dport ${destPort} -j ${target}`);
+        run('iptables', [action, chain, '-s', src, ...baseTail]);
       });
     } else if (source.type === 'interface') {
-      run(`iptables ${action} ${chain} -i ${source.iface} -d ${destIp} -p tcp --dport ${destPort} -j ${target}`);
+      run('iptables', [action, chain, '-i', source.iface, ...baseTail]);
     }
   }
 
