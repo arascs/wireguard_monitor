@@ -106,14 +106,6 @@ function NodeServicesModal({ node, onClose }) {
           {listSitesText(node.sites)}
         </div>
 
-        {node.nodeKey && (
-          <div className="mt-6 text-xs text-zinc-600">
-            <p className="font-medium mb-1">Node key</p>
-            <p>id: <span className="font-mono">{node.nodeKey.id}</span></p>
-            <p>created: {node.nodeKey.createdAt || '—'}</p>
-            <p>last seen: {node.nodeKey.lastSeenAt || '—'}</p>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -159,8 +151,7 @@ function AddNodeModal({ onClose, onCreated }) {
           <button type="button" className="text-zinc-500 hover:text-zinc-800 text-sm" onClick={onClose}>Close</button>
         </div>
         <p className="text-xs text-zinc-600 mb-3">
-          Generate a single API key for the new node. Copy it now — central stores only its hash and never displays the
-          plaintext again.
+          Generate a single API key for the new node. Copy it now — it will not be displayed again.
         </p>
         <input
           className="w-full mb-3 rounded border border-zinc-300 px-3 py-2 text-sm"
@@ -201,6 +192,7 @@ export default function NodeExplorer() {
   const [err, setErr] = useState(null);
   const [detailNode, setDetailNode] = useState(null);
   const [deletingNodeId, setDeletingNodeId] = useState(null);
+  const [rotatingNodeId, setRotatingNodeId] = useState(null);
   const [showAddNode, setShowAddNode] = useState(false);
 
   useEffect(() => {
@@ -250,9 +242,7 @@ export default function NodeExplorer() {
     try {
       const r = await apiFetch(`/api/nodes/${encodeURIComponent(node.id)}`, { method: 'DELETE' });
       const payload = await r.json().catch(() => ({}));
-      if (!r.ok || payload.ok === false) {
-        throw new Error(payload.error || `HTTP ${r.status}`);
-      }
+      if (!r.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${r.status}`);
       setRows((prev) => prev.filter((it) => it.id !== node.id));
       if (detailNode && detailNode.id === node.id) setDetailNode(null);
       if (payload.warnings && payload.warnings.length) {
@@ -262,6 +252,22 @@ export default function NodeExplorer() {
       window.alert(`Delete failed: ${e.message}`);
     } finally {
       setDeletingNodeId(null);
+    }
+  }
+
+  async function handleRotateKey(node) {
+    if (!node || !node.id) return;
+    if (!window.confirm(`Rotate API key for node "${node.name}"? The node will need to be updated with the new key.`)) return;
+    setRotatingNodeId(node.id);
+    try {
+      const r = await apiFetch(`/api/nodes/${encodeURIComponent(node.id)}/rotate`, { method: 'POST' });
+      const payload = await r.json().catch(() => ({}));
+      if (!r.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${r.status}`);
+      window.alert(`New API key for "${node.name}":\n${payload.apiKey}\n\nCopy it now — it will not be shown again.`);
+    } catch (e) {
+      window.alert(`Rotate failed: ${e.message}`);
+    } finally {
+      setRotatingNodeId(null);
     }
   }
 
@@ -403,6 +409,14 @@ export default function NodeExplorer() {
                       onClick={() => setDetailNode(n)}
                     >
                       View detail
+                    </button>
+                    <button
+                      type="button"
+                      className="text-amber-700 text-xs font-medium hover:underline disabled:text-zinc-400"
+                      disabled={rotatingNodeId === n.id}
+                      onClick={() => handleRotateKey(n)}
+                    >
+                      {rotatingNodeId === n.id ? 'Rotating…' : 'Rotate key'}
                     </button>
                     <button
                       type="button"

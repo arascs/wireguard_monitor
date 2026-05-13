@@ -527,6 +527,7 @@ function setupPeerModals() {
             endpoint: document.getElementById('new-peer-endpoint').value,
             allowedIPs: document.getElementById('new-peer-allowedIPs').value,
             persistentKeepalive: document.getElementById('new-peer-keepalive').value,
+            rotationKey: document.getElementById('new-peer-rotationKey').value,
             generatePsk: document.getElementById('new-peer-generatePsk').checked
         };
         try {

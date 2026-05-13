@@ -13,7 +13,7 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
 - Manage peers for each interface
 - Manage client-to-site connections using user identity and device enrollment
 - Apply access rules to internal applications
-- Create new key pair and synchronize key to other peers
+- Automated WireGuard key rotation and distribution
 - Automate disconnecting client after a period (default 12h)
 - Decide mandatory security settings (firewall, ssh, kernel version,...) 
 - Apply configuration changes directly to the system 
@@ -89,7 +89,8 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
 - Automatic alerts when a node goes offline, resource usage exceeds 90%, a service stops, or a site-to-site peer goes offline
 - Bell icon with unread badge and notification panel, refreshed every 5 seconds
 
-
+## Security
+- Session cookies, rate limiting, shell input validation, cors, apiKey, IP binding for internal apis, different HTTPS certificates for internal (admin/central) and public (site/devices) access. 
 
 ## Requirements
 

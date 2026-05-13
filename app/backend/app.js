@@ -51,7 +51,6 @@ if (!SESSION_SECRET) {
   process.exit(1);
 }
 
-/** Same contract as central: Bearer or X-Api-Key vs NODE_API_KEY. */
 function apiKeyAuth(req, res, next) {
   const expected = (process.env.NODE_API_KEY || '').trim();
   if (!expected) {
@@ -59,7 +58,7 @@ function apiKeyAuth(req, res, next) {
   }
   const auth = req.header('authorization') || '';
   const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
-  const provided = bearer || String(req.header('x-api-key') || '').trim();
+  const provided = bearer || '';
   if (!provided) {
     return res.status(401).json({ success: false, error: 'missing api key' });
   }
@@ -225,9 +224,6 @@ app.use(session({
   }
 }));
 
-// ── global guard: every /api/* call (other than the explicit allow-list)
-// must come from the admin CIDR; admin endpoints additionally require an
-// authenticated session. The allow-list covers public/device/internal callers.
 const ADMIN_BYPASS_PATHS = new Set([
   '/api/admin-login',
   '/api/login',
@@ -250,8 +246,6 @@ function pathAllowsBypass(p) {
 }
 
 app.use((req, res, next) => {
-  // Non-API requests handled later by static + page routes (which have their
-  // own requireAuth where needed).
   if (!req.path.startsWith('/api/')) return next();
   if (pathAllowsBypass(req.path)) return next();
   if (!isAdminIp(req)) {
@@ -313,6 +307,40 @@ function updateSharedConfig() {
   }
 }
 
+function secretStringsMatch(stored, presented) {
+  const a = String(stored || '');
+  const b = String(presented || '');
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  const ba = Buffer.from(a, 'utf8');
+  const bb = Buffer.from(b, 'utf8');
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
+async function hydrateRotationKeysFromDb() {
+  for (const p of config.peers) {
+    p.rotationKey = '';
+  }
+  try {
+    const conn = await mysql.createConnection(dbConfig);
+    const [rows] = await conn.execute(
+      'SELECT site_pubkey, site_rotation_key FROM sites WHERE `interface` = ?',
+      [INTERFACE]
+    );
+    await conn.end();
+    const map = new Map(rows.map((r) => [r.site_pubkey, r.site_rotation_key != null ? String(r.site_rotation_key) : '']));
+    for (const p of config.peers) {
+      if (p.publicKey && map.has(p.publicKey)) {
+        p.rotationKey = map.get(p.publicKey);
+      }
+    }
+  } catch (e) {
+    console.error('hydrateRotationKeysFromDb:', e.message);
+  }
+  updateSharedConfig();
+}
+
 // Load credentials from file
 function loadCredentials() {
   if (!fs.existsSync(CREDENTIALS_FILE)) {
@@ -333,7 +361,6 @@ function requireAuth(req, res, next) {
   if (req.path && req.path.startsWith('/api/')) {
     return res.status(401).json({ success: false, error: 'Authentication required' });
   }
-  // otherwise assume browser navigation
   res.redirect('/login');
 }
 
@@ -431,6 +458,7 @@ function loadConfigFromFile() {
           endpoint: '',
           allowedIPs: '',
           persistentKeepalive: '',
+          rotationKey: '',
           enabled: !isCommented
         };
         peerEnabled = !isCommented;
@@ -490,6 +518,9 @@ function loadConfigFromFile() {
             }
           }
         } else if (section === 'peer' && currentPeer) {
+          if (lowerKey === 'rotationkey') {
+            continue;
+          }
           if (lowerKey === 'publickey') {
             currentPeer.publicKey = value;
           } else if (lowerKey === 'presharedkey') {
@@ -699,12 +730,12 @@ function saveConfigToFile() {
 }
 
 // Choose interface
-app.post('/api/interface', (req, res) => {
+app.post('/api/interface', async (req, res) => {
   try {
     INTERFACE = req.body.interface || 'wg0';
     CONFIG_FILE = path.join(CONFIG_DIR, `${INTERFACE}.conf`);
-    // Load config when interface changes
     loadConfigFromFile();
+    await hydrateRotationKeysFromDb();
     res.json({ success: true, interface: INTERFACE, config });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -1018,26 +1049,27 @@ app.post('/api/generate-keys', async (req, res) => {
       }
     } catch (e) { }
 
-    // Send new key to all peers
-    const peers = config.peers.map(peer => ({
+    await hydrateRotationKeysFromDb();
+
+    const peersSummary = config.peers.map(peer => ({
       publicKey: peer.publicKey,
       endpoint: peer.endpoint
     }));
 
-    // Send update-key request to all peers with endpoints
-    for (const peer of peers) {
+    for (const peer of config.peers) {
       if (peer.endpoint) {
         const endpointParts = peer.endpoint.split(':');
         if (endpointParts.length === 2) {
           const peerIp = endpointParts[0];
           const peerPort = endpointParts[1];
           try {
-            await fetch(`http://${peerIp}:${peerPort}/api/update-key`, {
+            await fetch(`https://${peerIp}:${peerPort}/api/update-key`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 oldPublicKey: oldPublicKey,
-                newPublicKey: newPublicKey
+                newPublicKey: newPublicKey,
+                rotationKey: peer.rotationKey || ''
               })
             });
           } catch (e) {
@@ -1051,7 +1083,7 @@ app.post('/api/generate-keys', async (req, res) => {
       success: true,
       oldPublicKey: oldPublicKey,
       newPublicKey: newPublicKey,
-      peers: peers
+      peers: peersSummary
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -1158,6 +1190,7 @@ app.post('/api/add-peer', async (req, res) => {
       endpoint: req.body.endpoint || '',
       allowedIPs: req.body.allowedIPs || '0.0.0.0/0',
       persistentKeepalive: req.body.persistentKeepalive || '25',
+      rotationKey: typeof req.body.rotationKey === 'string' ? req.body.rotationKey : '',
       enabled: true
     };
 
@@ -1178,13 +1211,14 @@ app.post('/api/add-peer', async (req, res) => {
       try {
         const conn = await mysql.createConnection(dbConfig);
         await conn.execute(
-          'INSERT INTO sites (site_name, site_endpoint, site_pubkey, site_allowedIPs, site_persistent_keepalive, `interface`) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT INTO sites (site_name, site_endpoint, site_pubkey, site_allowedIPs, site_persistent_keepalive, site_rotation_key, `interface`) VALUES (?, ?, ?, ?, ?, ?, ?)',
           [
             peer.name,
             peer.endpoint,
             peer.publicKey,
             peer.allowedIPs,
             peer.persistentKeepalive ? parseInt(peer.persistentKeepalive) : null,
+            peer.rotationKey || null,
             INTERFACE
           ]
         );
@@ -1214,9 +1248,8 @@ app.post('/api/add-peer', async (req, res) => {
 });
 
 // Edit peer
-app.put('/api/edit-peer/:index', (req, res) => {
+app.put('/api/edit-peer/:index', async (req, res) => {
   try {
-    // Check if key is expired
     if (isKeyExpired()) {
       return res.status(403).json({
         success: false,
@@ -1227,7 +1260,6 @@ app.put('/api/edit-peer/:index', (req, res) => {
     const idx = parseInt(req.params.index);
     if (idx >= 0 && idx < config.peers.length) {
       const peer = config.peers[idx];
-      console.log(`Editing peer at index ${idx}:`, peer);
       const oldPeer = { ...peer };
 
       peer.name = req.body.name !== undefined ? req.body.name : peer.name;
@@ -1235,11 +1267,37 @@ app.put('/api/edit-peer/:index', (req, res) => {
       peer.endpoint = req.body.endpoint !== undefined ? req.body.endpoint : peer.endpoint;
       peer.allowedIPs = req.body.allowedIPs !== undefined ? req.body.allowedIPs : peer.allowedIPs;
       peer.persistentKeepalive = req.body.persistentKeepalive !== undefined ? req.body.persistentKeepalive : peer.persistentKeepalive;
+      if (req.body.rotationKey !== undefined) {
+        peer.rotationKey = typeof req.body.rotationKey === 'string' ? req.body.rotationKey : '';
+      }
       if (req.body.presharedKey !== undefined) {
         peer.presharedKey = req.body.presharedKey;
       }
 
       updateSharedConfig();
+
+      const ifaceType = config.interface.type || '';
+      if (ifaceType === 'Site' && oldPeer.publicKey) {
+        try {
+          const conn = await mysql.createConnection(dbConfig);
+          await conn.execute(
+            'UPDATE sites SET site_name = ?, site_endpoint = ?, site_pubkey = ?, site_allowedIPs = ?, site_persistent_keepalive = ?, site_rotation_key = ? WHERE site_pubkey = ? AND `interface` = ?',
+            [
+              peer.name,
+              peer.endpoint,
+              peer.publicKey,
+              peer.allowedIPs,
+              peer.persistentKeepalive ? parseInt(peer.persistentKeepalive, 10) : null,
+              peer.rotationKey || null,
+              oldPeer.publicKey,
+              INTERFACE
+            ]
+          );
+          await conn.end();
+        } catch (dbErr) {
+          console.error('Error updating site in DB:', dbErr.message);
+        }
+      }
 
       try {
         const admin = req.session && req.session.user ? req.session.user : 'unknown';
@@ -1386,9 +1444,9 @@ app.post('/api/disable-peer/:index', (req, res) => {
 });
 
 // Update peer key
-app.post('/api/update-key', (req, res) => {
+app.post('/api/update-key', async (req, res) => {
   try {
-    const { oldPublicKey, newPublicKey } = req.body;
+    const { oldPublicKey, newPublicKey, rotationKey } = req.body || {};
     if (!oldPublicKey || !newPublicKey) {
       return res.status(400).json({ success: false, error: 'Missing oldPublicKey or newPublicKey' });
     }
@@ -1446,6 +1504,24 @@ app.post('/api/update-key', (req, res) => {
       return res.status(404).json({ success: false, error: 'Peer not found in any interface' });
     }
 
+    let expectedRotation = '';
+    try {
+      const conn = await mysql.createConnection(dbConfig);
+      const [rows] = await conn.execute(
+        'SELECT site_rotation_key FROM sites WHERE site_pubkey = ? AND `interface` = ? LIMIT 1',
+        [oldPublicKey, foundInterface]
+      );
+      await conn.end();
+      if (rows.length && rows[0].site_rotation_key != null) {
+        expectedRotation = String(rows[0].site_rotation_key);
+      }
+    } catch (dbErr) {
+      console.error('update-key rotation lookup:', dbErr.message);
+    }
+    if (!secretStringsMatch(expectedRotation, rotationKey)) {
+      return res.status(403).json({ success: false, error: 'Invalid rotation key' });
+    }
+
     // Update public key in the found peer section
     for (let i = peerStartIndex; i <= peerEndIndex; i++) {
       const clean = foundLines[i].replace(/^\s*#\s*/, '').trim();
@@ -1469,7 +1545,17 @@ app.post('/api/update-key', (req, res) => {
       // Interface not running
     }
 
-    // audit log
+    try {
+      const conn = await mysql.createConnection(dbConfig);
+      await conn.execute(
+        'UPDATE sites SET site_pubkey = ? WHERE site_pubkey = ? AND `interface` = ?',
+        [newPublicKey, oldPublicKey, foundInterface]
+      );
+      await conn.end();
+    } catch (dbErr) {
+      console.error('Error updating site pubkey in DB:', dbErr.message);
+    }
+
     try {
       const admin = req.session && req.session.user ? req.session.user : 'unknown';
       logAction(admin, 'update_key', {
@@ -1491,9 +1577,10 @@ app.get('/api/config', (req, res) => {
 });
 
 // Reload configuration from file on demand
-app.get('/api/reload-config', (req, res) => {
+app.get('/api/reload-config', async (req, res) => {
   try {
     const loaded = loadConfigFromFile();
+    await hydrateRotationKeysFromDb();
     res.json({ success: true, config, loaded });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -1648,7 +1735,6 @@ app.post('/api/admin-login', loginLimiter('local-admin'), async (req, res) => {
     return res.json({ success: true });
   }
   res.status(401).json({ success: false, error: 'Invalid credentials' });
-
 });
 
 app.post('/api/change-password', requireAuth, async (req, res) => {
@@ -1657,6 +1743,7 @@ app.post('/api/change-password', requireAuth, async (req, res) => {
   if (await bcrypt.compare(currentPassword, creds.passwordHash)) {
     const newHash = await bcrypt.hash(newPassword, 10);
     fs.writeFileSync(CREDENTIALS_FILE, `${creds.username}:${newHash}`, { mode: 0o600 });
+    req.session.destroy(() => {});
     res.json({ success: true });
   } else {
     res.status(401).json({ success: false, error: 'Current password incorrect' });
@@ -1873,6 +1960,7 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
     }
 
     loadConfigFromFile();
+    await hydrateRotationKeysFromDb();
 
     // Find peer and enable it, or create if not exists
     let peer = config.peers.find(p => p.publicKey === publicKey);
@@ -1893,6 +1981,7 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
         endpoint: '',
         allowedIPs,
         persistentKeepalive: '25',
+        rotationKey: '',
         enabled: true
       });
       needSave = true;
@@ -2052,27 +2141,50 @@ async function pushMetricsToCentral() {
   }
 }
 
-const httpsOptions = {
-  key: fs.readFileSync(TLS_KEY_PATH),
-  cert: fs.readFileSync(TLS_CERT_PATH)
-};
+function tlsPair(keyPath, certPath) {
+  return { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) };
+}
 
-https.createServer(httpsOptions, app).listen(PORT, () => {
+const internalTls = tlsPair(
+  process.env.TLS_INTERNAL_KEY_PATH || TLS_KEY_PATH,
+  process.env.TLS_INTERNAL_CERT_PATH || TLS_CERT_PATH
+);
+const publicTls = tlsPair(
+  process.env.TLS_PUBLIC_KEY_PATH || TLS_KEY_PATH,
+  process.env.TLS_PUBLIC_CERT_PATH || TLS_CERT_PATH
+);
+
+const hLan = process.env.TLS_INTERNAL_BIND || '192.168.178.128';
+const hPub = process.env.TLS_PUBLIC_BIND || '172.16.0.128';
+const hLo = process.env.TLS_LOOPBACK_BIND || '127.0.0.1';
+
+const listeners = [
+  [internalTls, hLan],
+  [publicTls, hPub],
+  [internalTls, hLo]
+];
+
+let bootOnce = false;
+function afterListen(host) {
+  console.log(`HTTPS https://${host}:${PORT}`);
+  if (bootOnce) return;
+  bootOnce = true;
   loadConfigFromFile();
-  updateSharedConfig();
-  console.log(`WireGuard VPN Manager running on https://localhost:${PORT}`);
+  hydrateRotationKeysFromDb().catch((e) => console.error('hydrateRotationKeysFromDb:', e.message));
   registerWithCentral().catch((e) => console.error('[central register]', e.message));
-
   const regMs = parseInt(process.env.CENTRAL_REGISTER_INTERVAL_MS || '300000', 10);
   if (regMs > 0) {
     setInterval(() => {
       registerWithCentral().catch((e) => console.error('[central register]', e.message));
     }, regMs);
   }
-
   const pushMs = parseInt(process.env.METRICS_PUSH_INTERVAL_MS || '30000', 10);
   if (pushMs > 0) {
     setInterval(() => { pushMetricsToCentral(); }, pushMs);
     pushMetricsToCentral();
   }
-});
+}
+
+for (const [opts, host] of listeners) {
+  https.createServer(opts, app).listen(PORT, host, () => afterListen(host));
+}

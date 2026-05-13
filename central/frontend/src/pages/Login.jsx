@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { markAuthenticated } from '../auth';
 
 export default function Login() {
-  const [username, setUsername] = useState('admin');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(false);

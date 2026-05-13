@@ -339,7 +339,7 @@ async function loadPeerConnections(interfaceId, peerName) {
             `;
             
         } else {
-            tableHTML += '<div style="padding: 20px; text-align: center; color: #666;">No active connections</div>';
+            tableHTML += '<div style="padding: 20px; text-align: center; color: #666;">No active sessions</div>';
         }
         
         connectionsSection.innerHTML = tableHTML;
@@ -473,6 +473,7 @@ function setupEditPeerModal() {
             document.getElementById('edit-peer-endpoint').value = peerData.endpoint || '';
             document.getElementById('edit-peer-allowedIPs').value = peerData.allowedIPs || '';
             document.getElementById('edit-peer-keepalive').value = peerData.persistentKeepalive || '';
+            document.getElementById('edit-peer-rotationKey').value = peerData.rotationKey || '';
             modal.style.display = 'block';
         } catch (e) {
             console.error(e);
@@ -493,7 +494,8 @@ function setupEditPeerModal() {
             publicKey: document.getElementById('edit-peer-publicKey').value,
             endpoint: document.getElementById('edit-peer-endpoint').value,
             allowedIPs: document.getElementById('edit-peer-allowedIPs').value,
-            persistentKeepalive: document.getElementById('edit-peer-keepalive').value
+            persistentKeepalive: document.getElementById('edit-peer-keepalive').value,
+            rotationKey: document.getElementById('edit-peer-rotationKey').value
         };
         try {
             const path = `/api/edit-peer/${peerId}`;

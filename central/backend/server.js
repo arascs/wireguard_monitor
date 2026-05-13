@@ -1,6 +1,7 @@
 require('dotenv').config();
 
 const express = require('express');
+const session = require('express-session');
 const path = require('path');
 const fs = require('fs');
 const cookieParser = require('cookie-parser');
@@ -10,11 +11,8 @@ const https = require('https');
 const {
   loadNodes,
   saveNodes,
-  loadNodeKeys,
-  saveNodeKeys,
   nodeIdFor,
-  generateApiKey,
-  hashApiKey
+  generateApiKey
 } = require('./state');
 const { createPoller } = require('./poller');
 const {
@@ -31,15 +29,14 @@ const {
 } = require('./clickhouseLogs');
 const {
   ensureCredentials,
-  generateToken,
+  SESSION_SECRET,
+  COOKIE_MAX_AGE_MS,
+  COOKIE_NAME,
   verifyLogin,
-  authMiddleware,
-  setSessionCookie,
-  clearSessionCookie
+  authMiddleware
 } = require('./centralAuth');
 const { parseMetrics } = require('./parseMetrics');
 const { adminIpGuard, corsMiddleware, loginLimiter } = require('./security');
-const { logSecurityEvent } = require('./securityLog');
 
 ensureCredentials();
 
@@ -52,7 +49,6 @@ const TLS_CERT_PATH = process.env.TLS_CERT_PATH || '/usr/local/share/ca-certific
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 let nodes = loadNodes();
-let nodeKeys = loadNodeKeys();
 const geoCache = new Map();
 const latestByNode = new Map();
 const lastHealthOkByNode = new Map();
@@ -140,9 +136,8 @@ function endpointHost(endpoint) {
 
 const ipOnly = endpointHost;
 
-function publicNodeKey(row) {
+function publicNode(row) {
   return {
-    id: row.id,
     name: row.name || '',
     machineId: row.machineId || '',
     baseUrl: row.baseUrl || '',
@@ -151,27 +146,17 @@ function publicNodeKey(row) {
   };
 }
 
-function findNodeKeyByApiKey(plain) {
+function findNodeByApiKey(plain) {
   if (!plain) return null;
-  const hash = hashApiKey(plain);
-  return nodeKeys.find((k) => k.apiKeyHash === hash) || null;
+  return nodes.find((n) => n.apiKey === plain) || null;
 }
 
-function findNodeKeyById(id) {
-  return nodeKeys.find((k) => k.id === id) || null;
-}
-
-function findNodeKeyByMachineId(machineId) {
-  return nodeKeys.find((k) => k.machineId === machineId) || null;
-}
-
-/** Auth middleware for all node-facing endpoints (uses single API key). */
 function apiKeyAuth(req, res, next) {
   const auth = req.header('authorization') || '';
   const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
-  const provided = bearer || String(req.header('x-api-key') || '').trim();
+  const provided = bearer || '';
   if (!provided) return res.status(401).json({ ok: false, error: 'missing api key' });
-  const row = findNodeKeyByApiKey(provided);
+  const row = findNodeByApiKey(provided);
   if (!row) return res.status(401).json({ ok: false, error: 'invalid api key' });
   req.nodeKey = row;
   next();
@@ -428,6 +413,18 @@ app.use(corsMiddleware());
 app.use(cookieParser());
 app.use(express.json({ limit: '256kb' }));
 app.use(express.text({ type: 'text/plain', limit: '512kb' }));
+app.use(session({
+  name: COOKIE_NAME,
+  secret: SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'strict',
+    maxAge: COOKIE_MAX_AGE_MS
+  }
+}));
 
 // ── auth ─────────────────────────────────────────────────────────────
 
@@ -437,9 +434,7 @@ app.post('/api/login', loginLimiter('central'), async (req, res) => {
     if (!ok) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-
-    const token = generateToken(req.body.username);
-    setSessionCookie(res, token);
+    req.session.user = req.body.username;
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: 'Login failed' });
@@ -447,63 +442,51 @@ app.post('/api/login', loginLimiter('central'), async (req, res) => {
 });
 
 app.post('/api/logout', (req, res) => {
-  clearSessionCookie(res);
-  res.json({ ok: true });
+  req.session.destroy(() => {
+    res.clearCookie(COOKIE_NAME, { path: '/' });
+    res.json({ ok: true });
+  });
 });
 
 // ── node-facing endpoints (single API key) ───────────────────────────
 
 app.post('/api/register', apiKeyAuth, async (req, res) => {
   const machineId = String(req.body.machineId || req.body.nodeMachineId || '').trim();
-  if (!machineId) {
-    return res.status(400).json({ ok: false, error: 'machineId required' });
-  }
-  const keyRow = req.nodeKey;
-  if (keyRow.machineId && keyRow.machineId !== machineId) {
+  if (!machineId) return res.status(400).json({ ok: false, error: 'machineId required' });
+
+  const node = req.nodeKey;
+  if (node.machineId && node.machineId !== machineId) {
     return res.status(409).json({ ok: false, error: 'api key already bound to another machine' });
   }
 
-  const name = String(req.body.name || keyRow.name || '').trim() || 'node';
+  const name = String(req.body.name || node.name || '').trim() || 'node';
   const baseUrl = normalizeBaseUrl(String(req.body.baseUrl || '').trim());
   if (!baseUrl) return res.status(400).json({ ok: false, error: 'baseUrl required' });
 
   const id = nodeIdFor(baseUrl);
-  const idx = nodes.findIndex((n) => n.id === id);
   const bodyIp = req.body.publicIp != null ? String(req.body.publicIp).trim() : '';
-  const publicIp = bodyIp || (idx >= 0 && nodes[idx].publicIp) || null;
+  const publicIp = bodyIp || node.publicIp || null;
   let geo = null;
   if (publicIp) geo = await geoForIp(publicIp);
 
-  const row = {
-    id,
-    name,
-    machineId,
-    baseUrl,
-    publicIp,
-    region: geo ? geo.country : (idx >= 0 ? nodes[idx].region : '') || '',
-    lat: geo ? geo.lat : (idx >= 0 ? nodes[idx].lat : null),
-    lon: geo ? geo.lon : (idx >= 0 ? nodes[idx].lon : null)
-  };
-  if (idx >= 0) nodes[idx] = { ...nodes[idx], ...row };
-  else nodes.push(row);
-
-  keyRow.machineId = machineId;
-  keyRow.baseUrl = baseUrl;
-  keyRow.name = name;
-  keyRow.lastSeenAt = new Date().toISOString();
+  node.id = id;
+  node.name = name;
+  node.machineId = machineId;
+  node.baseUrl = baseUrl;
+  node.publicIp = publicIp;
+  node.region = geo ? geo.country : node.region || '';
+  node.lat = geo ? geo.lat : node.lat || null;
+  node.lon = geo ? geo.lon : node.lon || null;
+  node.lastSeenAt = new Date().toISOString();
 
   saveNodes(nodes);
-  saveNodeKeys(nodeKeys);
   res.json({ ok: true, id });
 });
 
 app.post('/api/metrics/push', apiKeyAuth, (req, res) => {
-  const keyRow = req.nodeKey;
-  if (!keyRow.machineId) {
-    return res.status(409).json({ ok: false, error: 'node not registered yet' });
-  }
-  const node = nodes.find((n) => n.machineId === keyRow.machineId);
-  if (!node) return res.status(404).json({ ok: false, error: 'node not found' });
+  const node = req.nodeKey;
+  if (!node.machineId) return res.status(409).json({ ok: false, error: 'node not registered yet' });
+  if (!node.id) return res.status(404).json({ ok: false, error: 'node not found' });
 
   let m;
   if (typeof req.body === 'string') {
@@ -513,12 +496,10 @@ app.post('/api/metrics/push', apiKeyAuth, (req, res) => {
   } else {
     return res.status(400).json({ ok: false, error: 'empty payload' });
   }
-  if (!m || typeof m !== 'object') {
-    return res.status(400).json({ ok: false, error: 'invalid metrics' });
-  }
+  if (!m || typeof m !== 'object') return res.status(400).json({ ok: false, error: 'invalid metrics' });
   applyMetricsSnapshot(node.id, m);
-  keyRow.lastSeenAt = new Date().toISOString();
-  saveNodeKeys(nodeKeys);
+  node.lastSeenAt = new Date().toISOString();
+  saveNodes(nodes);
   res.json({ ok: true });
 });
 
@@ -530,10 +511,8 @@ app.post('/api/notifications/ingest', apiKeyAuth, (req, res) => {
 });
 
 app.post('/api/logs/push', apiKeyAuth, async (req, res) => {
-  const keyRow = req.nodeKey;
-  if (!keyRow.machineId) {
-    return res.status(409).json({ ok: false, error: 'node not registered yet' });
-  }
+  const node = req.nodeKey;
+  if (!node.machineId) return res.status(409).json({ ok: false, error: 'node not registered yet' });
   const incoming = Array.isArray(req.body) ? req.body : [req.body];
   const cleaned = incoming
     .map((raw) => {
@@ -541,7 +520,7 @@ app.post('/api/logs/push', apiKeyAuth, async (req, res) => {
       const ts = raw.timestamp || raw.ingest_timestamp || new Date().toISOString();
       return {
         timestamp: String(ts).replace('T', ' ').replace('Z', ''),
-        origin_host: String(raw.origin_host || keyRow.machineId || 'unknown'),
+        origin_host: String(raw.origin_host || node.machineId || 'unknown'),
         event_type: String(raw.event_name || raw.event_type || 'general'),
         message: String(raw.message || ''),
         data: JSON.stringify(raw)
@@ -557,8 +536,6 @@ app.post('/api/logs/push', apiKeyAuth, async (req, res) => {
     res.status(503).json({ ok: false, error: e.message || 'ClickHouse unavailable' });
   }
 });
-
-// ── admin endpoints (cookie + IP guard) ──────────────────────────────
 
 const admin = [adminIpGuard, authMiddleware];
 
@@ -581,6 +558,7 @@ app.post('/api/notifications/mark-read', admin, (req, res) => {
 app.get('/api/nodes', admin, async (req, res) => {
   const enriched = [];
   for (const n of nodes) {
+    if (!n.id) continue;
     let geo = null;
     if (n.publicIp) geo = await geoForIp(n.publicIp);
     const lat = n.lat != null ? n.lat : geo && geo.lat;
@@ -592,7 +570,6 @@ app.get('/api/nodes', admin, async (req, res) => {
     const bps = snap && snap.bandwidthDelta != null ? snap.bandwidthDelta / dt : 0;
     const { memUsedPct, diskUsedPct } = usageFromMetrics(m);
     const lastOk = lastHealthOkByNode.get(n.id);
-    const nodeKey = findNodeKeyByMachineId(n.machineId || n.name || '');
     enriched.push({
       id: n.id,
       name: n.name,
@@ -620,49 +597,46 @@ app.get('/api/nodes', admin, async (req, res) => {
       lastHealthOkAt: lastOk != null ? lastOk : null,
       memTotal: m && m.memTotal,
       memAvail: m && m.memAvail,
-      nodeKey: nodeKey ? publicNodeKey(nodeKey) : null
+      hasApiKey: !!n.apiKey
     });
   }
   res.json({ nodes: enriched });
 });
 
 app.get('/api/node-keys', admin, (req, res) => {
-  res.json({ ok: true, rows: nodeKeys.map(publicNodeKey) });
+  res.json({ ok: true, rows: nodes.filter((n) => !n.id).map(publicNode) });
 });
 
 app.post('/api/node-keys', admin, (req, res) => {
   const name = String((req.body && req.body.name) || '').trim() || 'node';
   const apiKey = generateApiKey();
   const row = {
-    id: 'k_' + require('crypto').randomBytes(8).toString('hex'),
     name,
-    apiKeyHash: hashApiKey(apiKey),
+    apiKey,
     machineId: '',
     baseUrl: '',
     createdAt: new Date().toISOString(),
     lastSeenAt: null
   };
-  nodeKeys.unshift(row);
-  saveNodeKeys(nodeKeys);
-  // The plaintext apiKey is returned ONCE here. It is never stored or shown again.
-  res.json({ ok: true, row: publicNodeKey(row), apiKey });
+  nodes.unshift(row);
+  saveNodes(nodes);
+  res.json({ ok: true, row: publicNode(row), apiKey });
 });
 
-app.post('/api/node-keys/:id/rotate', admin, (req, res) => {
-  const row = findNodeKeyById(req.params.id);
-  if (!row) return res.status(404).json({ ok: false, error: 'not found' });
+app.post('/api/nodes/:id/rotate', admin, (req, res) => {
+  const node = nodes.find((n) => n.id === req.params.id);
+  if (!node) return res.status(404).json({ ok: false, error: 'not found' });
   const apiKey = generateApiKey();
-  row.apiKeyHash = hashApiKey(apiKey);
-  row.lastSeenAt = null;
-  saveNodeKeys(nodeKeys);
-  res.json({ ok: true, row: publicNodeKey(row), apiKey });
+  node.apiKey = apiKey;
+  saveNodes(nodes);
+  res.json({ ok: true, apiKey });
 });
 
-app.delete('/api/node-keys/:id', admin, (req, res) => {
-  const idx = nodeKeys.findIndex((k) => k.id === req.params.id);
+app.delete('/api/node-keys/:name', admin, (req, res) => {
+  const idx = nodes.findIndex((n) => !n.id && n.name === req.params.name);
   if (idx < 0) return res.status(404).json({ ok: false, error: 'not found' });
-  nodeKeys.splice(idx, 1);
-  saveNodeKeys(nodeKeys);
+  nodes.splice(idx, 1);
+  saveNodes(nodes);
   res.json({ ok: true });
 });
 

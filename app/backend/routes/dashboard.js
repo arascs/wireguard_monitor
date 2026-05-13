@@ -1,8 +1,33 @@
+require('dotenv').config();
 const express = require('express');
 const router = express.Router();
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const mysql = require('mysql2/promise');
+
+const dbConfig = {
+    host: process.env.WG_DB_HOST || 'localhost',
+    user: process.env.WG_DB_USER || 'root',
+    password: process.env.WG_DB_PASSWORD || 'root',
+    database: process.env.WG_DB_NAME || 'wg_monitor'
+};
+
+async function getSiteRotationKey(iface, sitePubkey) {
+    if (!sitePubkey) return '';
+    try {
+        const conn = await mysql.createConnection(dbConfig);
+        const [rows] = await conn.execute(
+            'SELECT site_rotation_key FROM sites WHERE site_pubkey = ? AND `interface` = ? LIMIT 1',
+            [sitePubkey, iface]
+        );
+        await conn.end();
+        if (!rows.length || rows[0].site_rotation_key == null) return '';
+        return String(rows[0].site_rotation_key);
+    } catch (e) {
+        return '';
+    }
+}
 
 function formatBytes(bytes) {
     if (bytes === 0) return '0 B';
@@ -357,7 +382,9 @@ router.get('/peer/:id', async (req, res) => {
     } else if (handshakeTimestamp && (nowSec - handshakeTimestamp) < 180) {
         status = 'active';
     }
-    
+
+    const rotationKey = await getSiteRotationKey(interfaceIdFinal, peer.publicKey || '');
+
         res.json({
             id: peerId,
             name: peer.name || '',
@@ -372,7 +399,8 @@ router.get('/peer/:id', async (req, res) => {
             endpoint: peer.endpoint || '',
             allowedIPs: peer.allowedIPs || '',
             persistentKeepalive: peer.persistentKeepalive || '',
-            presharedKey: peer.presharedKey || ''
+            presharedKey: peer.presharedKey || '',
+            rotationKey
         });
     } catch (error) {
         console.error('Error in peer details API:', error);

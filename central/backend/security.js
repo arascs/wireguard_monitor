@@ -18,11 +18,11 @@ function clientIp(req) {
 /** Reject requests not coming from the configured admin CIDR ranges. */
 function adminIpGuard(req, res, next) {
   const cidrs = parseList(process.env.ADMIN_IP_CIDR);
+  if (cidrs.length === 0) return next();
   const ip = clientIp(req);
   if (ip === '127.0.0.1' || ip === '::1') return next();
-  if (cidrs.length === 0) return next();
   if (ipRangeCheck(ip, cidrs)) return next();
-  return res.status(403).json({ error: 'forbidden network' });
+  return res.status(403).json({ error: 'forbidden' });
 }
 
 function corsMiddleware() {

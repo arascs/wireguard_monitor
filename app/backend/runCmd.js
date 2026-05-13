@@ -1,13 +1,5 @@
 const { execFileSync, spawnSync } = require('child_process');
 
-/**
- * Run a binary with explicit args via execFile (no shell interpretation).
- *
- * Usage:
- *   run('wg', ['show', 'interfaces'])
- *   run('wg-quick', ['up', INTERFACE])
- *   run('wg', ['pubkey'], { input: privateKey })
- */
 function run(file, args = [], opts = {}) {
   if (typeof file !== 'string' || !file) {
     throw new Error('run(): file must be a non-empty string');
