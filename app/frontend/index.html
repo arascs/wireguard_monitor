@@ -262,7 +262,7 @@
                     <td>${p.lastHandshake ? timeAgo(p.lastHandshake) : '–'}</td>
                     <td><button class="btn-terminate"
                         data-iface="${escHtml(p.interfaceName)}"
-                        data-idx="${p.peerIndex}">Terminate</button></td>
+                        data-pubkey="${escHtml(p.publicKey)}">Terminate</button></td>
                 </tr>`;
             });
             html += '</tbody></table>';
@@ -311,7 +311,7 @@
                         const r = await fetch('/api/main-dashboard/disable-peer', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ interfaceName: iface, peerIndex: parseInt(idx) })
+                            body: JSON.stringify({ interfaceName: iface, publicKey: pubkey })
                         });
                         const j = await r.json();
                         if (j.success) {

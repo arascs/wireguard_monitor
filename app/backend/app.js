@@ -26,6 +26,16 @@ const { logAction, logSecurityEvent, getLogs, getSecurityEvents } = require('./a
 const { touch: redisHeartbeatTouch } = require('./deviceHeartbeat');
 const { run, tryRun } = require('./runCmd');
 const {
+  CONFIG_DIR,
+  loadInterfaceConfig,
+  saveInterfaceConfig,
+  isKeyExpired: isInterfaceKeyExpired,
+  findPeer,
+  findPeerIndex,
+  wgSyncconfIfRunning,
+  sanitizeInterfaceName
+} = require('./lib/wireguardConfig');
+const {
   corsMiddleware,
   loginLimiter,
   isAdminIp,
@@ -156,9 +166,6 @@ app.get('/health', (req, res) => {
   res.status(ok ? 200 : 503).type('text/plain').send(ok ? 'ok' : 'fail');
 });
 
-const CONFIG_DIR = '/etc/wireguard/';
-let INTERFACE = 'wgA';
-let CONFIG_FILE = path.join(CONFIG_DIR, `${INTERFACE}.conf`);
 const FRONTEND_DIR = path.join(__dirname, '../frontend');
 const CREDENTIALS_FILE = '/etc/wireguard/credentials.txt';
 
@@ -190,26 +197,6 @@ function loadGlobalSettings() {
   }
   return defaultSettings;
 }
-
-let config = {
-  interface: {
-    privateKey: '',
-    publicKey: '',
-    address: '',
-    dns: '',
-    listenPort: '',
-    table: '',
-    mtu: '1420',
-    preUp: '',
-    postUp: '',
-    preDown: '',
-    postDown: '',
-    keyCreationDate: null,
-    keyExpiryDays: loadGlobalSettings().keyExpiryDays
-  },
-  peers: []
-};
-
 
 app.use(express.json());
 app.use(session({
@@ -255,55 +242,29 @@ app.use((req, res, next) => {
   return res.status(401).json({ success: false, error: 'Authentication required' });
 });
 
-// Check if key is expired
-function isKeyExpired() {
-  if (!config.interface.keyCreationDate) {
-    return false; // No key created yet
-  }
-
+function getRemainingDays(config) {
+  if (!config.interface.keyCreationDate) return null;
   const creationDate = new Date(config.interface.keyCreationDate);
   const expiryDate = new Date(creationDate);
   expiryDate.setDate(expiryDate.getDate() + config.interface.keyExpiryDays);
-
-  return new Date() > expiryDate;
+  const diffTime = expiryDate - new Date();
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 }
 
-// Get remaining days
-function getRemainingDays() {
-  if (!config.interface.keyCreationDate) {
-    return null;
-  }
-
-  const creationDate = new Date(config.interface.keyCreationDate);
-  const expiryDate = new Date(creationDate);
-  expiryDate.setDate(expiryDate.getDate() + config.interface.keyExpiryDays);
-
-  const now = new Date();
-  const diffTime = expiryDate - now;
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-  return diffDays;
-}
-
-// Auto disconnect VPN if key expired
 async function checkAndDisconnectIfExpired() {
-  if (isKeyExpired()) {
+  const defaults = loadGlobalSettings();
+  for (const iface of listInterfaces()) {
+    const config = loadInterfaceConfig(iface.name, { defaultKeyExpiryDays: defaults.keyExpiryDays });
+    if (!isInterfaceKeyExpired(config)) continue;
     try {
       const status = run('wg', ['show', 'interfaces']);
-      if (status.includes(INTERFACE)) {
-        run('wg-quick', ['down', INTERFACE]);
-        console.log(`[INFO] VPN ${INTERFACE} automatically disconnected due to expired key`);
+      if (status.includes(iface.name)) {
+        run('wg-quick', ['down', iface.name]);
+        console.log(`[INFO] VPN ${iface.name} disconnected due to expired key`);
       }
     } catch (e) {
       console.error('Error disconnecting VPN:', e.message);
     }
-  }
-}
-
-// Share config with routes
-function updateSharedConfig() {
-  if (app) {
-    app.set('config', config);
   }
 }
 
@@ -318,7 +279,7 @@ function secretStringsMatch(stored, presented) {
   return crypto.timingSafeEqual(ba, bb);
 }
 
-async function hydrateRotationKeysFromDb() {
+async function hydrateRotationKeysFromDb(iface, config) {
   for (const p of config.peers) {
     p.rotationKey = '';
   }
@@ -326,7 +287,7 @@ async function hydrateRotationKeysFromDb() {
     const conn = await mysql.createConnection(dbConfig);
     const [rows] = await conn.execute(
       'SELECT site_pubkey, site_rotation_key FROM sites WHERE `interface` = ?',
-      [INTERFACE]
+      [iface]
     );
     await conn.end();
     const map = new Map(rows.map((r) => [r.site_pubkey, r.site_rotation_key != null ? String(r.site_rotation_key) : '']));
@@ -338,7 +299,6 @@ async function hydrateRotationKeysFromDb() {
   } catch (e) {
     console.error('hydrateRotationKeysFromDb:', e.message);
   }
-  updateSharedConfig();
 }
 
 // Load credentials from file
@@ -362,197 +322,6 @@ function requireAuth(req, res, next) {
     return res.status(401).json({ success: false, error: 'Authentication required' });
   }
   res.redirect('/login');
-}
-
-// Load configuration from file
-function loadConfigFromFile() {
-  try {
-    if (!fs.existsSync(CONFIG_FILE)) {
-      // Reset config if file doesn't exist
-      config = {
-        interface: {
-          privateKey: '',
-          publicKey: '',
-          address: '',
-          dns: '',
-          listenPort: '',
-          table: '',
-          mtu: '1420',
-          preUp: '',
-          postUp: '',
-          preDown: '',
-          postDown: '',
-          keyCreationDate: null,
-          keyExpiryDays: loadGlobalSettings().keyExpiryDays,
-          type: ''
-        },
-        peers: []
-      };
-      updateSharedConfig();
-      return false;
-    }
-
-    const content = fs.readFileSync(CONFIG_FILE, 'utf8');
-    const lines = content.split('\n');
-    let section = null;
-    let currentPeer = null;
-    let peerEnabled = true;
-    let peerName = '';
-
-    config = {
-      interface: {
-        privateKey: '',
-        publicKey: '',
-        address: '',
-        dns: '',
-        listenPort: '',
-        table: '',
-        mtu: '1420',
-        preUp: '',
-        postUp: '',
-        preDown: '',
-        postDown: '',
-        keyCreationDate: null,
-        keyExpiryDays: loadGlobalSettings().keyExpiryDays,
-        type: ''
-      },
-      peers: []
-    };
-
-    for (let i = 0; i < lines.length; i++) {
-      let line = lines[i];
-      const trimmed = line.trim();
-
-      if (!trimmed) {
-        continue;
-      }
-
-      // Check if line is commented
-      const isCommented = trimmed.startsWith('#');
-      const cleanLine = isCommented ? trimmed.substring(1).trim() : trimmed;
-
-      // Skip if cleanLine is empty after removing comment
-      if (!cleanLine) {
-        continue;
-      }
-
-      if (isCommented && cleanLine.toLowerCase().startsWith('name =')) {
-        const parts = cleanLine.split('=');
-        if (parts.length > 1) {
-          peerName = parts.slice(1).join('=').trim();
-        }
-        continue;
-      }
-
-      if (cleanLine === '[Interface]') {
-        section = 'interface';
-        peerEnabled = true;
-        peerName = '';
-      } else if (cleanLine === '[Peer]') {
-        section = 'peer';
-        const pendingPeerName = peerName;
-        currentPeer = {
-          name: pendingPeerName || '',
-          publicKey: '',
-          presharedKey: '',
-          endpoint: '',
-          allowedIPs: '',
-          persistentKeepalive: '',
-          rotationKey: '',
-          enabled: !isCommented
-        };
-        peerEnabled = !isCommented;
-        peerName = '';
-        config.peers.push(currentPeer);
-      } else if (cleanLine.includes('=')) {
-        const equalIndex = cleanLine.indexOf('=');
-        const key = cleanLine.substring(0, equalIndex).trim();
-        const value = cleanLine.substring(equalIndex + 1).trim();
-
-        if (!key) {
-          continue;
-        }
-
-        const lowerKey = key.toLowerCase();
-
-        if (isCommented) {
-          if (lowerKey === 'key creation' && section === 'interface') {
-            config.interface.keyCreationDate = value;
-            continue;
-          }
-          if (lowerKey === 'key expiry days' && section === 'interface') {
-            config.interface.keyExpiryDays = parseInt(value) || loadGlobalSettings().keyExpiryDays;
-            continue;
-          }
-          if (lowerKey === 'type' && (section === 'interface' || section === null)) {
-            config.interface.type = value;
-            continue;
-          }
-        }
-
-        if (section === 'interface') {
-          // Map lowercase keys to camelCase property names
-          let propertyName = lowerKey;
-          if (lowerKey === 'listenport') {
-            propertyName = 'listenPort';
-          } else if (lowerKey === 'preup') {
-            propertyName = 'preUp';
-          } else if (lowerKey === 'postup') {
-            propertyName = 'postUp';
-          } else if (lowerKey === 'predown') {
-            propertyName = 'preDown';
-          } else if (lowerKey === 'postdown') {
-            propertyName = 'postDown';
-          } else if (lowerKey === 'privatekey') {
-            propertyName = 'privateKey';
-          } else if (lowerKey === 'publickey') {
-            propertyName = 'publicKey';
-          }
-
-          config.interface[propertyName] = value;
-          if (lowerKey === 'privatekey') {
-            try {
-              config.interface.publicKey = wgPubkey(value);
-            } catch (e) {
-              console.error('Error generating public key:', e.message);
-            }
-          }
-        } else if (section === 'peer' && currentPeer) {
-          if (lowerKey === 'rotationkey') {
-            continue;
-          }
-          if (lowerKey === 'publickey') {
-            currentPeer.publicKey = value;
-          } else if (lowerKey === 'presharedkey') {
-            currentPeer.presharedKey = value;
-          } else if (lowerKey === 'endpoint') {
-            currentPeer.endpoint = value;
-          } else if (lowerKey === 'allowedips') {
-            currentPeer.allowedIPs = value;
-          } else if (lowerKey === 'persistentkeepalive') {
-            currentPeer.persistentKeepalive = value;
-          } else {
-            currentPeer[lowerKey] = value;
-          }
-          // Update enabled status based on whether peer section was commented
-          if (peerEnabled === false) {
-            currentPeer.enabled = false;
-          }
-        }
-      }
-    }
-
-    // Check and disconnect if expired
-    checkAndDisconnectIfExpired();
-
-    // Update shared config
-    updateSharedConfig();
-
-    return true;
-  } catch (error) {
-    console.error('Error loading config from file:', error.message);
-    return false;
-  }
 }
 
 function getActiveInterfaces() {
@@ -641,112 +410,6 @@ function listInterfaces() {
   });
 }
 
-function buildConfigFileContent() {
-  let content = '';
-
-  let typeToWrite = config.interface.type;
-  if (!typeToWrite && fs.existsSync(CONFIG_FILE)) {
-    try {
-      const currentContent = fs.readFileSync(CONFIG_FILE, 'utf8');
-      const lines = currentContent.split('\n');
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.toLowerCase().startsWith('# type =')) {
-          const parts = trimmed.split('=');
-          if (parts.length > 1) {
-            typeToWrite = parts.slice(1).join('=').trim();
-            break;
-          }
-        }
-      }
-    } catch (e) {
-      // Nếu có lỗi đọc file, tiếp tục mà không lưu type
-    }
-  }
-
-  if (typeToWrite) {
-    content += `# Type = ${typeToWrite}\n`;
-  }
-
-  content += '[Interface]\n';
-
-  if (config.interface.keyCreationDate) {
-    content += `# Key Creation = ${config.interface.keyCreationDate}\n`;
-  }
-  if (config.interface.keyExpiryDays) {
-    content += `# Key Expiry Days = ${config.interface.keyExpiryDays}\n`;
-  }
-
-  content += `PrivateKey = ${config.interface.privateKey}\n`;
-  content += `Address = ${config.interface.address}\n`;
-  if (config.interface.dns) content += `DNS = ${config.interface.dns}\n`;
-  if (config.interface.listenPort) content += `ListenPort = ${config.interface.listenPort}\n`;
-  if (config.interface.mtu) content += `MTU = ${config.interface.mtu}\n`;
-  if (config.interface.preUp) content += `PreUp = ${config.interface.preUp}\n`;
-  if (config.interface.postUp) content += `PostUp = ${config.interface.postUp}\n`;
-  if (config.interface.preDown) content += `PreDown = ${config.interface.preDown}\n`;
-  if (config.interface.postDown) content += `PostDown = ${config.interface.postDown}\n`;
-
-  config.peers.forEach(peer => {
-    const isDisabled = peer.enabled === false;
-    content += '\n';
-
-    if (peer.name) {
-      content += `# Name = ${peer.name}\n`;
-    }
-
-    content += isDisabled ? '# [Peer]\n' : '[Peer]\n';
-    const prefix = isDisabled ? '# ' : '';
-    content += `${prefix}PublicKey = ${peer.publicKey}\n`;
-    if (peer.presharedKey) content += `${prefix}PresharedKey = ${peer.presharedKey}\n`;
-    if (peer.endpoint) content += `${prefix}Endpoint = ${peer.endpoint}\n`;
-    content += `${prefix}AllowedIPs = ${peer.allowedIPs}\n`;
-    if (peer.persistentKeepalive) content += `${prefix}PersistentKeepalive = ${peer.persistentKeepalive}\n`;
-  });
-
-  return content;
-}
-
-function saveConfigToFile() {
-  if (isKeyExpired()) {
-    const err = new Error('Key has expired. Cannot save configuration.');
-    err.statusCode = 403;
-    throw err;
-  }
-  if (!config.interface.privateKey || !config.interface.address) {
-    const err = new Error('Missing required fields (private key, address)');
-    err.statusCode = 400;
-    throw err;
-  }
-
-  const content = buildConfigFileContent();
-
-  if (!fs.existsSync(CONFIG_DIR)) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  }
-
-  fs.writeFileSync(CONFIG_FILE, content, { mode: 0o600 });
-  return content;
-}
-
-// Choose interface
-app.post('/api/interface', async (req, res) => {
-  try {
-    INTERFACE = req.body.interface || 'wg0';
-    CONFIG_FILE = path.join(CONFIG_DIR, `${INTERFACE}.conf`);
-    loadConfigFromFile();
-    await hydrateRotationKeysFromDb();
-    res.json({ success: true, interface: INTERFACE, config });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Get current interface
-app.get('/api/interface', (req, res) => {
-  res.json({ interface: INTERFACE });
-});
-
 // Get last 50 log lines for a specific interface from /var/log/wg_systemd.log
 app.get('/api/interface-log/:interfaceName', (req, res) => {
   try {
@@ -769,15 +432,16 @@ app.get('/api/interface-log/:interfaceName', (req, res) => {
   }
 });
 
-// Get key status
-app.get('/api/key-status', (req, res) => {
-  const expired = isKeyExpired();
-  const remainingDays = getRemainingDays();
-
+app.get('/api/interfaces/:interface/key-status', (req, res) => {
+  const iface = sanitizeInterfaceName(req.params.interface);
+  if (!iface) {
+    return res.status(400).json({ success: false, error: 'Invalid interface name' });
+  }
+  const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
   res.json({
     success: true,
-    expired,
-    remainingDays,
+    expired: isInterfaceKeyExpired(config),
+    remainingDays: getRemainingDays(config),
     keyCreationDate: config.interface.keyCreationDate,
     keyExpiryDays: config.interface.keyExpiryDays
   });
@@ -976,9 +640,14 @@ app.post('/api/settings', (req, res) => {
   }
 });
 
-// Generate keys
-app.post('/api/generate-keys', async (req, res) => {
+app.post('/api/interfaces/:interface/generate-keys', async (req, res) => {
+  const iface = sanitizeInterfaceName(req.params.interface);
+  if (!iface) {
+    return res.status(400).json({ success: false, error: 'Invalid interface name' });
+  }
   try {
+    const defaults = loadGlobalSettings();
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: defaults.keyExpiryDays });
     const hasExistingKey = config.interface.privateKey && config.interface.privateKey.length > 0;
     const forceGenerate = req.body.force === true;
 
@@ -998,36 +667,19 @@ app.post('/api/generate-keys', async (req, res) => {
     config.interface.privateKey = newPrivateKey;
     config.interface.publicKey = newPublicKey;
     config.interface.keyCreationDate = new Date().toISOString();
-
-    // Use global default if not set
     if (!config.interface.keyExpiryDays) {
-      const currentSettings = loadGlobalSettings();
-      config.interface.keyExpiryDays = currentSettings.keyExpiryDays;
+      config.interface.keyExpiryDays = defaults.keyExpiryDays;
     }
 
-    const content = buildConfigFileContent();
-    if (!fs.existsSync(CONFIG_DIR)) {
-      fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    }
-    fs.writeFileSync(CONFIG_FILE, content, { mode: 0o600 });
+    saveInterfaceConfig(iface, config);
+    wgSyncconfIfRunning(iface);
+    await hydrateRotationKeysFromDb(iface, config);
 
-    try {
-      const status = run('wg', ['show', 'interfaces']);
-      if (status.includes(INTERFACE)) {
-        wgSyncconf(INTERFACE);
-      }
-    } catch (e) {
-      // Interface not running
-    }
-
-    updateSharedConfig();
-
-    // audit log
     try {
       const admin = req.session && req.session.user ? req.session.user : 'unknown';
       if (!hasExistingKey) {
         logAction(admin, 'add_interface', {
-          interface: INTERFACE,
+          interface: iface,
           publicKey: newPublicKey,
           address: config.interface.address,
           listenPort: config.interface.listenPort,
@@ -1042,60 +694,52 @@ app.post('/api/generate-keys', async (req, res) => {
         });
       } else {
         logAction(admin, 'change_key_pair', {
-          interface: INTERFACE,
+          interface: iface,
           old_private_key: oldPrivateKey,
           new_private_key: newPrivateKey
         });
       }
     } catch (e) { }
 
-    await hydrateRotationKeysFromDb();
-
-    const peersSummary = config.peers.map(peer => ({
+    const peersSummary = config.peers.map((peer) => ({
       publicKey: peer.publicKey,
       endpoint: peer.endpoint
     }));
 
     for (const peer of config.peers) {
-      if (peer.endpoint) {
-        const endpointParts = peer.endpoint.split(':');
-        if (endpointParts.length === 2) {
-          const peerIp = endpointParts[0];
-          const peerPort = endpointParts[1];
-          try {
-            await fetch(`https://${peerIp}:${peerPort}/api/update-key`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                oldPublicKey: oldPublicKey,
-                newPublicKey: newPublicKey,
-                rotationKey: peer.rotationKey || ''
-              })
-            });
-          } catch (e) {
-            console.error(`Failed to notify peer ${peerIp}:${peerPort}:`, e.message);
-          }
-        }
+      if (!peer.endpoint) continue;
+      const endpointParts = peer.endpoint.split(':');
+      if (endpointParts.length !== 2) continue;
+      try {
+        await fetch(`https://${endpointParts[0]}:${endpointParts[1]}/api/update-key`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            oldPublicKey,
+            newPublicKey,
+            rotationKey: peer.rotationKey || ''
+          })
+        });
+      } catch (e) {
+        console.error(`Failed to notify peer ${peer.endpoint}:`, e.message);
       }
     }
 
-    res.json({
-      success: true,
-      oldPublicKey: oldPublicKey,
-      newPublicKey: newPublicKey,
-      peers: peersSummary
-    });
+    res.json({ success: true, oldPublicKey, newPublicKey, peers: peersSummary });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-
-// Configure interface
-app.post('/api/configure-interface', (req, res) => {
+app.post('/api/interfaces/:interface/configure', (req, res) => {
+  const iface = sanitizeInterfaceName(req.params.interface);
+  if (!iface) {
+    return res.status(400).json({ success: false, error: 'Invalid interface name' });
+  }
   try {
-    const isNew = !fs.existsSync(CONFIG_FILE);
-    // ✅ Bảo toàn type hiện tại (vì có thể đã load từ file trước đó)
+    const defaults = loadGlobalSettings();
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: defaults.keyExpiryDays });
+    const isNew = !fs.existsSync(path.join(CONFIG_DIR, `${iface}.conf`));
     const existingType = config.interface.type;
 
     config.interface.address = req.body.address || '';
@@ -1107,33 +751,26 @@ app.post('/api/configure-interface', (req, res) => {
     config.interface.postUp = req.body.postUp || '';
     config.interface.preDown = req.body.preDown || '';
     config.interface.postDown = req.body.postDown || '';
-
-    // ✅ Khôi phục type sau khi cập nhật các field khác
-    if (existingType) {
-      config.interface.type = existingType;
-    }
-
+    if (existingType) config.interface.type = existingType;
     if (req.body.keyExpiryDays) {
-      config.interface.keyExpiryDays = parseInt(req.body.keyExpiryDays) || 90;
+      config.interface.keyExpiryDays = parseInt(req.body.keyExpiryDays, 10) || 90;
     } else if (!config.interface.keyExpiryDays) {
-      const currentSettings = loadGlobalSettings();
-      config.interface.keyExpiryDays = currentSettings.keyExpiryDays;
+      config.interface.keyExpiryDays = defaults.keyExpiryDays;
     }
 
     let savedContent = null;
     if (req.body.saveToFile) {
       try {
-        savedContent = saveConfigToFile();
+        savedContent = saveInterfaceConfig(iface, config);
       } catch (error) {
         const status = error.statusCode || 500;
         return res.status(status).json({ success: false, error: error.message });
       }
       if (!isNew) {
-        // Audit log when editing existing interface
         try {
           const admin = req.session && req.session.user ? req.session.user : 'unknown';
           logAction(admin, 'edit_interface', {
-            interface: INTERFACE,
+            interface: iface,
             publicKey: config.interface.publicKey,
             address: config.interface.address,
             listenPort: config.interface.listenPort,
@@ -1150,37 +787,28 @@ app.post('/api/configure-interface', (req, res) => {
       }
     }
 
-    updateSharedConfig();
     res.json({ success: true, config, content: savedContent });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Add peer
-app.post('/api/add-peer', async (req, res) => {
+app.post('/api/interfaces/:interface/peers', async (req, res) => {
+  const iface = sanitizeInterfaceName(req.params.interface);
+  if (!iface) {
+    return res.status(400).json({ success: false, error: 'Invalid interface name' });
+  }
   try {
-    if (isKeyExpired()) {
-      return res.status(403).json({
-        success: false,
-        error: 'Key has expired. Please generate new keys and reconfigure interface first.'
-      });
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    if (isInterfaceKeyExpired(config)) {
+      return res.status(403).json({ success: false, error: 'Key has expired. Please generate new keys and reconfigure interface first.' });
     }
-
     if (!config.interface.privateKey || !config.interface.address) {
-      return res.status(400).json({
-        success: false,
-        error: 'Interface not configured. Please configure interface first.'
-      });
+      return res.status(400).json({ success: false, error: 'Interface not configured. Please configure interface first.' });
     }
-
     const ifaceType = config.interface.type || '';
-
     if (ifaceType === 'Client') {
-      return res.status(400).json({
-        success: false,
-        error: 'Peer type Client can only be added by approving devices.'
-      });
+      return res.status(400).json({ success: false, error: 'Peer type Client can only be added by approving devices.' });
     }
 
     const peer = {
@@ -1193,16 +821,11 @@ app.post('/api/add-peer', async (req, res) => {
       rotationKey: typeof req.body.rotationKey === 'string' ? req.body.rotationKey : '',
       enabled: true
     };
-
-    if (req.body.generatePsk) {
-      peer.presharedKey = run('wg', ['genpsk']).trim();
-    }
+    if (req.body.generatePsk) peer.presharedKey = run('wg', ['genpsk']).trim();
 
     config.peers.push(peer);
-    updateSharedConfig();
-
     try {
-      saveConfigToFile();
+      saveInterfaceConfig(iface, config);
     } catch (saveErr) {
       return res.status(saveErr.statusCode || 500).json({ success: false, error: saveErr.message });
     }
@@ -1217,9 +840,9 @@ app.post('/api/add-peer', async (req, res) => {
             peer.endpoint,
             peer.publicKey,
             peer.allowedIPs,
-            peer.persistentKeepalive ? parseInt(peer.persistentKeepalive) : null,
+            peer.persistentKeepalive ? parseInt(peer.persistentKeepalive, 10) : null,
             peer.rotationKey || null,
-            INTERFACE
+            iface
           ]
         );
         await conn.end();
@@ -1228,183 +851,160 @@ app.post('/api/add-peer', async (req, res) => {
       }
     }
 
-    try {
-      const status = run('wg', ['show', 'interfaces']);
-      if (status.includes(INTERFACE)) {
-        wgSyncconf(INTERFACE);
-      }
-    } catch (e) {
-      console.error('wg syncconf failed:', e.message);
-    }
-
+    wgSyncconfIfRunning(iface);
     try {
       const admin = req.session && req.session.user ? req.session.user : 'unknown';
       logAction(admin, 'create_peer', { peer });
     } catch (e) { }
-    res.json({ success: true, peer, index: config.peers.length - 1 });
+    res.json({ success: true, peer });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Edit peer
-app.put('/api/edit-peer/:index', async (req, res) => {
-  try {
-    if (isKeyExpired()) {
-      return res.status(403).json({
-        success: false,
-        error: 'Key has expired. Please generate new keys first.'
-      });
-    }
-
-    const idx = parseInt(req.params.index);
-    if (idx >= 0 && idx < config.peers.length) {
-      const peer = config.peers[idx];
-      const oldPeer = { ...peer };
-
-      peer.name = req.body.name !== undefined ? req.body.name : peer.name;
-      peer.publicKey = req.body.publicKey !== undefined ? req.body.publicKey : peer.publicKey;
-      peer.endpoint = req.body.endpoint !== undefined ? req.body.endpoint : peer.endpoint;
-      peer.allowedIPs = req.body.allowedIPs !== undefined ? req.body.allowedIPs : peer.allowedIPs;
-      peer.persistentKeepalive = req.body.persistentKeepalive !== undefined ? req.body.persistentKeepalive : peer.persistentKeepalive;
-      if (req.body.rotationKey !== undefined) {
-        peer.rotationKey = typeof req.body.rotationKey === 'string' ? req.body.rotationKey : '';
-      }
-      if (req.body.presharedKey !== undefined) {
-        peer.presharedKey = req.body.presharedKey;
-      }
-
-      updateSharedConfig();
-
-      const ifaceType = config.interface.type || '';
-      if (ifaceType === 'Site' && oldPeer.publicKey) {
-        try {
-          const conn = await mysql.createConnection(dbConfig);
-          await conn.execute(
-            'UPDATE sites SET site_name = ?, site_endpoint = ?, site_pubkey = ?, site_allowedIPs = ?, site_persistent_keepalive = ?, site_rotation_key = ? WHERE site_pubkey = ? AND `interface` = ?',
-            [
-              peer.name,
-              peer.endpoint,
-              peer.publicKey,
-              peer.allowedIPs,
-              peer.persistentKeepalive ? parseInt(peer.persistentKeepalive, 10) : null,
-              peer.rotationKey || null,
-              oldPeer.publicKey,
-              INTERFACE
-            ]
-          );
-          await conn.end();
-        } catch (dbErr) {
-          console.error('Error updating site in DB:', dbErr.message);
-        }
-      }
-
-      try {
-        const admin = req.session && req.session.user ? req.session.user : 'unknown';
-        logAction(admin, 'edit_peer', {
-          oldConfig: oldPeer,
-          newConfig: peer
-        });
-      } catch (e) {
-        console.error('Audit log error:', e.message);
-      }
-
-      res.json({ success: true, peer });
-    } else {
-      res.status(404).json({ success: false, error: 'Peer not found' });
-    }
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+app.put('/api/interfaces/:interface/peers/:publicKey', async (req, res) => {
+  const iface = sanitizeInterfaceName(req.params.interface);
+  const paramKey = decodeURIComponent(req.params.publicKey || '');
+  if (!iface || !paramKey) {
+    return res.status(400).json({ success: false, error: 'Invalid interface or public key' });
   }
-});
-
-// Delete peer
-app.delete('/api/delete-peer/:index', async (req, res) => {
   try {
-    // Check if key is expired
-    if (isKeyExpired()) {
-      return res.status(403).json({
-        success: false,
-        error: 'Key has expired. Please generate new keys first.'
-      });
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    if (isInterfaceKeyExpired(config)) {
+      return res.status(403).json({ success: false, error: 'Key has expired. Please generate new keys first.' });
     }
+    const idx = findPeerIndex(config, paramKey);
+    if (idx < 0) {
+      return res.status(404).json({ success: false, error: 'Peer not found' });
+    }
+
+    const peer = config.peers[idx];
+    const oldPeer = { ...peer };
+    peer.name = req.body.name !== undefined ? req.body.name : peer.name;
+    peer.publicKey = req.body.publicKey !== undefined ? req.body.publicKey : peer.publicKey;
+    peer.endpoint = req.body.endpoint !== undefined ? req.body.endpoint : peer.endpoint;
+    peer.allowedIPs = req.body.allowedIPs !== undefined ? req.body.allowedIPs : peer.allowedIPs;
+    peer.persistentKeepalive = req.body.persistentKeepalive !== undefined ? req.body.persistentKeepalive : peer.persistentKeepalive;
+    if (req.body.rotationKey !== undefined) {
+      peer.rotationKey = typeof req.body.rotationKey === 'string' ? req.body.rotationKey : '';
+    }
+    if (req.body.presharedKey !== undefined) peer.presharedKey = req.body.presharedKey;
 
     const ifaceType = config.interface.type || '';
-
-    if (ifaceType === 'Client') {
-      return res.status(400).json({
-        success: false,
-        error: 'Peer type Client can only be deleted by removing devices.'
-      });
-    }
-
-    const idx = parseInt(req.params.index);
-    if (idx >= 0 && idx < config.peers.length) {
-      const peer = config.peers[idx];
-      const publicKey = peer.publicKey;
-      config.peers.splice(idx, 1);
-      updateSharedConfig();
-
-      if (publicKey) {
-        try {
-          const conn = await mysql.createConnection(dbConfig);
-          await conn.execute('DELETE FROM sites WHERE site_pubkey = ?', [publicKey]);
-          await conn.end();
-        } catch (dbErr) {
-          console.error('Error deleting site from DB:', dbErr.message);
-        }
-      }
-
+    if (ifaceType === 'Site' && oldPeer.publicKey) {
       try {
-        const admin = req.session && req.session.user ? req.session.user : 'unknown';
-        logAction(admin, 'delete_peer', { peer });
-      } catch (e) { }
-      res.json({ success: true });
-    } else {
-      res.status(404).json({ success: false, error: 'Peer not found' });
+        const conn = await mysql.createConnection(dbConfig);
+        await conn.execute(
+          'UPDATE sites SET site_name = ?, site_endpoint = ?, site_pubkey = ?, site_allowedIPs = ?, site_persistent_keepalive = ?, site_rotation_key = ? WHERE site_pubkey = ? AND `interface` = ?',
+          [
+            peer.name,
+            peer.endpoint,
+            peer.publicKey,
+            peer.allowedIPs,
+            peer.persistentKeepalive ? parseInt(peer.persistentKeepalive, 10) : null,
+            peer.rotationKey || null,
+            oldPeer.publicKey,
+            iface
+          ]
+        );
+        await conn.end();
+      } catch (dbErr) {
+        console.error('Error updating site in DB:', dbErr.message);
+      }
     }
+
+    saveInterfaceConfig(iface, config);
+    wgSyncconfIfRunning(iface);
+
+    try {
+      const admin = req.session && req.session.user ? req.session.user : 'unknown';
+      logAction(admin, 'edit_peer', { oldConfig: oldPeer, newConfig: peer });
+    } catch (e) {
+      console.error('Audit log error:', e.message);
+    }
+
+    res.json({ success: true, peer });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Enable peer
-app.post('/api/enable-peer/:index', async (req, res) => {
+app.delete('/api/interfaces/:interface/peers/:publicKey', async (req, res) => {
+  const iface = sanitizeInterfaceName(req.params.interface);
+  const publicKey = decodeURIComponent(req.params.publicKey || '');
+  if (!iface || !publicKey) {
+    return res.status(400).json({ success: false, error: 'Invalid interface or public key' });
+  }
+  try {
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    if (isInterfaceKeyExpired(config)) {
+      return res.status(403).json({ success: false, error: 'Key has expired. Please generate new keys first.' });
+    }
+    if ((config.interface.type || '') === 'Client') {
+      return res.status(400).json({ success: false, error: 'Peer type Client can only be deleted by removing devices.' });
+    }
+    const idx = findPeerIndex(config, publicKey);
+    if (idx < 0) {
+      return res.status(404).json({ success: false, error: 'Peer not found' });
+    }
+    const peer = config.peers[idx];
+    config.peers.splice(idx, 1);
+    saveInterfaceConfig(iface, config);
+
+    try {
+      const conn = await mysql.createConnection(dbConfig);
+      await conn.execute('DELETE FROM sites WHERE site_pubkey = ?', [publicKey]);
+      await conn.end();
+    } catch (dbErr) {
+      console.error('Error deleting site from DB:', dbErr.message);
+    }
+
+    wgSyncconfIfRunning(iface);
+    try {
+      const admin = req.session && req.session.user ? req.session.user : 'unknown';
+      logAction(admin, 'delete_peer', { peer });
+    } catch (e) { }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/interfaces/:interface/peers/:publicKey/enable', async (req, res) => {
+  const iface = sanitizeInterfaceName(req.params.interface);
+  const publicKey = decodeURIComponent(req.params.publicKey || '');
+  if (!iface || !publicKey) {
+    return res.status(400).json({ success: false, error: 'Invalid interface or public key' });
+  }
   let connection;
   try {
-    // Check if key is expired
-    if (isKeyExpired()) {
-      return res.status(403).json({
-        success: false,
-        error: 'Key has expired. Please generate new keys first.'
-      });
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    if (isInterfaceKeyExpired(config)) {
+      return res.status(403).json({ success: false, error: 'Key has expired. Please generate new keys first.' });
     }
-
-    const idx = parseInt(req.params.index);
-    if (idx >= 0 && idx < config.peers.length) {
-      const peer = config.peers[idx];
-      if (config.interface.type && config.interface.type.toLowerCase() === 'client' && peer.publicKey) {
-        connection = await mysql.createConnection(dbConfig);
-        const [rows] = await connection.execute(
-          'SELECT status FROM devices WHERE public_key = ? LIMIT 1',
-          [peer.publicKey]
-        );
-        if (rows.length > 0 && parseInt(rows[0].status, 10) === 0) {
-          return res.status(403).json({ success: false, error: 'Device disabled' });
-        }
+    const idx = findPeerIndex(config, publicKey);
+    if (idx < 0) {
+      return res.status(404).json({ success: false, error: 'Peer not found' });
+    }
+    const peer = config.peers[idx];
+    if (config.interface.type && config.interface.type.toLowerCase() === 'client' && peer.publicKey) {
+      connection = await mysql.createConnection(dbConfig);
+      const [rows] = await connection.execute(
+        'SELECT status FROM devices WHERE public_key = ? LIMIT 1',
+        [peer.publicKey]
+      );
+      if (rows.length > 0 && parseInt(rows[0].status, 10) === 0) {
+        return res.status(403).json({ success: false, error: 'Device disabled' });
       }
-
-      config.peers[idx].enabled = true;
-      updateSharedConfig();
-      // audit log
-      try {
-        const admin = req.session && req.session.user ? req.session.user : 'unknown';
-        logAction(admin, 'enable_peer', { peer: config.peers[idx] });
-      } catch (e) { }
-      res.json({ success: true, peer: config.peers[idx] });
-    } else {
-      res.status(404).json({ success: false, error: 'Peer not found' });
     }
+    config.peers[idx].enabled = true;
+    saveInterfaceConfig(iface, config);
+    wgSyncconfIfRunning(iface);
+    try {
+      const admin = req.session && req.session.user ? req.session.user : 'unknown';
+      logAction(admin, 'enable_peer', { peer: config.peers[idx] });
+    } catch (e) { }
+    res.json({ success: true, peer: config.peers[idx] });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   } finally {
@@ -1414,30 +1014,29 @@ app.post('/api/enable-peer/:index', async (req, res) => {
   }
 });
 
-// Disable peer
-app.post('/api/disable-peer/:index', (req, res) => {
+app.post('/api/interfaces/:interface/peers/:publicKey/disable', (req, res) => {
+  const iface = sanitizeInterfaceName(req.params.interface);
+  const publicKey = decodeURIComponent(req.params.publicKey || '');
+  if (!iface || !publicKey) {
+    return res.status(400).json({ success: false, error: 'Invalid interface or public key' });
+  }
   try {
-    // Check if key is expired
-    if (isKeyExpired()) {
-      return res.status(403).json({
-        success: false,
-        error: 'Key has expired. Please generate new keys first.'
-      });
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    if (isInterfaceKeyExpired(config)) {
+      return res.status(403).json({ success: false, error: 'Key has expired. Please generate new keys first.' });
     }
-
-    const idx = parseInt(req.params.index);
-    if (idx >= 0 && idx < config.peers.length) {
-      config.peers[idx].enabled = false;
-      updateSharedConfig();
-      // audit log
-      try {
-        const admin = req.session && req.session.user ? req.session.user : 'unknown';
-        logAction(admin, 'disable_peer', { peer: config.peers[idx] });
-      } catch (e) { }
-      res.json({ success: true, peer: config.peers[idx] });
-    } else {
-      res.status(404).json({ success: false, error: 'Peer not found' });
+    const idx = findPeerIndex(config, publicKey);
+    if (idx < 0) {
+      return res.status(404).json({ success: false, error: 'Peer not found' });
     }
+    config.peers[idx].enabled = false;
+    saveInterfaceConfig(iface, config);
+    wgSyncconfIfRunning(iface);
+    try {
+      const admin = req.session && req.session.user ? req.session.user : 'unknown';
+      logAction(admin, 'disable_peer', { peer: config.peers[idx] });
+    } catch (e) { }
+    res.json({ success: true, peer: config.peers[idx] });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -1571,36 +1170,50 @@ app.post('/api/update-key', async (req, res) => {
   }
 });
 
-// View configuration (in-memory state)
-app.get('/api/config', (req, res) => {
-  res.json({ success: true, config });
+app.get('/api/interfaces/:interface/config', async (req, res) => {
+  const iface = sanitizeInterfaceName(req.params.interface);
+  if (!iface) {
+    return res.status(400).json({ success: false, error: 'Invalid interface name' });
+  }
+  try {
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    await hydrateRotationKeysFromDb(iface, config);
+    res.json({ success: true, config });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
-// Reload configuration from file on demand
-app.get('/api/reload-config', async (req, res) => {
+app.get('/api/interfaces/:interface/reload', async (req, res) => {
+  const iface = sanitizeInterfaceName(req.params.interface);
+  if (!iface) {
+    return res.status(400).json({ success: false, error: 'Invalid interface name' });
+  }
   try {
-    const loaded = loadConfigFromFile();
-    await hydrateRotationKeysFromDb();
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    await hydrateRotationKeysFromDb(iface, config);
+    const loaded = fs.existsSync(path.join(CONFIG_DIR, `${iface}.conf`));
     res.json({ success: true, config, loaded });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Save configuration
-app.post('/api/save-config', (req, res) => {
+app.post('/api/interfaces/:interface/save', (req, res) => {
+  const iface = sanitizeInterfaceName(req.params.interface);
+  if (!iface) {
+    return res.status(400).json({ success: false, error: 'Invalid interface name' });
+  }
   try {
-    const content = saveConfigToFile();
-    // Restart interface if running to apply new config
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    const content = saveInterfaceConfig(iface, config);
     try {
       const status = run('wg', ['show', 'interfaces']);
-      if (status.includes(INTERFACE)) {
-        run('wg-quick', ['down', INTERFACE]);
-        run('wg-quick', ['up', INTERFACE]);
+      if (status.includes(iface)) {
+        run('wg-quick', ['down', iface]);
+        run('wg-quick', ['up', iface]);
       }
-    } catch (e) {
-      // Interface not running, no need to restart
-    }
+    } catch (e) { /* not running */ }
     res.json({ success: true, content });
   } catch (error) {
     const status = error.statusCode || 500;
@@ -1608,58 +1221,50 @@ app.post('/api/save-config', (req, res) => {
   }
 });
 
-
-// Connect VPN
-app.post('/api/connect', (req, res) => {
+app.post('/api/interfaces/:interface/connect', (req, res) => {
+  const iface = sanitizeInterfaceName(req.params.interface);
+  if (!iface) {
+    return res.status(400).json({ success: false, error: 'Invalid interface name' });
+  }
   try {
-    // audit start interface
     try {
       const admin = req.session && req.session.user ? req.session.user : 'unknown';
-      logAction(admin, 'start_interface', { interface: INTERFACE });
+      logAction(admin, 'start_interface', { interface: iface });
     } catch (e) { }
 
-    // Check if key is expired
-    if (isKeyExpired()) {
-      return res.status(403).json({
-        success: false,
-        error: 'Key has expired. Cannot connect VPN. Please generate new keys first.'
-      });
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    if (isInterfaceKeyExpired(config)) {
+      return res.status(403).json({ success: false, error: 'Key has expired. Cannot connect VPN. Please generate new keys first.' });
     }
 
-    try {
-      const status = run('wg', ['show', 'interfaces']);
-      if (status.includes(INTERFACE)) {
-        return res.status(400).json({
-          success: false,
-          error: 'VPN already connected'
-        });
-      }
-    } catch (e) { }
-
-    if (!fs.existsSync(CONFIG_FILE)) {
-      return res.status(404).json({
-        success: false,
-        error: 'Config file not found. Save configuration first.'
-      });
+    const status = run('wg', ['show', 'interfaces']);
+    if (status.includes(iface)) {
+      return res.status(400).json({ success: false, error: 'VPN already connected' });
     }
 
-    run('wg-quick', ['up', INTERFACE]);
+    const confFile = path.join(CONFIG_DIR, `${iface}.conf`);
+    if (!fs.existsSync(confFile)) {
+      return res.status(404).json({ success: false, error: 'Config file not found. Save configuration first.' });
+    }
+
+    run('wg-quick', ['up', iface]);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Disconnect VPN
-app.post('/api/disconnect', (req, res) => {
+app.post('/api/interfaces/:interface/disconnect', (req, res) => {
+  const iface = sanitizeInterfaceName(req.params.interface);
+  if (!iface) {
+    return res.status(400).json({ success: false, error: 'Invalid interface name' });
+  }
   try {
-    // audit stop interface
     try {
       const admin = req.session && req.session.user ? req.session.user : 'unknown';
-      logAction(admin, 'stop_interface', { interface: INTERFACE });
+      logAction(admin, 'stop_interface', { interface: iface });
     } catch (e) { }
-
-    run('wg-quick', ['down', INTERFACE]);
+    run('wg-quick', ['down', iface]);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -1696,14 +1301,15 @@ app.use('/api', createBackupRoutes({ requireAuth, BACKUP_DIR, CONFIG_DIR, dbConf
 // Get hostname API for frontend navbar
 app.get('/api/hostname', (req, res) => res.json({ success: true, hostname: HOSTNAME }));
 
-// Get VPN status
-app.get('/api/vpn-status', (req, res) => {
+app.get('/api/interfaces/:interface/vpn-status', (req, res) => {
+  const iface = sanitizeInterfaceName(req.params.interface);
+  if (!iface) {
+    return res.status(400).json({ success: false, error: 'Invalid interface name' });
+  }
   try {
     const status = run('wg', ['show', 'interfaces']);
-    const isConnected = status.includes(INTERFACE);
-    res.json({ success: true, connected: isConnected });
+    res.json({ success: true, connected: status.includes(iface) });
   } catch (error) {
-    // If command fails, VPN is likely not connected
     res.json({ success: true, connected: false });
   }
 });
@@ -1878,9 +1484,6 @@ app.use(
 );
 
 app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
-  const originalInterface = INTERFACE;
-  const originalConfigFile = CONFIG_FILE;
-  const originalConfigObj = JSON.parse(JSON.stringify(config));
   let connection;
 
   try {
@@ -1951,19 +1554,16 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
     const allowedIPs = device.allowed_ips;
     const publicKey = device.public_key;
     const targetIface = device.interface || 'wg2';
+    const confFile = path.join(CONFIG_DIR, `${targetIface}.conf`);
 
-    INTERFACE = targetIface;
-    CONFIG_FILE = path.join(CONFIG_DIR, `${targetIface}.conf`);
-
-    if (!fs.existsSync(CONFIG_FILE)) {
+    if (!fs.existsSync(confFile)) {
       throw new Error(`Interface ${targetIface} config not found on server`);
     }
 
-    loadConfigFromFile();
-    await hydrateRotationKeysFromDb();
+    const config = loadInterfaceConfig(targetIface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    await hydrateRotationKeysFromDb(targetIface, config);
 
-    // Find peer and enable it, or create if not exists
-    let peer = config.peers.find(p => p.publicKey === publicKey);
+    let peer = config.peers.find((p) => p.publicKey === publicKey);
     let needSave = false;
 
     if (peer) {
@@ -1989,15 +1589,8 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
     }
 
     if (needSave) {
-      saveConfigToFile();
-      try {
-        const status = run('wg', ['show', 'interfaces']);
-        if (status.includes(targetIface)) {
-          wgSyncconf(targetIface);
-        }
-      } catch (e) {
-        console.error(`Error syncing ${targetIface}:`, e.message);
-      }
+      saveInterfaceConfig(targetIface, config);
+      wgSyncconfIfRunning(targetIface);
 
       // Schedule auto-disable after specified hours via systemd-run
       try {
@@ -2040,10 +1633,6 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   } finally {
     if (connection) await connection.end();
-    INTERFACE = originalInterface;
-    CONFIG_FILE = originalConfigFile;
-    config = originalConfigObj;
-    updateSharedConfig();
   }
 });
 
@@ -2169,8 +1758,6 @@ function afterListen(host) {
   console.log(`HTTPS https://${host}:${PORT}`);
   if (bootOnce) return;
   bootOnce = true;
-  loadConfigFromFile();
-  hydrateRotationKeysFromDb().catch((e) => console.error('hydrateRotationKeysFromDb:', e.message));
   registerWithCentral().catch((e) => console.error('[central register]', e.message));
   const regMs = parseInt(process.env.CENTRAL_REGISTER_INTERVAL_MS || '300000', 10);
   if (regMs > 0) {

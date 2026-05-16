@@ -2,6 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { logAction } = require('../auditLogger');
+const { deletePeerFromConf } = require('../lib/wireguardConfig');
 const { notifyDeviceApproved, notifyDeviceRemoved } = require('../centralSync');
 const { registerExpireHandler, touch: heartbeatTouch, clear: heartbeatClear } = require('../deviceHeartbeat');
 
@@ -56,84 +57,6 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
     return null;
   }
 
-  function deletePeerByPublicKey(interfaceName, publicKey) {
-    if (!interfaceName || !publicKey) {
-      return { updated: false, reason: 'Missing interface or public key' };
-    }
-
-    const configFile = path.join(CONFIG_DIR, `${interfaceName}.conf`);
-    if (!fs.existsSync(configFile)) {
-      return { updated: false, reason: `${interfaceName}.conf not found` };
-    }
-
-    const content = fs.readFileSync(configFile, 'utf8');
-    const lines = content.split('\n');
-
-    const peerStarts = [];
-    for (let i = 0; i < lines.length; i++) {
-      const raw = lines[i].trim();
-      const clean = raw.replace(/^#\s*/, '').trim();
-      if (clean === '[Peer]') {
-        peerStarts.push(i);
-      }
-    }
-    if (peerStarts.length === 0) {
-      return { updated: false, reason: 'No peers in config' };
-    }
-
-    let updated = false;
-    for (let s = peerStarts.length - 1; s >= 0; s--) {
-      const start = peerStarts[s];
-      const end = (s + 1 < peerStarts.length) ? (peerStarts[s + 1] - 1) : (lines.length - 1);
-
-      let matches = false;
-      for (let i = start; i <= end; i++) {
-        const clean = lines[i].replace(/^\s*#\s*/, '').trim();
-        const m = clean.match(/^PublicKey\s*=\s*(.+)\s*$/i);
-        if (m && m[1].trim() === publicKey) {
-          matches = true;
-          break;
-        }
-      }
-      if (!matches) {
-        continue;
-      }
-
-      // Delete all lines from start to end (peer section)
-      let deleteEnd = end;
-      while (deleteEnd < lines.length - 1 && lines[deleteEnd + 1].trim() === '') {
-        deleteEnd++;
-      }
-      lines.splice(start, deleteEnd - start + 1);
-      updated = true;
-      break;
-    }
-
-    if (!updated) {
-      return { updated: false, reason: 'Peer not found in config' };
-    }
-
-    fs.writeFileSync(configFile, lines.join('\n'), { mode: 0o600 });
-
-    try {
-      const { spawnSync } = require('child_process');
-      const interfaces = run('wg', ['show', 'interfaces']).trim();
-      if (interfaces.split(/\s+/).includes(interfaceName)) {
-        const strip = spawnSync('wg-quick', ['strip', interfaceName], { encoding: 'utf8' });
-        if (strip.status === 0) {
-          spawnSync('wg', ['syncconf', interfaceName, '/dev/stdin'], {
-            input: strip.stdout,
-            encoding: 'utf8'
-          });
-        }
-      }
-    } catch (e) {
-      // ignore sync errors; config file already updated
-    }
-
-    return { updated: true };
-  }
-
   async function disconnectDeviceNow(username, deviceName) {
     if (!username || !deviceName) return { disconnected: false, reason: 'Missing username/deviceName' };
     let connection;
@@ -146,7 +69,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       if (rows.length === 0 || !rows[0].public_key || !rows[0].interface) {
         return { disconnected: false, reason: 'Device not found' };
       }
-      const result = deletePeerByPublicKey(rows[0].interface, rows[0].public_key);
+      const result = deletePeerFromConf(rows[0].interface, rows[0].public_key);
       return { disconnected: !!result.updated, reason: result.reason || '' };
     } finally {
       if (connection) {
@@ -264,7 +187,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       // Delete peers from the device interface config for each device
       for (const device of devices) {
         if (device.public_key && device.interface) {
-          deletePeerByPublicKey(device.interface, device.public_key);
+          deletePeerFromConf(device.interface, device.public_key);
         }
       }
 
@@ -438,7 +361,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
       // Delete peer from interface config if public key exists
       if (device.public_key && device.interface) {
-        const result = deletePeerByPublicKey(device.interface, device.public_key);
+        const result = deletePeerFromConf(device.interface, device.public_key);
         if (!result.updated) {
           return res.status(500).json({ success: false, error: `Failed to update config: ${result.reason}` });
         }
@@ -487,7 +410,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       }
       for (const dev of rows) {
         if (dev.public_key && dev.interface) {
-          deletePeerByPublicKey(dev.interface, dev.public_key);
+          deletePeerFromConf(dev.interface, dev.public_key);
         }
         await connection.execute('DELETE FROM devices WHERE id = ?', [dev.id]);
       }
@@ -527,7 +450,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       let removed = 0;
       for (const row of rows) {
         if (!row.site_pubkey || !row.interface) continue;
-        const result = deletePeerByPublicKey(row.interface, row.site_pubkey);
+        const result = deletePeerFromConf(row.interface, row.site_pubkey);
         if (!result.updated) continue;
         await connection.execute('DELETE FROM sites WHERE site_pubkey = ?', [row.site_pubkey]);
         removed += 1;
@@ -890,7 +813,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
         return res.json({ success: true, active: false, disabled: false });
       }
 
-      const result = deletePeerByPublicKey(iface, publicKey);
+      const result = deletePeerFromConf(iface, publicKey);
       if (!result.updated) {
         return res.status(404).json({ success: false, error: result.reason || 'Cannot disable peer' });
       }

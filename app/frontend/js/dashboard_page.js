@@ -8,33 +8,28 @@ function formatBytes(bytes) {
 
 function getInterfaceIdFromUrl() {
     const path = window.location.pathname;
-    const match = path.match(/\/dashboard\/([^\/]+)/);
+    const match = path.match(/^\/dashboard\/([^\/]+)$/);
     return match ? decodeURIComponent(match[1]) : null;
 }
 
-const iface = window.location.pathname.split("/").pop();
-
-async function setInterface(interfaceName) {
-    try {
-        const response = await fetch('/api/interface', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ interface: interfaceName })
-        });
-        const data = await response.json();
-        return data.success;
-    } catch (error) {
-        console.error('Error setting interface:', error);
-        return false;
-    }
-}
+const iface = getInterfaceIdFromUrl() || '';
 
 let currentInterfaceConfig = {};
 
+function apiIface(path) {
+    const interfaceId = getInterfaceIdFromUrl();
+    if (!interfaceId) return null;
+    return `/api/interfaces/${encodeURIComponent(interfaceId)}${path}`;
+}
 
 async function loadInterfaceInfo() {
+    const configUrl = apiIface('/config');
+    if (!configUrl) {
+        document.getElementById('interface-info').innerHTML = '<div class="error">Missing interface in URL</div>';
+        return;
+    }
     try {
-        const response = await fetch('/api/config');
+        const response = await fetch(configUrl);
         const data = await response.json();
 
         if (data.success && data.config) {
@@ -81,7 +76,8 @@ let _allPeersData = [];
 async function loadPeers() {
     try {
         const interfaceId = getInterfaceIdFromUrl();
-        const url = interfaceId ? `/api/dashboard/peers?interface=${encodeURIComponent(interfaceId)}` : '/api/dashboard/peers';
+        if (!interfaceId) return;
+        const url = `/api/dashboard/peers?interface=${encodeURIComponent(interfaceId)}`;
         const response = await fetch(url);
         const data = await response.json();
 
@@ -142,11 +138,11 @@ function renderPeersTable(peers, interfaceId) {
     }
     tbody.innerHTML = peers.map(peer => {
         const disabled = peer.isDisabled === true;
-        const detailLink = interfaceId
-            ? `/dashboard/${encodeURIComponent(interfaceId)}/peer/${peer.id}`
-            : `/dashboard/peer/${peer.id}`;
-        return `<tr data-peer-id="${peer.id}">
-            <td><a href="${detailLink}" style="color:rgba(134,22,24,1);text-decoration:none;font-weight:500;">${peer.name || `Peer ${peer.id}`}</a></td>
+        const keySeg = encodeURIComponent(peer.publicKey || '');
+        const detailLink = `/dashboard/${encodeURIComponent(interfaceId)}/peer/${keySeg}`;
+        const label = peer.name || (peer.publicKey ? peer.publicKey.substring(0, 12) + '…' : 'Peer');
+        return `<tr data-public-key="${keySeg}">
+            <td><a href="${detailLink}" style="color:rgba(134,22,24,1);text-decoration:none;font-weight:500;">${label}</a></td>
             <td style="font-family:monospace;font-size:0.82em;">${peer.allowedIPs || '—'}</td>
             <td style="font-family:monospace;font-size:0.82em;">${peer.endpoint || '—'}</td>
             <td>${peer.timeAgo}</td>
@@ -154,8 +150,8 @@ function renderPeersTable(peers, interfaceId) {
             <td><span class="peer-badge badge-${peer.calculatedStatus}">${peer.calculatedStatus.toUpperCase()}</span></td>
             <td>
                 <div style="display:flex;gap:6px;">
-                    <button class="peer-action-btn" data-action="${disabled ? 'enable' : 'disable'}" data-index="${peer.id}" style="padding:4px 10px;font-size:0.8rem;">${disabled ? 'Enable' : 'Disable'}</button>
-                    <button class="peer-action-btn" data-action="delete" data-index="${peer.id}" style="padding:4px 10px;font-size:0.8rem;background:rgba(220,53,69,.85);">Delete</button>
+                    <button class="peer-action-btn" data-action="${disabled ? 'enable' : 'disable'}" data-public-key="${keySeg}" style="padding:4px 10px;font-size:0.8rem;">${disabled ? 'Enable' : 'Disable'}</button>
+                    <button class="peer-action-btn" data-action="delete" data-public-key="${keySeg}" style="padding:4px 10px;font-size:0.8rem;background:rgba(220,53,69,.85);">Delete</button>
                 </div>
             </td>
         </tr>`;
@@ -167,6 +163,7 @@ function filterPeersTable() {
     const interfaceId = getInterfaceIdFromUrl();
     const filtered = _allPeersData.filter(p =>
         (p.name || '').toLowerCase().includes(q) ||
+        (p.publicKey || '').toLowerCase().includes(q) ||
         (p.allowedIPs || '').toLowerCase().includes(q) ||
         (p.endpoint || '').toLowerCase().includes(q)
     );
@@ -312,16 +309,6 @@ function updateCharts() {
 }
 
 window.onload = async function () {
-    const interfaceId = getInterfaceIdFromUrl();
-    if (interfaceId) {
-        const success = await setInterface(interfaceId);
-        if (!success) {
-            document.getElementById('interface-info').innerHTML =
-                '<div class="error">Error setting interface: ' + interfaceId + '</div>';
-            return;
-        }
-    }
-
     await loadInterfaceInfo();
     checkVPNStatus();
     await loadPeers();
@@ -374,8 +361,10 @@ function initSidebar() {
 
 // VPN status control functions
 async function checkVPNStatus() {
+    const statusUrl = apiIface('/vpn-status');
+    if (!statusUrl) return;
     try {
-        const r = await fetch('/api/vpn-status');
+        const r = await fetch(statusUrl);
         const d = await r.json();
         updateVpnButton(d.connected);
     } catch (e) {
@@ -400,12 +389,15 @@ function updateVpnButton(isConnected) {
 
 async function toggleVpn() {
     const btn = document.getElementById('start-stop-btn');
+    const connectUrl = apiIface('/connect');
+    const disconnectUrl = apiIface('/disconnect');
+    if (!connectUrl || !disconnectUrl) return;
     if (btn.textContent === 'Start') {
-        const r = await fetch('/api/connect', { method: 'POST' });
+        const r = await fetch(connectUrl, { method: 'POST' });
         const d = await r.json();
         if (d.success) checkVPNStatus();
     } else {
-        const r = await fetch('/api/disconnect', { method: 'POST' });
+        const r = await fetch(disconnectUrl, { method: 'POST' });
         const d = await r.json();
         if (d.success) checkVPNStatus();
     }
@@ -435,7 +427,9 @@ function setupInterfaceControls() {
             saveToFile: true
         };
         try {
-            const res = await fetch('/api/configure-interface', {
+            const configureUrl = apiIface('/configure');
+            if (!configureUrl) return;
+            const res = await fetch(configureUrl, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updated)
             });
@@ -458,7 +452,9 @@ function setupInterfaceControls() {
             const output = document.getElementById('edit-if-keys-output');
             if (output) output.innerHTML = 'Generating new key pair...';
             try {
-                const res = await fetch('/api/generate-keys', {
+                const genUrl = apiIface('/generate-keys');
+                if (!genUrl) return;
+                const res = await fetch(genUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ force: true })
@@ -478,7 +474,6 @@ function setupInterfaceControls() {
                             output.innerHTML += `<p>Distributed keys to ${data.peers.length} peers.</p>`;
                         }
                     }
-                    await checkKeyStatus();
                     await loadInterfaceInfo();
                     loadPeers();
                 } else if (output) {
@@ -531,7 +526,9 @@ function setupPeerModals() {
             generatePsk: document.getElementById('new-peer-generatePsk').checked
         };
         try {
-            const res = await fetch('/api/add-peer', {
+            const addUrl = apiIface('/peers');
+            if (!addUrl) return;
+            const res = await fetch(addUrl, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(peer)
             });
@@ -551,24 +548,24 @@ function setupPeerModals() {
         if (!btn) return;
         ev.stopPropagation();
         const action = btn.dataset.action;
-        const peerId = btn.dataset.index;
+        const publicKey = btn.dataset.publicKey;
+        const iface = getInterfaceIdFromUrl();
+        if (!iface || !publicKey) return;
         let url = '';
         let method = 'POST';
         if (action === 'delete') {
             if (!confirm('Delete peer?')) return;
-            url = `/api/delete-peer/${peerId}`;
+            url = `/api/interfaces/${encodeURIComponent(iface)}/peers/${publicKey}`;
             method = 'DELETE';
         } else if (action === 'enable') {
-            url = `/api/enable-peer/${peerId}`;
+            url = `/api/interfaces/${encodeURIComponent(iface)}/peers/${publicKey}/enable`;
         } else if (action === 'disable') {
-            url = `/api/disable-peer/${peerId}`;
+            url = `/api/interfaces/${encodeURIComponent(iface)}/peers/${publicKey}/disable`;
         }
         try {
             const r = await fetch(url, { method });
             const d = await r.json();
             if (d.success) {
-                // persist the change to disk so it survives restarts and is applied to wg
-                await fetch('/api/save-config', { method: 'POST' });
                 await loadPeers();
             } else {
                 alert('Error: ' + d.error);

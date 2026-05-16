@@ -33,35 +33,16 @@ function formatDateTime(dateTimeStr) {
     }
 }
 
-// Get interface ID and peer ID from URL
 function getIdsFromUrl() {
     const path = window.location.pathname;
-    // Try pattern /dashboard/:id/peer/:peer_id first
-    const matchWithInterface = path.match(/\/dashboard\/([^\/]+)\/peer\/(\d+)/);
-    if (matchWithInterface) {
-        return {
-            interfaceId: decodeURIComponent(matchWithInterface[1]),
-            peerId: parseInt(matchWithInterface[2])
-        };
+    const match = path.match(/^\/dashboard\/([^\/]+)\/peer\/(.+)$/);
+    if (!match) {
+        return { interfaceId: null, publicKey: null };
     }
-    // Fallback to pattern /dashboard/peer/:id
-    const match = path.match(/\/dashboard\/peer\/(\d+)/);
-    return match ? { interfaceId: null, peerId: parseInt(match[1]) } : { interfaceId: null, peerId: null };
-}
-
-// Set interface before loading peer details
-async function setInterface(interfaceName) {
-    try {
-        const response = await fetch('/api/interface', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ interface: interfaceName })
-        });
-        return await response.json();
-    } catch (error) {
-        console.error('Error setting interface:', error);
-        return { success: false };
-    }
+    return {
+        interfaceId: decodeURIComponent(match[1]),
+        publicKey: decodeURIComponent(match[2])
+    };
 }
 
 // Khởi tạo khung biểu đồ
@@ -93,21 +74,15 @@ function initChartFrames() {
 }
 
 async function loadPeerPage() {
-    const { interfaceId, peerId } = getIdsFromUrl();
-    if (peerId === null) return;
-
-    if (interfaceId) {
-        await setInterface(interfaceId);
-    }
+    const { interfaceId, publicKey } = getIdsFromUrl();
+    if (!interfaceId || !publicKey) return;
 
     try {
-        const peerUrl = interfaceId 
-            ? `/api/dashboard/peer/${peerId}?interface=${encodeURIComponent(interfaceId)}`
-            : `/api/dashboard/peer/${peerId}`;
+        const peerUrl = `/api/dashboard/${encodeURIComponent(interfaceId)}/peers/${encodeURIComponent(publicKey)}`;
 
         const [peerRes, statsRes] = await Promise.all([
             fetch(peerUrl).then(r => r.json()),
-            fetchPeerStatsData(interfaceId, peerId) // lấy data stats
+            fetchPeerStatsData(interfaceId, publicKey)
         ]);
 
         // Dựng khung và điền dữ liệu 
@@ -192,8 +167,8 @@ function calculateHandshake(timestamp) {
     return new Date(timestamp * 1000).toLocaleString();
 }
 
-async function fetchPeerStatsData(interfaceId, peerId, startTs = null, endTs = null) {
-    let url = `/api/dashboard/${encodeURIComponent(interfaceId)}/peer/${peerId}/stats`;
+async function fetchPeerStatsData(interfaceId, publicKey, startTs = null, endTs = null) {
+    let url = `/api/dashboard/${encodeURIComponent(interfaceId)}/peers/${encodeURIComponent(publicKey)}/stats`;
     const params = [];
     if (startTs) params.push(`start=${startTs}`);
     if (endTs) params.push(`end=${endTs}`);
@@ -203,9 +178,9 @@ async function fetchPeerStatsData(interfaceId, peerId, startTs = null, endTs = n
 }
 
 async function refreshPeerDataOnly() {
-    const { interfaceId, peerId } = getIdsFromUrl();
+    const { interfaceId, publicKey } = getIdsFromUrl();
     try {
-        const url = interfaceId ? `/api/dashboard/peer/${peerId}?interface=${encodeURIComponent(interfaceId)}` : `/api/dashboard/peer/${peerId}`;
+        const url = `/api/dashboard/${encodeURIComponent(interfaceId)}/peers/${encodeURIComponent(publicKey)}`;
         const response = await fetch(url);
         const peer = await response.json();
 
@@ -365,9 +340,9 @@ let peerStatsHistory = [];
 let peerRxSpeedChart, peerTxSpeedChart;
 let currentPeerName = null;
 
-async function fetchPeerStats(interfaceId, peerId, startTs = null, endTs = null) {
+async function fetchPeerStats(interfaceId, publicKey, startTs = null, endTs = null) {
     try {
-        let url = `/api/dashboard/${encodeURIComponent(interfaceId)}/peer/${peerId}/stats`;
+        let url = `/api/dashboard/${encodeURIComponent(interfaceId)}/peers/${encodeURIComponent(publicKey)}/stats`;
         const params = [];
         if (startTs) params.push(`start=${startTs}`);
         if (endTs) params.push(`end=${endTs}`);
@@ -415,19 +390,19 @@ function calculatePeerMetricRate(data, metricKey) {
 
 function setupFilterEventListeners() {
     document.getElementById('applyPeerFilter').onclick = async () => {
-        const { interfaceId, peerId } = getIdsFromUrl();
+        const { interfaceId, publicKey } = getIdsFromUrl();
         const start = document.getElementById('peerStartDate').value;
         const end = document.getElementById('peerEndDate').value;
         const sTs = start ? Math.floor(new Date(start).getTime() / 1000) : null;
         const eTs = end ? Math.floor(new Date(end + 'T23:59:59').getTime() / 1000) : null;
-        peerStatsHistory = await fetchPeerStatsData(interfaceId, peerId, sTs, eTs);
+        peerStatsHistory = await fetchPeerStatsData(interfaceId, publicKey, sTs, eTs);
         updatePeerCharts();
     };
     document.getElementById('clearPeerFilter').onclick = async () => {
         document.getElementById('peerStartDate').value = '';
         document.getElementById('peerEndDate').value = '';
-        const { interfaceId, peerId } = getIdsFromUrl();
-        peerStatsHistory = await fetchPeerStatsData(interfaceId, peerId);
+        const { interfaceId, publicKey } = getIdsFromUrl();
+        peerStatsHistory = await fetchPeerStatsData(interfaceId, publicKey);
         updatePeerCharts();
     };
 }
@@ -459,11 +434,8 @@ function setupEditPeerModal() {
     if (!btn) return;
     btn.addEventListener('click', async () => {
         const ids = getIdsFromUrl();
-        // peerId may be 0 so guard against null/undefined rather than falsy
-        if (ids.peerId === null || ids.peerId === undefined) return;
-        const url = ids.interfaceId ?
-            `/api/dashboard/peer/${ids.peerId}?interface=${encodeURIComponent(ids.interfaceId)}` :
-            `/api/dashboard/peer/${ids.peerId}`;
+        if (!ids.interfaceId || !ids.publicKey) return;
+        const url = `/api/dashboard/${encodeURIComponent(ids.interfaceId)}/peers/${encodeURIComponent(ids.publicKey)}`;
         try {
             const res = await fetch(url);
             const peerData = await res.json();
@@ -488,7 +460,7 @@ function setupEditPeerModal() {
         e.preventDefault();
         if (!currentPeer) return;
         const ids = getIdsFromUrl();
-        const peerId = ids.peerId;
+        if (!ids.interfaceId || !ids.publicKey) return;
         const payload = {
             name: document.getElementById('edit-peer-name').value,
             publicKey: document.getElementById('edit-peer-publicKey').value,
@@ -498,18 +470,20 @@ function setupEditPeerModal() {
             rotationKey: document.getElementById('edit-peer-rotationKey').value
         };
         try {
-            const path = `/api/edit-peer/${peerId}`;
+            const path = `/api/interfaces/${encodeURIComponent(ids.interfaceId)}/peers/${encodeURIComponent(ids.publicKey)}`;
             const res = await fetch(path, {
                 method: 'PUT', headers:{'Content-Type':'application/json'},
                 body: JSON.stringify(payload)
             });
             const data = await res.json();
             if (data.success) {
-                // persist the updated configuration to disk
-                await fetch('/api/save-config', { method: 'POST' });
                 modal.style.display = 'none';
-                // reload entire peer page so name/allowedIPs etc update
-                await loadPeerPage();
+                const newKey = payload.publicKey;
+                if (newKey !== ids.publicKey) {
+                    window.location.href = `/dashboard/${encodeURIComponent(ids.interfaceId)}/peer/${encodeURIComponent(newKey)}`;
+                } else {
+                    await loadPeerPage();
+                }
             } else {
                 alert('Error: '+data.error);
             }
@@ -523,13 +497,13 @@ function initPeerDetail() {
     loadPeerPage();
 
     setInterval(() => {
-        const { interfaceId, peerId } = getIdsFromUrl();
-        if (interfaceId && peerId !== null) {
+        const { interfaceId, publicKey } = getIdsFromUrl();
+        if (interfaceId && publicKey) {
             refreshPeerDataOnly();
             if (currentPeerName) {
                 loadPeerConnections(interfaceId, currentPeerName);
             }
-            fetchPeerStatsData(interfaceId, peerId).then(data => {
+            fetchPeerStatsData(interfaceId, publicKey).then(data => {
                 peerStatsHistory = data;
                 updatePeerCharts();
             });
