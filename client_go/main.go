@@ -202,11 +202,11 @@ func buildServerRow(s Server) fyne.CanvasObject {
 	st.mu.RLock()
 	if isConnected {
 		if st.hbFailed {
-			hbText = "💀 Failed"
+			hbText = "Failed"
 		} else if st.hbCount > 0 {
 			hbText = fmt.Sprintf("💓 #%d  %s", st.hbCount, st.hbLastAt.Format("15:04:05"))
 		} else {
-			hbText = "💓 Starting…"
+			hbText = "Starting…"
 		}
 	}
 	st.mu.RUnlock()
@@ -466,19 +466,17 @@ func doConnect(s Server) {
 				st.mu.Lock()
 				st.hbCount = count
 				st.hbLastAt = lastSent
+				st.hbFailed = false
+				st.hbReason = ""
 				st.mu.Unlock()
 				refreshServerList()
 			},
 			func(reason string) {
-				// Server rejected heartbeat → force disconnect
 				st.mu.Lock()
-				st.connected[k] = false
 				st.hbFailed = true
 				st.hbReason = reason
 				st.mu.Unlock()
-				bringDownVPN()
 				refreshServerList()
-				showError(fmt.Errorf("VPN disconnected by server:\n%s", reason))
 			},
 		)
 

@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const { loginLimiter, clientIp } = require('../security');
+const { isUserExpired } = require('../lib/securityChecks');
 
 
 function createAuthRoutes({ jwt, JWT_SECRET, mysql, dbConfig }) {
@@ -16,7 +17,7 @@ function createAuthRoutes({ jwt, JWT_SECRET, mysql, dbConfig }) {
     try {
       connection = await mysql.createConnection(dbConfig);
       const [users] = await connection.execute(
-        'SELECT id, username, password FROM users WHERE username = ?',
+        'SELECT id, username, password, expire_day FROM users WHERE username = ?',
         [username]
       );
       if (users.length === 0) {
@@ -26,6 +27,10 @@ function createAuthRoutes({ jwt, JWT_SECRET, mysql, dbConfig }) {
       const match = await bcrypt.compare(password, users[0].password);
       if (!match) {
         return res.status(401).json({ success: false, error: 'Invalid credentials' });
+      }
+
+      if (isUserExpired(users[0].expire_day)) {
+        return res.status(403).json({ success: false, error: 'User account expired' });
       }
 
       const token = jwt.sign(

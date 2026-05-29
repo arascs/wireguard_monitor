@@ -492,18 +492,18 @@
             style="max-width:500px; width:100%; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); margin:0;">
             <h3>Add New Peer</h3>
             <form id="add-peer-form">
-                <div style="margin-bottom:10px;"><label>Name:</label><input type="text" id="new-peer-name"
+                <div style="margin-bottom:10px;"><label>Name:</label><input type="text" id="new-peer-name" required
                         style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-                <div style="margin-bottom:10px;"><label>Public Key:</label><input type="text" id="new-peer-publicKey"
+                <div style="margin-bottom:10px;"><label>Public Key:</label><input type="text" id="new-peer-publicKey" required
                         style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-                <div style="margin-bottom:10px;"><label>Endpoint:</label><input type="text" id="new-peer-endpoint"
+                <div style="margin-bottom:10px;"><label>Endpoint:</label><input type="text" id="new-peer-endpoint" required
                         style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"></div>
-                <div style="margin-bottom:10px;"><label>Allowed IPs:</label><input type="text" id="new-peer-allowedIPs"
+                <div style="margin-bottom:10px;"><label>Allowed IPs:</label><input type="text" id="new-peer-allowedIPs" required
                         style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;" value="0.0.0.0/0"></div>
-                <div style="margin-bottom:10px;"><label>Persistent Keepalive:</label><input type="text"
+                <div style="margin-bottom:10px;"><label>Persistent Keepalive (optional):</label><input type="text"
                         id="new-peer-keepalive" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;"
                         value="25"></div>
-                <div style="margin-bottom:10px;"><label>Key Rotation API Key:</label><input type="text" id="new-peer-rotationKey"
+                <div style="margin-bottom:10px;"><label>Key Rotation API Key:</label><input type="text" id="new-peer-rotationKey" required
                         style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;" placeholder="Secret key for automatic key rotation"></div>
                 <div style="margin-bottom:10px;"><label><input type="checkbox" id="new-peer-generatePsk"> Generate
                         PSK</label></div>

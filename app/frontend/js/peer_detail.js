@@ -252,7 +252,7 @@ async function loadPeerConnections(interfaceId, peerName) {
             <h3>Active Sessions</h3>
             <div style="margin-bottom: 10px; font-size: 0.9em; color: #666;">
                 Last updated: ${data.last_updated ? formatDateTime(data.last_updated) : 'N/A'} | 
-                Active connections: ${data.active_connections_count || 0}
+                Active sessions: ${data.active_connections_count || 0}
             </div>
         `;
         

@@ -63,7 +63,7 @@ func configureClientInterface(allowedIPs, serverPubKey, serverEndpoint, serverAl
 	cfg := fmt.Sprintf(`[Interface]
 PrivateKey = %s
 Address = %s
-ListenPort = 51000
+ListenPort = 51002
 
 [Peer]
 PublicKey = %s

@@ -9,7 +9,6 @@ import (
 const heartbeatInterval = 60 * time.Second
 
 // HeartbeatManager manages the per-connection heartbeat goroutine.
-// After connect succeeds, call Start(). On disconnect or 403, it stops automatically.
 type HeartbeatManager struct {
 	mu         sync.Mutex
 	stopCh     chan struct{}
@@ -129,18 +128,14 @@ func (h *HeartbeatManager) sendBeat(stopCh chan struct{}) {
 		log.Printf("[heartbeat] FAILED: %s", reason)
 		h.failed = true
 		h.failReason = reason
-		h.running = false
-		select {
-		case <-stopCh:
-		default:
-			close(stopCh)
-		}
 		if onFailed != nil {
 			go onFailed(reason)
 		}
 		return
 	}
 
+	h.failed = false
+	h.failReason = ""
 	h.count++
 	h.lastSentAt = time.Now()
 	log.Printf("[heartbeat] OK #%d at %s", h.count, h.lastSentAt.Format("15:04:05"))

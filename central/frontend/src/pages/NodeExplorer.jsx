@@ -191,7 +191,6 @@ export default function NodeExplorer() {
   const [region, setRegion] = useState('');
   const [err, setErr] = useState(null);
   const [detailNode, setDetailNode] = useState(null);
-  const [deletingNodeId, setDeletingNodeId] = useState(null);
   const [rotatingNodeId, setRotatingNodeId] = useState(null);
   const [showAddNode, setShowAddNode] = useState(false);
 
@@ -233,27 +232,6 @@ export default function NodeExplorer() {
       return name.includes(ql) || pip.includes(ql);
     });
   }, [rows, q, region]);
-
-  async function handleDeleteNode(node) {
-    if (!node || !node.id) return;
-    const ok = window.confirm(`Delete node "${node.name}"? This also requests peer cleanup on connected sites.`);
-    if (!ok) return;
-    setDeletingNodeId(node.id);
-    try {
-      const r = await apiFetch(`/api/nodes/${encodeURIComponent(node.id)}`, { method: 'DELETE' });
-      const payload = await r.json().catch(() => ({}));
-      if (!r.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${r.status}`);
-      setRows((prev) => prev.filter((it) => it.id !== node.id));
-      if (detailNode && detailNode.id === node.id) setDetailNode(null);
-      if (payload.warnings && payload.warnings.length) {
-        window.alert(`Node removed with warnings:\n${payload.warnings.join('\n')}`);
-      }
-    } catch (e) {
-      window.alert(`Delete failed: ${e.message}`);
-    } finally {
-      setDeletingNodeId(null);
-    }
-  }
 
   async function handleRotateKey(node) {
     if (!node || !node.id) return;
@@ -417,14 +395,6 @@ export default function NodeExplorer() {
                       onClick={() => handleRotateKey(n)}
                     >
                       {rotatingNodeId === n.id ? 'Rotating…' : 'Rotate key'}
-                    </button>
-                    <button
-                      type="button"
-                      className="text-red-700 text-xs font-medium hover:underline disabled:text-zinc-400"
-                      disabled={deletingNodeId === n.id}
-                      onClick={() => handleDeleteNode(n)}
-                    >
-                      {deletingNodeId === n.id ? 'Deleting…' : 'Delete'}
                     </button>
                   </div>
                 </td>

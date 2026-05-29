@@ -516,13 +516,23 @@ function setupPeerModals() {
     });
     document.getElementById('add-peer-form').addEventListener('submit', async (e) => {
         e.preventDefault();
+        const name = document.getElementById('new-peer-name').value.trim();
+        const publicKey = document.getElementById('new-peer-publicKey').value.trim();
+        const endpoint = document.getElementById('new-peer-endpoint').value.trim();
+        const allowedIPs = document.getElementById('new-peer-allowedIPs').value.trim();
+        const rotationKey = document.getElementById('new-peer-rotationKey').value.trim();
+        if (!name) { alert('Name is required'); return; }
+        if (!publicKey) { alert('Public key is required'); return; }
+        if (!endpoint) { alert('Endpoint is required'); return; }
+        if (!allowedIPs) { alert('Allowed IPs is required'); return; }
+        if (!rotationKey) { alert('Key rotation API key is required'); return; }
         const peer = {
-            name: document.getElementById('new-peer-name').value,
-            publicKey: document.getElementById('new-peer-publicKey').value,
-            endpoint: document.getElementById('new-peer-endpoint').value,
-            allowedIPs: document.getElementById('new-peer-allowedIPs').value,
-            persistentKeepalive: document.getElementById('new-peer-keepalive').value,
-            rotationKey: document.getElementById('new-peer-rotationKey').value,
+            name,
+            publicKey,
+            endpoint,
+            allowedIPs,
+            persistentKeepalive: document.getElementById('new-peer-keepalive').value.trim(),
+            rotationKey,
             generatePsk: document.getElementById('new-peer-generatePsk').checked
         };
         try {

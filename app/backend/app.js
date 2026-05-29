@@ -3,9 +3,10 @@
 require('dotenv').config();
 
 const express = require('express');
-const { spawnSync } = require('child_process');
+const { spawnSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const session = require('express-session');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -26,6 +27,13 @@ const { logAction, logSecurityEvent, getLogs, getSecurityEvents } = require('./a
 const { touch: redisHeartbeatTouch } = require('./deviceHeartbeat');
 const { run, tryRun } = require('./runCmd');
 const {
+  parseKernelSemver,
+  cmpKernelSemver,
+  isSshRootLoginEnabled,
+  isFirewallDropOnAllChains,
+  isUserExpired
+} = require('./lib/securityChecks');
+const {
   CONFIG_DIR,
   loadInterfaceConfig,
   saveInterfaceConfig,
@@ -33,7 +41,8 @@ const {
   findPeer,
   findPeerIndex,
   wgSyncconfIfRunning,
-  sanitizeInterfaceName
+  sanitizeInterfaceName,
+  buildClientVpnRouteAllowedIPs
 } = require('./lib/wireguardConfig');
 const {
   corsMiddleware,
@@ -41,7 +50,7 @@ const {
   isAdminIp,
   clientIp
 } = require('./security');
-const { getApiKey, authHeaders, httpsAgent: centralAgent } = require('./centralSync');
+const { getApiKey, authHeaders, httpsAgent: centralAgent, pushDevicesToCentral } = require('./centralSync');
 
 const dbConfig = {
   host: process.env.WG_DB_HOST || 'localhost',
@@ -135,18 +144,34 @@ function wgPubkey(privateKey) {
 
 /** `wg syncconf <iface> <(wg-quick strip <iface>)` without invoking a shell. */
 function wgSyncconf(iface) {
-  const strip = spawnSync('wg-quick', ['strip', iface], { encoding: 'utf8' });
-  if (strip.status !== 0) throw new Error(strip.stderr || `wg-quick strip ${iface} failed`);
-  const sync = spawnSync('wg', ['syncconf', iface, '/dev/stdin'], {
-    input: strip.stdout,
-    encoding: 'utf8'
+  let stripOutput;
+  try {
+    stripOutput = execFileSync('wg-quick', ['strip', iface], { encoding: 'utf8' });
+  } catch (e) {
+    console.error(`[wgSyncconf] wg-quick strip error for ${iface}:`, e.stderr || e.message);
+    throw new Error(e.stderr || e.message || `wg-quick strip ${iface} failed`);
+  }
+
+  console.log("stripOutput: ", stripOutput);
+
+  const tmpFile = path.join('/etc/wireguard/', `.tmp-sync-${iface}.conf`);
+
+  fs.writeFileSync(tmpFile, stripOutput, {
+    mode: 0o600
   });
-  if (sync.status !== 0) throw new Error(sync.stderr || `wg syncconf ${iface} failed`);
+
+  try {
+    execFileSync('wg', ['syncconf', iface, tmpFile], { encoding: 'utf8' });
+  } catch (e) {
+    console.error(`[wgSyncconf] wg syncconf error for ${iface} using file ${tmpFile}:`, e.stderr || e.message);
+    throw new Error(e.stderr || e.message || `wg syncconf ${iface} failed`);
+  } finally {
+    if (fs.existsSync(tmpFile)) {
+      fs.unlinkSync(tmpFile);
+    }
+  }
 }
 
-// Prometheus-style metrics — kept for local debugging only. Restricted to the
-// admin CIDR (loopback always allowed). Metrics are pushed to central via
-// pushMetricsToCentral() at startup.
 app.get('/metrics', (req, res) => {
   if (!isAdminIp(req)) {
     return res.status(403).type('text/plain').send('forbidden');
@@ -255,6 +280,14 @@ async function checkAndDisconnectIfExpired() {
   const defaults = loadGlobalSettings();
   for (const iface of listInterfaces()) {
     const config = loadInterfaceConfig(iface.name, { defaultKeyExpiryDays: defaults.keyExpiryDays });
+    const remaining = getRemainingDays(config);
+    if (remaining !== null && remaining <= 3) {
+      logSecurityEvent({
+        event_name: 'interface_expire',
+        interface: iface.name,
+        remaining_days: remaining
+      });
+    }
     if (!isInterfaceKeyExpired(config)) continue;
     try {
       const status = run('wg', ['show', 'interfaces']);
@@ -471,8 +504,14 @@ app.get('/api/interfaces/client', (req, res) => {
 app.post('/api/add-interface', async (req, res) => {
   try {
     const { name, type, address, listenPort, dns, mtu, preUp, postUp, preDown, postDown } = req.body;
-    if (!name) {
+    if (!String(name || '').trim()) {
       return res.status(400).json({ success: false, error: 'Interface name is required' });
+    }
+    if (!String(address || '').trim()) {
+      return res.status(400).json({ success: false, error: 'Address is required' });
+    }
+    if (!String(listenPort || '').trim()) {
+      return res.status(400).json({ success: false, error: 'Listen port is required' });
     }
     const interfaceType = (type === 'Site' || type === 'Client') ? type : 'Client';
     const confFile = path.join(CONFIG_DIR, `${name}.conf`);
@@ -491,8 +530,8 @@ app.post('/api/add-interface', async (req, res) => {
     const settings = loadGlobalSettings();
     content += `# Key Expiry Days = ${settings.keyExpiryDays}\n`;
     content += `PrivateKey = ${privateKey}\n`;
-    if (address) content += `Address = ${address}\n`;
-    if (listenPort) content += `ListenPort = ${listenPort}\n`;
+    content += `Address = ${String(address).trim()}\n`;
+    content += `ListenPort = ${String(listenPort).trim()}\n`;
     if (dns) content += `DNS = ${dns}\n`;
     if (mtu) content += `MTU = ${mtu}\n`;
     if (preUp) content += `PreUp = ${preUp}\n`;
@@ -711,7 +750,7 @@ app.post('/api/interfaces/:interface/generate-keys', async (req, res) => {
       const endpointParts = peer.endpoint.split(':');
       if (endpointParts.length !== 2) continue;
       try {
-        await fetch(`https://${endpointParts[0]}:${endpointParts[1]}/api/update-key`, {
+        await fetch(`https://${endpointParts[0]}:3000/api/update-key`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -811,14 +850,34 @@ app.post('/api/interfaces/:interface/peers', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Peer type Client can only be added by approving devices.' });
     }
 
+    const peerName = String(req.body.name || '').trim();
+    const peerPublicKey = String(req.body.publicKey || '').trim();
+    const peerEndpoint = String(req.body.endpoint || '').trim();
+    const peerAllowedIPs = String(req.body.allowedIPs || '').trim();
+    const peerRotationKey = typeof req.body.rotationKey === 'string' ? req.body.rotationKey.trim() : '';
+    if (!peerName) {
+      return res.status(400).json({ success: false, error: 'Peer name is required' });
+    }
+    if (!peerPublicKey) {
+      return res.status(400).json({ success: false, error: 'Public key is required' });
+    }
+    if (!peerEndpoint) {
+      return res.status(400).json({ success: false, error: 'Endpoint is required' });
+    }
+    if (!peerAllowedIPs) {
+      return res.status(400).json({ success: false, error: 'Allowed IPs is required' });
+    }
+    if (!peerRotationKey) {
+      return res.status(400).json({ success: false, error: 'Key rotation API key is required' });
+    }
     const peer = {
-      name: req.body.name || '',
-      publicKey: req.body.publicKey || '',
+      name: peerName,
+      publicKey: peerPublicKey,
       presharedKey: req.body.presharedKey || '',
-      endpoint: req.body.endpoint || '',
-      allowedIPs: req.body.allowedIPs || '0.0.0.0/0',
-      persistentKeepalive: req.body.persistentKeepalive || '25',
-      rotationKey: typeof req.body.rotationKey === 'string' ? req.body.rotationKey : '',
+      endpoint: peerEndpoint,
+      allowedIPs: peerAllowedIPs,
+      persistentKeepalive: String(req.body.persistentKeepalive || '').trim() || '25',
+      rotationKey: peerRotationKey,
       enabled: true
     };
     if (req.body.generatePsk) peer.presharedKey = run('wg', ['genpsk']).trim();
@@ -1498,16 +1557,18 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
     const settings = loadGlobalSettings();
     if (securityInfo) {
       const issues = [];
-      if (settings.enforceKernelCheck && securityInfo.kernelVersion !== null) {
-        if (securityInfo.kernelVersion <= settings.minKernelVersion) {
-          issues.push(`Kernel version ${securityInfo.rawKernel || securityInfo.kernelVersion} is too old (must be > ${settings.minKernelVersion})`);
+      if (settings.enforceKernelCheck && securityInfo.rawKernel != null) {
+        const clientVer = parseKernelSemver(securityInfo.rawKernel);
+        const minVer = parseKernelSemver(String(settings.minKernelVersion));
+        if (cmpKernelSemver(clientVer, minVer) <= 0) {
+          issues.push(`Kernel version ${securityInfo.rawKernel} is too old (must be > ${settings.minKernelVersion})`);
         }
       }
-      if (settings.enforceNoRootLogin && securityInfo.sshRootLogin === true) {
-        issues.push('SSH PermitRootLogin is set to yes');
+      if (settings.enforceNoRootLogin && isSshRootLoginEnabled(securityInfo)) {
+        issues.push('SSH root login is permitted');
       }
-      if (settings.enforceFirewall && securityInfo.firewallActive === false) {
-        issues.push('Firewall is inactive or missing');
+      if (settings.enforceFirewall && !isFirewallDropOnAllChains(securityInfo)) {
+        issues.push('Firewall DROP policy not set on all chains (INPUT, OUTPUT, FORWARD)');
       }
 
       if (issues.length > 0) {
@@ -1516,6 +1577,20 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
     }
 
     connection = await mysql.createConnection(dbConfig);
+    const now = Math.floor(Date.now() / 1000);
+
+    const [userRows] = await connection.execute(
+      'SELECT expire_day FROM users WHERE username = ?',
+      [username]
+    );
+    if (userRows.length === 0) {
+      await connection.end();
+      return res.status(403).json({ success: false, error: 'User not found' });
+    }
+    if (isUserExpired(userRows[0].expire_day)) {
+      await connection.end();
+      return res.status(403).json({ success: false, error: 'User account expired' });
+    }
 
     const [devices] = await connection.execute(
       'SELECT allowed_ips, public_key, status, expire_date, `interface` FROM devices WHERE username = ? AND device_name = ?',
@@ -1524,7 +1599,7 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
 
     await connection.execute(
       'UPDATE devices SET last_seen = ? WHERE username = ? AND device_name = ?',
-      [Math.floor(Date.now() / 1000), username, deviceName]
+      [now, username, deviceName]
     );
     await connection.end();
 
@@ -1538,7 +1613,6 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
       return res.status(403).json({ success: false, error: 'Device disabled' });
     }
 
-    const now = Math.floor(Date.now() / 1000);
     const expireDate = deviceRow.expire_date ? parseInt(deviceRow.expire_date, 10) : null;
     if (expireDate !== null && expireDate < now) {
       const c2 = await mysql.createConnection(dbConfig);
@@ -1620,12 +1694,22 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
       console.error('[heartbeat] connect-vpn touch:', e.message);
     }
 
+    const listenPort = String(config.interface.listenPort || '').trim();
+    const serverAllowedIPs = buildClientVpnRouteAllowedIPs(config.interface.address);
+    if (!listenPort) {
+      return res.status(500).json({ success: false, error: `Interface ${targetIface} missing ListenPort` });
+    }
+    if (!serverAllowedIPs) {
+      return res.status(500).json({ success: false, error: `Interface ${targetIface} missing Address` });
+    }
+
+    const vpnPublicHost = process.env.VPN_PUBLIC_ENDPOINT_HOST || process.env.TLS_PUBLIC_BIND || '172.16.0.128';
     res.json({
       success: true,
       allowedIPs,
       serverPublicKey: config.interface.publicKey,
-      serverEndpoint: '172.16.0.128:51001',
-      serverAllowedIPs: '10.0.0.1/32, 192.168.220.0/24'
+      serverEndpoint: `${vpnPublicHost}:${listenPort}`,
+      serverAllowedIPs
     });
 
   } catch (error) {
@@ -1647,7 +1731,7 @@ if (process.getuid && process.getuid() !== 0) {
 // Periodic check for expired keys (every hour)
 setInterval(() => {
   checkAndDisconnectIfExpired();
-}, 60 * 60 * 1000);
+}, 60 * 1000);
 
 function normalizeCentralUrl(u) {
   if (!u) return '';
@@ -1758,17 +1842,26 @@ function afterListen(host) {
   console.log(`HTTPS https://${host}:${PORT}`);
   if (bootOnce) return;
   bootOnce = true;
-  registerWithCentral().catch((e) => console.error('[central register]', e.message));
+  const onRegisterFail = (e) => console.error('[central register]', e.message);
+  registerWithCentral()
+    .then(() => pushDevicesToCentral().catch((e) => console.error('[centralSync] pushDevices', e.message)))
+    .catch(onRegisterFail);
   const regMs = parseInt(process.env.CENTRAL_REGISTER_INTERVAL_MS || '300000', 10);
   if (regMs > 0) {
     setInterval(() => {
-      registerWithCentral().catch((e) => console.error('[central register]', e.message));
+      registerWithCentral().catch(onRegisterFail);
     }, regMs);
   }
   const pushMs = parseInt(process.env.METRICS_PUSH_INTERVAL_MS || '30000', 10);
   if (pushMs > 0) {
     setInterval(() => { pushMetricsToCentral(); }, pushMs);
     pushMetricsToCentral();
+  }
+  const deviceSyncMs = parseInt(process.env.DEVICE_SYNC_INTERVAL_MS || '3600000', 10);
+  if (deviceSyncMs > 0) {
+    setInterval(() => {
+      pushDevicesToCentral().catch((e) => console.error('[centralSync] pushDevices', e.message));
+    }, deviceSyncMs);
   }
 }
 

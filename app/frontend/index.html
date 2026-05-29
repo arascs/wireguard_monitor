@@ -303,8 +303,8 @@
             container.querySelectorAll('.btn-terminate').forEach(btn => {
                 btn.addEventListener('click', async () => {
                     const iface = btn.dataset.iface;
-                    const idx = btn.dataset.idx;
-                    if (!confirm(`Terminate peer #${idx} on interface ${iface}?`)) return;
+                    const pubkey = btn.dataset.pubkey;
+                    if (!confirm(`Terminate peer ${pubkey.substring(0, 12)}... on interface ${iface}?`)) return;
                     btn.disabled = true;
                     btn.textContent = '…';
                     try {

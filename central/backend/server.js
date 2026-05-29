@@ -19,10 +19,7 @@ const {
   fetchLogs,
   insertOperationLog,
   fetchOperationLogs,
-  upsertDeviceRow,
-  deleteDeviceRow,
-  deleteAllDeviceRowsForMachine,
-  fetchDistinctBaseUrlsForMachine,
+  syncDevicesForNode,
   fetchDevicesAggregated,
   insertWireguardLogs,
   countAlertsLast24h
@@ -694,53 +691,6 @@ app.get('/api/dashboard', admin, async (req, res) => {
   });
 });
 
-app.delete('/api/nodes/:id', admin, async (req, res) => {
-  const nodeId = String(req.params.id || '').trim();
-  const idx = nodes.findIndex((n) => n.id === nodeId);
-  if (idx < 0) return res.status(404).json({ ok: false, error: 'Node not found' });
-
-  const targetNode = nodes[idx];
-  const snap = latestByNode.get(nodeId);
-  const siteEndpoints = Array.isArray(snap && snap.sites) ? snap.sites : [];
-  const warnings = [];
-
-  // Site cleanup callback: still uses legacy CENTRAL_SHARED_SECRET for now.
-  const SHARED_SECRET = process.env.CENTRAL_SHARED_SECRET || '';
-  if (SHARED_SECRET) {
-    const peerBases = new Set();
-    for (const endpoint of siteEndpoints) {
-      const host = ipOnly(endpoint);
-      if (!host) continue;
-      const peerNode = nodes.find((n) => ipOnly(n.publicIp) === host);
-      if (!peerNode || !peerNode.baseUrl || peerNode.id === nodeId) continue;
-      peerBases.add(normalizeBaseUrl(peerNode.baseUrl));
-    }
-    for (const base of peerBases) {
-      try {
-        const r = await fetch(`${base}/api/sites/by-endpoint`, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json', 'X-Register-Key': SHARED_SECRET },
-          body: JSON.stringify({ endpoint: targetNode.publicIp }),
-          agent: base.startsWith('https') ? httpsAgent : undefined
-        });
-        if (!r.ok) {
-          const txt = await r.text();
-          warnings.push(`${base}: ${r.status} ${txt.slice(0, 120)}`);
-        }
-      } catch (e) {
-        warnings.push(`${base}: ${e.message}`);
-      }
-    }
-  }
-
-  nodes.splice(idx, 1);
-  saveNodes(nodes);
-  latestByNode.delete(nodeId);
-  lastHealthOkByNode.delete(nodeId);
-  prevMetrics.delete(nodeId);
-  res.json({ ok: true, warnings });
-});
-
 app.get('/api/alerts', admin, async (req, res) => {
   try {
     const out = await fetchLogs(req.query);
@@ -761,48 +711,32 @@ app.get('/api/operation-logs', admin, async (req, res) => {
   }
 });
 
-// Device registry sync (still uses legacy CENTRAL_SHARED_SECRET for now).
-app.post('/api/devices/sync', async (req, res) => {
-  const SHARED_SECRET = process.env.CENTRAL_SHARED_SECRET || '';
-  const key = (req.header('x-register-key') || '').trim();
-  if (!SHARED_SECRET || key !== SHARED_SECRET) {
-    return res.status(401).json({ ok: false, error: 'unauthorized' });
+app.post('/api/devices/sync-batch', apiKeyAuth, async (req, res) => {
+  const node = req.nodeKey;
+  if (!node.id) {
+    return res.status(409).json({ ok: false, error: 'node not registered' });
   }
-  const b = req.body || {};
-  const required = ['machine_id', 'device_name', 'public_key', 'interface', 'node_id', 'node_name', 'base_url'];
-  for (const k of required) {
-    if (b[k] === undefined || b[k] === null || String(b[k]).trim() === '') {
-      return res.status(400).json({ ok: false, error: `missing ${k}` });
-    }
-  }
-  try {
-    await upsertDeviceRow({
-      machine_id: String(b.machine_id).trim(),
-      device_name: String(b.device_name).trim(),
-      public_key: String(b.public_key).trim(),
-      interface: String(b.interface).trim(),
-      node_id: String(b.node_id).trim(),
-      node_name: String(b.node_name).trim(),
-      base_url: normalizeBaseUrl(String(b.base_url).trim())
-    });
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
 
-app.post('/api/devices/unsync', async (req, res) => {
-  const SHARED_SECRET = process.env.CENTRAL_SHARED_SECRET || '';
-  const key = (req.header('x-register-key') || '').trim();
-  if (!SHARED_SECRET || key !== SHARED_SECRET) {
-    return res.status(401).json({ ok: false, error: 'unauthorized' });
+  const b = req.body || {};
+  const node_id = String(b.node_id || '').trim();
+  if (!node_id) return res.status(400).json({ ok: false, error: 'missing node_id' });
+  if (node_id !== node.id) {
+    return res.status(400).json({ ok: false, error: 'node_id mismatch' });
   }
-  const machine_id = req.body && req.body.machine_id != null ? String(req.body.machine_id).trim() : '';
-  const node_id = req.body && req.body.node_id != null ? String(req.body.node_id).trim() : '';
-  if (!machine_id || !node_id) return res.status(400).json({ ok: false, error: 'machine_id and node_id required' });
+
+  const node_name = String(b.node_name || node.name || '').trim();
+  const base_url = normalizeBaseUrl(String(b.base_url || node.baseUrl || '').trim());
+  if (!base_url) return res.status(400).json({ ok: false, error: 'missing base_url' });
+
+  const devices = Array.isArray(b.devices) ? b.devices : [];
   try {
-    await deleteDeviceRow(machine_id, node_id);
-    res.json({ ok: true });
+    const synced = await syncDevicesForNode(
+      { node_id, node_name, base_url },
+      devices
+    );
+    node.lastSeenAt = new Date().toISOString();
+    saveNodes(nodes);
+    res.json({ ok: true, synced });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
@@ -816,45 +750,6 @@ app.get('/api/registry/devices', admin, async (req, res) => {
     if (e.code === 'CH_DISABLED') return res.status(503).json({ ok: false, error: e.message });
     res.status(503).json({ ok: false, error: e.message || 'ClickHouse unavailable.' });
   }
-});
-
-app.delete('/api/registry/devices/:machineId', admin, async (req, res) => {
-  const SHARED_SECRET = process.env.CENTRAL_SHARED_SECRET || '';
-  const machineId = decodeURIComponent(String(req.params.machineId || '').trim());
-  if (!machineId) return res.status(400).json({ ok: false, error: 'machineId required' });
-  let bases = [];
-  try {
-    bases = await fetchDistinctBaseUrlsForMachine(machineId);
-  } catch (e) {
-    return res.status(503).json({ ok: false, error: e.message });
-  }
-  const warnings = [];
-  if (SHARED_SECRET) {
-    for (const base of bases) {
-      const u = normalizeBaseUrl(base);
-      if (!u) continue;
-      const p = `/api/devices/by-machine/${encodeURIComponent(machineId)}`;
-      try {
-        const r = await fetch(`${u}${p}`, {
-          method: 'DELETE',
-          headers: { 'X-Register-Key': SHARED_SECRET },
-          agent: u.startsWith('https') ? httpsAgent : undefined
-        });
-        if (!r.ok) {
-          const txt = await r.text();
-          warnings.push(`${u}: ${r.status} ${txt.slice(0, 120)}`);
-        }
-      } catch (e) {
-        warnings.push(`${u}: ${e.message}`);
-      }
-    }
-  }
-  try {
-    await deleteAllDeviceRowsForMachine(machineId);
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: e.message });
-  }
-  res.json({ ok: true, warnings });
 });
 
 // ── static UI ────────────────────────────────────────────────────────

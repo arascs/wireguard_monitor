@@ -166,45 +166,41 @@ async function upsertDeviceRow(row) {
   });
 }
 
-async function deleteDeviceRow(machineId, nodeId) {
+async function deleteDeviceRowsForNodeExcept(nodeId, keepMachineIds) {
   const ch = getClient();
   if (!ch) throw new Error('ClickHouse unavailable');
+  const nid = String(nodeId);
+  if (!keepMachineIds.length) {
+    await ch.query({
+      query: `ALTER TABLE ${DEVICES_TABLE} DELETE WHERE node_id = {n:String}`,
+      query_params: { n: nid }
+    });
+    return;
+  }
   await ch.query({
-    query: `ALTER TABLE ${DEVICES_TABLE} DELETE WHERE machine_id = {m:String} AND node_id = {n:String}`,
-    query_params: { m: String(machineId), n: String(nodeId) }
+    query: `ALTER TABLE ${DEVICES_TABLE} DELETE WHERE node_id = {n:String} AND machine_id NOT IN ({ids:Array(String)})`,
+    query_params: { n: nid, ids: keepMachineIds.map(String) }
   });
 }
 
-async function deleteAllDeviceRowsForMachine(machineId) {
-  const ch = getClient();
-  if (!ch) throw new Error('ClickHouse unavailable');
-  await ch.query({
-    query: `ALTER TABLE ${DEVICES_TABLE} DELETE WHERE machine_id = {m:String}`,
-    query_params: { m: String(machineId) }
-  });
-}
-
-async function fetchDistinctBaseUrlsForMachine(machineId) {
-  const ch = getClient();
-  if (!ch) return [];
-  const rs = await ch.query({
-    query: `SELECT DISTINCT base_url FROM ${DEVICES_TABLE} WHERE machine_id = {m:String} AND base_url != ''`,
-    query_params: { m: String(machineId) },
-    format: 'JSONEachRow'
-  });
-  const text = await rs.text();
-  if (!text.trim()) return [];
-  return text
-    .trim()
-    .split('\n')
-    .map((l) => {
-      try {
-        return JSON.parse(l).base_url;
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean);
+async function syncDevicesForNode(nodeMeta, devices) {
+  const machineIds = [];
+  for (const d of devices) {
+    const machine_id = String(d.machine_id || '').trim();
+    if (!machine_id) continue;
+    machineIds.push(machine_id);
+    await upsertDeviceRow({
+      machine_id,
+      device_name: String(d.device_name || '').trim(),
+      public_key: String(d.public_key || '').trim(),
+      interface: String(d.interface || '').trim(),
+      node_id: String(nodeMeta.node_id),
+      node_name: String(nodeMeta.node_name || ''),
+      base_url: String(nodeMeta.base_url || '')
+    });
+  }
+  await deleteDeviceRowsForNodeExcept(nodeMeta.node_id, machineIds);
+  return machineIds.length;
 }
 
 async function fetchDevicesAggregated() {
@@ -391,9 +387,7 @@ module.exports = {
   insertOperationLog,
   fetchOperationLogs,
   upsertDeviceRow,
-  deleteDeviceRow,
-  deleteAllDeviceRowsForMachine,
-  fetchDistinctBaseUrlsForMachine,
+  syncDevicesForNode,
   fetchDevicesAggregated,
   insertWireguardLogs,
   countAlertsLast24h,

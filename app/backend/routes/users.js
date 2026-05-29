@@ -3,8 +3,13 @@ const fs = require('fs');
 const path = require('path');
 const { logAction } = require('../auditLogger');
 const { deletePeerFromConf } = require('../lib/wireguardConfig');
-const { notifyDeviceApproved, notifyDeviceRemoved } = require('../centralSync');
 const { registerExpireHandler, touch: heartbeatTouch, clear: heartbeatClear } = require('../deviceHeartbeat');
+const {
+  parseKernelSemver,
+  cmpKernelSemver,
+  isSshRootLoginEnabled,
+  isFirewallDropOnAllChains
+} = require('../lib/securityChecks');
 
 function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authenticateToken }) {
   const router = express.Router();
@@ -314,13 +319,6 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
         fs.writeFileSync(CONFIG_FILE, configContent);
       }
 
-      notifyDeviceApproved({
-        machine_id: machineId,
-        device_name: deviceName,
-        public_key: publicKey,
-        interface: selectedInterface
-      });
-
       res.json({
         success: true,
         message: 'Device approved successfully'
@@ -359,11 +357,15 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       const device = devices[0];
       const machineId = device.machine_id;
 
-      // Delete peer from interface config if public key exists
+      // Delete peer from interface config
       if (device.public_key && device.interface) {
         const result = deletePeerFromConf(device.interface, device.public_key);
         if (!result.updated) {
-          return res.status(500).json({ success: false, error: `Failed to update config: ${result.reason}` });
+          if (result.reason === 'Peer not found in config' || result.reason === 'No peers in config') {
+            console.log(`[INFO] Ignored config error when deleting device ${id}: ${result.reason}`);
+          } else {
+            return res.status(500).json({ success: false, error: `Failed to update config: ${result.reason}` });
+          }
         }
       }
 
@@ -372,10 +374,6 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
         'DELETE FROM devices WHERE id = ?',
         [id]
       );
-
-      if (machineId) {
-        notifyDeviceRemoved(machineId);
-      }
 
       res.json({ success: true, message: 'Device deleted successfully' });
     } catch (error) {
@@ -612,16 +610,18 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       if (!securityInfo) {
         issues.push('Missing securityInfo');
       } else {
-        if (settings.enforceKernelCheck && securityInfo.kernelVersion !== null) {
-          if (securityInfo.kernelVersion <= settings.minKernelVersion) {
-            issues.push('Kernel version too old');
+        if (settings.enforceKernelCheck && securityInfo.rawKernel != null) {
+          const clientVer = parseKernelSemver(securityInfo.rawKernel);
+          const minVer = parseKernelSemver(String(settings.minKernelVersion));
+          if (cmpKernelSemver(clientVer, minVer) <= 0) {
+            issues.push(`Kernel version ${securityInfo.rawKernel} is too old (must be > ${settings.minKernelVersion})`);
           }
         }
-        if (settings.enforceNoRootLogin && securityInfo.sshRootLogin === true) {
-          issues.push('SSH PermitRootLogin is yes');
+        if (settings.enforceNoRootLogin && isSshRootLoginEnabled(securityInfo)) {
+          issues.push('SSH root login is permitted');
         }
-        if (settings.enforceFirewall && securityInfo.firewallActive === false) {
-          issues.push('Firewall inactive');
+        if (settings.enforceFirewall && !isFirewallDropOnAllChains(securityInfo)) {
+          issues.push('Firewall DROP policy not set on all chains (INPUT, OUTPUT, FORWARD)');
         }
       }
 

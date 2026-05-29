@@ -1,9 +1,17 @@
 const fetch = require('node-fetch');
 const https = require('https');
 const crypto = require('crypto');
+const mysql = require('mysql2/promise');
 const { HOSTNAME } = require('./config');
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+
+const dbConfig = {
+  host: process.env.WG_DB_HOST || 'localhost',
+  user: process.env.WG_DB_USER || 'root',
+  password: process.env.WG_DB_PASSWORD || 'root',
+  database: process.env.WG_DB_NAME || 'wg_monitor'
+};
 
 function normalizeBaseUrl(u) {
   const trimmed = String(u || '').trim().replace(/\/+$/, '');
@@ -57,42 +65,51 @@ async function postJson(url, body) {
   });
 }
 
-async function notifyDeviceApproved(row) {
+async function pushDevicesToCentral() {
   const base = getCentralBase();
   if (!base || !getApiKey()) return;
+
   const ctx = getNodeContext();
+  let connection;
   try {
-    await postJson(`${base}/api/devices/sync`, {
-      machine_id: row.machine_id,
-      device_name: row.device_name,
-      public_key: row.public_key,
-      interface: row.interface,
+    connection = await mysql.createConnection(dbConfig);
+    const [rows] = await connection.execute(
+      `SELECT device_name, public_key, \`interface\`, machine_id
+       FROM devices
+       WHERE machine_id IS NOT NULL AND TRIM(machine_id) != ''`
+    );
+    const devices = rows
+      .map((r) => ({
+        machine_id: String(r.machine_id || '').trim(),
+        device_name: String(r.device_name || '').trim(),
+        public_key: String(r.public_key || '').trim(),
+        interface: String(r.interface || '').trim()
+      }))
+      .filter((d) => d.machine_id);
+
+    const r = await postJson(`${base}/api/devices/sync-batch`, {
       node_id: ctx.nodeId,
       node_name: ctx.nodeName,
-      base_url: ctx.baseUrl
+      base_url: ctx.baseUrl,
+      devices
     });
+    if (!r.ok) {
+      const txt = await r.text();
+      console.error('[centralSync] pushDevices', r.status, txt.slice(0, 200));
+    }
   } catch (e) {
-    console.error('[centralSync] notifyDeviceApproved', e.message);
-  }
-}
-
-async function notifyDeviceRemoved(machineId) {
-  const base = getCentralBase();
-  if (!base || !getApiKey() || !machineId) return;
-  const ctx = getNodeContext();
-  try {
-    await postJson(`${base}/api/devices/unsync`, {
-      machine_id: machineId,
-      node_id: ctx.nodeId
-    });
-  } catch (e) {
-    console.error('[centralSync] notifyDeviceRemoved', e.message);
+    console.error('[centralSync] pushDevices', e.message);
+  } finally {
+    if (connection) {
+      try {
+        await connection.end();
+      } catch (_) { /* ignore */ }
+    }
   }
 }
 
 module.exports = {
-  notifyDeviceApproved,
-  notifyDeviceRemoved,
+  pushDevicesToCentral,
   getNodeContext,
   getCentralBase,
   getApiKey,

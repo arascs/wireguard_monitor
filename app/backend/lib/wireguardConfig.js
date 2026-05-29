@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { spawnSync } = require('child_process');
 const { run } = require('../runCmd');
 
@@ -279,13 +280,26 @@ function wgSyncconfIfRunning(ifaceName) {
     const status = run('wg', ['show', 'interfaces']);
     if (!status.includes(ifaceName)) return;
     const strip = spawnSync('wg-quick', ['strip', ifaceName], { encoding: 'utf8' });
-    if (strip.status === 0) {
-      spawnSync('wg', ['syncconf', ifaceName, '/dev/stdin'], {
-        input: strip.stdout,
-        encoding: 'utf8'
-      });
+    
+    if (strip.status === 0 && strip.stdout) {
+      const tmpFile = path.join(CONFIG_DIR, `.tmp-sync-${ifaceName}.conf`);
+      try {
+        fs.writeFileSync(tmpFile, strip.stdout, { mode: 0o600 });
+        const syncResult = spawnSync('wg', ['syncconf', ifaceName, tmpFile], { encoding: 'utf8' });
+        if (syncResult.status !== 0) {
+          console.error(`[wgSyncconf] wg syncconf error for ${ifaceName}:`, syncResult.stderr || 'Unknown error');
+        }
+      } finally {
+        if (fs.existsSync(tmpFile)) {
+          fs.unlinkSync(tmpFile);
+        }
+      }
+    } else {
+      console.error(`[wgSyncconf] wg-quick strip failed for ${ifaceName}:`, strip.stderr || 'unknown error');
     }
-  } catch (e) { /* ignore */ }
+  } catch (e) {
+    console.error(`[wgSyncconf] error syncing ${ifaceName}:`, e.message);
+  }
 }
 
 function disablePeerInConf(ifaceName, publicKey) {
@@ -355,6 +369,18 @@ function deletePeerFromConf(ifaceName, publicKey) {
   return { updated: false, reason: 'Peer not found in config' };
 }
 
+function interfaceAddressAsHost32(addressField) {
+  const first = String(addressField || '').split(',')[0].trim();
+  if (!first) return null;
+  const host = first.includes('/') ? first.split('/')[0].trim() : first;
+  return host ? `${host}/32` : null;
+}
+
+function buildClientVpnRouteAllowedIPs(addressField, extraCidr = '192.168.220.0/24') {
+  const host32 = interfaceAddressAsHost32(addressField);
+  return host32 ? `${host32}, ${extraCidr}` : null;
+}
+
 module.exports = {
   CONFIG_DIR,
   LOG_BASE,
@@ -372,5 +398,7 @@ module.exports = {
   findPeerIndex,
   disablePeerInConf,
   deletePeerFromConf,
-  wgSyncconfIfRunning
+  wgSyncconfIfRunning,
+  interfaceAddressAsHost32,
+  buildClientVpnRouteAllowedIPs
 };

@@ -91,14 +91,21 @@ function hideAddInterfaceModal() {
 async function submitAddInterfaceForm(e) {
     e.preventDefault();
     const name = document.getElementById('new-interface-name').value.trim();
+    const address = document.getElementById('new-interface-address').value.trim();
+    const listenPort = document.getElementById('new-interface-listenPort').value.trim();
     if (!name) {
         alert('Interface name is required');
         return;
     }
+    if (!address) {
+        alert('Address is required');
+        return;
+    }
+    if (!listenPort) {
+        alert('Listen port is required');
+        return;
+    }
     const type = document.getElementById('new-interface-type').value;
-    // optional fields
-    const address = document.getElementById('new-interface-address').value.trim();
-    const listenPort = document.getElementById('new-interface-listenPort').value.trim();
     const dns = document.getElementById('new-interface-dns').value.trim();
     const mtu = document.getElementById('new-interface-mtu').value.trim();
     const preUp = document.getElementById('new-interface-preUp').value.trim();
@@ -107,9 +114,7 @@ async function submitAddInterfaceForm(e) {
     const postDown = document.getElementById('new-interface-postDown').value.trim();
 
     try {
-        const payload = { name, type };
-        if (address) payload.address = address;
-        if (listenPort) payload.listenPort = listenPort;
+        const payload = { name, type, address, listenPort };
         if (dns) payload.dns = dns;
         if (mtu) payload.mtu = mtu;
         if (preUp) payload.preUp = preUp;
