@@ -171,29 +171,42 @@
 
                 <hr style="border:0; border-top:1px solid #eee; margin:30px 0;">
                 <h2>Security Policies</h2>
+                <p class="form-text">Clients send check results; server applies policy by device OS (linux / windows).</p>
 
                 <div class="form-group">
                     <label>
-                        <input type="checkbox" id="enforceKernelCheck"> Protect Minimum Kernel Required
+                        <input type="checkbox" id="enforceKernelCheck"> Enforce minimum OS version
                     </label>
-                    <div style="margin-top: 10px; padding-left: 24px;">
-                        <label for="minKernelVersion" style="display:inline-block; width: auto; font-weight: normal;">Minimum Major Version:</label>
-                        <input type="number" id="minKernelVersion" min="1" max="99" style="width: 80px; display: inline-block;">
+                    <div style="margin-top: 10px; padding-left: 24px; display: flex; gap: 24px; flex-wrap: wrap;">
+                        <label for="minKernelVersionLinux" style="font-weight: normal;">Linux min major:</label>
+                        <input type="number" id="minKernelVersionLinux" min="1" max="99" style="width: 80px;">
+                        <label for="minKernelVersionWindows" style="font-weight: normal;">Windows min major:</label>
+                        <input type="number" id="minKernelVersionWindows" min="1" max="99" style="width: 80px;">
                     </div>
                 </div>
 
                 <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="enforceNoRootLogin"> Enforce SSH PermitRootLogin Disabled
-                    </label>
-                    <span class="form-text" style="padding-left: 24px;">Check if client device allows root SSH login (must not be 'yes').</span>
+                    <label>Enforce firewall enabled</label>
+                    <div style="padding-left: 24px; margin-top: 8px;">
+                        <label style="font-weight: normal; margin-right: 16px;">
+                            <input type="checkbox" id="enforceFirewallLinux"> Linux
+                        </label>
+                        <label style="font-weight: normal;">
+                            <input type="checkbox" id="enforceFirewallWindows"> Windows
+                        </label>
+                    </div>
                 </div>
 
                 <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="enforceFirewall"> Enforce Firewall Enabled (ufw/iptables)
-                    </label>
-                    <span class="form-text" style="padding-left: 24px;">Check if client device has an active firewall.</span>
+                    <label>Enforce password required for login users</label>
+                    <div style="padding-left: 24px; margin-top: 8px;">
+                        <label style="font-weight: normal; margin-right: 16px;">
+                            <input type="checkbox" id="enforcePasswordRequiredLinux"> Linux
+                        </label>
+                        <label style="font-weight: normal;">
+                            <input type="checkbox" id="enforcePasswordRequiredWindows"> Windows
+                        </label>
+                    </div>
                 </div>
 
                 <div style="text-align: right; margin-top: 20px;">

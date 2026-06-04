@@ -1,69 +1,91 @@
 package main
 
 import (
-	"bufio"
-	"os"
 	"os/exec"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
 
-// SecurityInfo matches the structure expected by the server's /device-heartbeat API
+const clientOS = "linux"
+
 type SecurityInfo struct {
-	KernelVersion  int    `json:"kernelVersion"`
-	RawKernel      string `json:"rawKernel"`
-	SSHRootLogin   bool   `json:"sshRootLogin"`
-	FirewallActive bool   `json:"firewallActive"`
+	OS                     string   `json:"os"`
+	RawKernel              string   `json:"rawKernel"`
+	KernelVersion          int      `json:"kernelVersion,omitempty"`
+	FirewallActive         bool     `json:"firewallActive"`
+	PasswordlessShellUsers []string `json:"passwordlessShellUsers,omitempty"`
 }
 
-func getSecurityInfo() SecurityInfo {
-	info := SecurityInfo{}
+var iptablesPolicyRe = regexp.MustCompile(`(?i)\(policy\s+(\w+)\)`)
 
-	// 1. Kernel version via uname -r
+func getSecurityInfo() SecurityInfo {
+	info := SecurityInfo{OS: clientOS}
+
 	if out, err := exec.Command("uname", "-r").Output(); err == nil {
 		raw := strings.TrimSpace(string(out))
 		info.RawKernel = raw
-		parts := strings.Split(raw, ".")
-		if len(parts) > 0 {
+		if parts := strings.Split(raw, "."); len(parts) > 0 {
 			if v, err := strconv.Atoi(parts[0]); err == nil {
 				info.KernelVersion = v
 			}
 		}
 	}
 
-	// 2. SSH PermitRootLogin yes
-	if f, err := os.Open("/etc/ssh/sshd_config"); err == nil {
-		defer f.Close()
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if strings.HasPrefix(line, "#") {
-				continue
-			}
-			fields := strings.Fields(line)
-			if len(fields) >= 2 &&
-				strings.EqualFold(fields[0], "PermitRootLogin") &&
-				strings.EqualFold(fields[1], "yes") {
-				info.SSHRootLogin = true
-				break
-			}
-		}
-	}
-
-	// 3. Firewall: try ufw first, fallback to iptables
-	if _, err := exec.LookPath("ufw"); err == nil {
-		if out, err := exec.Command("ufw", "status").Output(); err == nil {
-			if !strings.Contains(strings.ToLower(string(out)), "status: inactive") {
-				info.FirewallActive = true
-			}
-		}
-	} else {
-		if out, err := exec.Command("iptables", "-L", "INPUT").Output(); err == nil {
-			if !strings.Contains(string(out), "Chain INPUT (policy ACCEPT)") {
-				info.FirewallActive = true
-			}
-		}
-	}
+	policies := getFirewallPolicies()
+	info.FirewallActive = isFirewallDropOnAllChains(policies)
+	info.PasswordlessShellUsers = getPasswordlessShellUsers()
 
 	return info
+}
+
+func getFirewallPolicies() map[string]string {
+	policies := make(map[string]string)
+	for _, chain := range []string{"INPUT", "OUTPUT", "FORWARD"} {
+		if p := iptablesChainPolicy(chain); p != "" {
+			policies[chain] = p
+		}
+	}
+	return policies
+}
+
+func iptablesChainPolicy(chain string) string {
+	out, err := exec.Command("iptables", "-L", chain, "-n").CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	if m := iptablesPolicyRe.FindStringSubmatch(string(out)); len(m) > 1 {
+		return strings.ToUpper(m[1])
+	}
+	return ""
+}
+
+func isFirewallDropOnAllChains(policies map[string]string) bool {
+	if len(policies) == 0 {
+		return false
+	}
+	for _, chain := range []string{"INPUT", "OUTPUT", "FORWARD"} {
+		if strings.ToUpper(policies[chain]) != "DROP" {
+			return false
+		}
+	}
+	return true
+}
+
+func getPasswordlessShellUsers() []string {
+	awkScript := `FNR==NR { shadow[$1]=$2; next } $7 !~ /(nologin|false)$/ { if (shadow[$1] == "") print $1 }`
+	out, err := exec.Command("sudo", "awk", "-F:", awkScript, "/etc/shadow", "/etc/passwd").Output()
+	if err != nil {
+		return nil
+	}
+	var users []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			users = append(users, line)
+		}
+	}
+	sort.Strings(users)
+	return users
 }

@@ -2,7 +2,10 @@
 
 require('dotenv').config();
 
+const { accessLogStream } = require('./lib/logging');
+
 const express = require('express');
+const morgan = require('morgan');
 const { spawnSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -27,10 +30,9 @@ const { logAction, logSecurityEvent, getLogs, getSecurityEvents } = require('./a
 const { touch: redisHeartbeatTouch } = require('./deviceHeartbeat');
 const { run, tryRun } = require('./runCmd');
 const {
-  parseKernelSemver,
-  cmpKernelSemver,
-  isSshRootLoginEnabled,
-  isFirewallDropOnAllChains,
+  collectSecurityPolicyIssues,
+  formatIssues,
+  normalizeSettings,
   isUserExpired
 } = require('./lib/securityChecks');
 const {
@@ -152,8 +154,6 @@ function wgSyncconf(iface) {
     throw new Error(e.stderr || e.message || `wg-quick strip ${iface} failed`);
   }
 
-  console.log("stripOutput: ", stripOutput);
-
   const tmpFile = path.join('/etc/wireguard/', `.tmp-sync-${iface}.conf`);
 
   fs.writeFileSync(tmpFile, stripOutput, {
@@ -191,6 +191,8 @@ app.get('/health', (req, res) => {
   res.status(ok ? 200 : 503).type('text/plain').send(ok ? 'ok' : 'fail');
 });
 
+app.use(morgan('combined', { stream: accessLogStream() }));
+
 const FRONTEND_DIR = path.join(__dirname, '../frontend');
 const CREDENTIALS_FILE = '/etc/wireguard/credentials.txt';
 
@@ -208,14 +210,17 @@ function loadGlobalSettings() {
     peerDisableHours: 12,
     keyRenewalTime: "08:00",
     enforceKernelCheck: true,
-    minKernelVersion: 4,
-    enforceNoRootLogin: true,
-    enforceFirewall: true
+    minKernelVersionLinux: 4,
+    minKernelVersionWindows: 10,
+    enforceFirewallLinux: true,
+    enforceFirewallWindows: true,
+    enforcePasswordRequiredLinux: true,
+    enforcePasswordRequiredWindows: true
   };
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
       const data = fs.readFileSync(SETTINGS_FILE, 'utf8');
-      return { ...defaultSettings, ...JSON.parse(data) };
+      return normalizeSettings({ ...defaultSettings, ...JSON.parse(data) });
     }
   } catch (e) {
     console.error('Error loading settings:', e.message);
@@ -638,9 +643,18 @@ app.post('/api/settings', (req, res) => {
       peerDisableHours: req.body.peerDisableHours ? parseInt(req.body.peerDisableHours, 10) : currentSettings.peerDisableHours,
       keyRenewalTime: req.body.keyRenewalTime || currentSettings.keyRenewalTime,
       enforceKernelCheck: req.body.enforceKernelCheck !== undefined ? req.body.enforceKernelCheck : currentSettings.enforceKernelCheck,
-      minKernelVersion: req.body.minKernelVersion !== undefined ? parseInt(req.body.minKernelVersion, 10) : currentSettings.minKernelVersion,
-      enforceNoRootLogin: req.body.enforceNoRootLogin !== undefined ? req.body.enforceNoRootLogin : currentSettings.enforceNoRootLogin,
-      enforceFirewall: req.body.enforceFirewall !== undefined ? req.body.enforceFirewall : currentSettings.enforceFirewall
+      minKernelVersionLinux: req.body.minKernelVersionLinux !== undefined
+        ? parseInt(req.body.minKernelVersionLinux, 10) : currentSettings.minKernelVersionLinux,
+      minKernelVersionWindows: req.body.minKernelVersionWindows !== undefined
+        ? parseInt(req.body.minKernelVersionWindows, 10) : currentSettings.minKernelVersionWindows,
+      enforceFirewallLinux: req.body.enforceFirewallLinux !== undefined
+        ? req.body.enforceFirewallLinux : currentSettings.enforceFirewallLinux,
+      enforceFirewallWindows: req.body.enforceFirewallWindows !== undefined
+        ? req.body.enforceFirewallWindows : currentSettings.enforceFirewallWindows,
+      enforcePasswordRequiredLinux: req.body.enforcePasswordRequiredLinux !== undefined
+        ? req.body.enforcePasswordRequiredLinux : currentSettings.enforcePasswordRequiredLinux,
+      enforcePasswordRequiredWindows: req.body.enforcePasswordRequiredWindows !== undefined
+        ? req.body.enforcePasswordRequiredWindows : currentSettings.enforcePasswordRequiredWindows
     };
 
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(newSettings, null, 2), 'utf8');
@@ -1556,23 +1570,13 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
     // Security Policies Check
     const settings = loadGlobalSettings();
     if (securityInfo) {
-      const issues = [];
-      if (settings.enforceKernelCheck && securityInfo.rawKernel != null) {
-        const clientVer = parseKernelSemver(securityInfo.rawKernel);
-        const minVer = parseKernelSemver(String(settings.minKernelVersion));
-        if (cmpKernelSemver(clientVer, minVer) <= 0) {
-          issues.push(`Kernel version ${securityInfo.rawKernel} is too old (must be > ${settings.minKernelVersion})`);
-        }
-      }
-      if (settings.enforceNoRootLogin && isSshRootLoginEnabled(securityInfo)) {
-        issues.push('SSH root login is permitted');
-      }
-      if (settings.enforceFirewall && !isFirewallDropOnAllChains(securityInfo)) {
-        issues.push('Firewall DROP policy not set on all chains (INPUT, OUTPUT, FORWARD)');
-      }
-
+      const issues = collectSecurityPolicyIssues(securityInfo, settings);
       if (issues.length > 0) {
-        return res.status(403).json({ success: false, error: 'Security policy violation', issues });
+        return res.status(403).json({
+          success: false,
+          error: `Security policy violation: ${formatIssues(issues)}`,
+          issues
+        });
       }
     }
 

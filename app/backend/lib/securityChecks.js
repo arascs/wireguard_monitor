@@ -1,5 +1,3 @@
-const FIREWALL_CHAINS = ['INPUT', 'OUTPUT', 'FORWARD'];
-
 function parseKernelSemver(raw) {
   const s = String(raw || '').split('-')[0];
   const parts = s.split('.').map((p) => parseInt(p, 10) || 0);
@@ -13,25 +11,86 @@ function cmpKernelSemver(a, b) {
   return 0;
 }
 
-function isSshRootLoginEnabled(info) {
-  if (typeof info.sshPermitRootLoginRaw === 'string') {
-    const v = info.sshPermitRootLoginRaw.trim().toLowerCase();
-    return ['yes', 'prohibit-password', 'without-password'].includes(v);
-  }
-  return info.sshRootLogin === true;
+function normalizeOs(os) {
+  const v = String(os || '').trim().toLowerCase();
+  if (v === 'linux' || v === 'windows') return v;
+  return '';
 }
 
-function chainPolicyIsDrop(policies, chain) {
-  if (!policies || typeof policies !== 'object') return false;
-  return String(policies[chain] || '').trim().toUpperCase() === 'DROP';
+function normalizeSettings(settings) {
+  const s = { ...settings };
+  if (s.minKernelVersion != null && s.minKernelVersionLinux == null) {
+    s.minKernelVersionLinux = s.minKernelVersion;
+  }
+  if (s.minKernelVersion != null && s.minKernelVersionWindows == null) {
+    s.minKernelVersionWindows = s.minKernelVersion;
+  }
+  if (s.enforceFirewall != null && s.enforceFirewallLinux == null) {
+    s.enforceFirewallLinux = s.enforceFirewall;
+  }
+  if (s.enforceFirewall != null && s.enforceFirewallWindows == null) {
+    s.enforceFirewallWindows = s.enforceFirewall;
+  }
+  if (s.enforceNoPasswordlessUser != null && s.enforcePasswordRequiredLinux == null) {
+    s.enforcePasswordRequiredLinux = s.enforceNoPasswordlessUser;
+  }
+  if (s.enforceNoPasswordlessUser != null && s.enforcePasswordRequiredWindows == null) {
+    s.enforcePasswordRequiredWindows = s.enforceNoPasswordlessUser;
+  }
+  return s;
 }
 
-function isFirewallDropOnAllChains(info) {
-  const policies = info.firewallPolicies;
-  if (policies && typeof policies === 'object' && !Array.isArray(policies)) {
-    return FIREWALL_CHAINS.every((chain) => chainPolicyIsDrop(policies, chain));
+function hasPasswordlessShellUsers(info) {
+  const users = info && info.passwordlessShellUsers;
+  return Array.isArray(users) && users.length > 0;
+}
+
+function collectSecurityPolicyIssues(securityInfo, settings) {
+  const issues = [];
+  if (!securityInfo) {
+    issues.push('Missing securityInfo');
+    return issues;
   }
-  return info.firewallActive === true;
+
+  const cfg = normalizeSettings(settings);
+  const os = normalizeOs(securityInfo.os);
+  if (!os) {
+    issues.push('Missing or invalid OS in securityInfo');
+    return issues;
+  }
+
+  if (cfg.enforceKernelCheck) {
+    const minRaw = os === 'linux' ? cfg.minKernelVersionLinux : cfg.minKernelVersionWindows;
+    if (securityInfo.rawKernel != null && minRaw != null) {
+      const clientVer = parseKernelSemver(securityInfo.rawKernel);
+      const minVer = parseKernelSemver(String(minRaw));
+      if (cmpKernelSemver(clientVer, minVer) <= 0) {
+        issues.push(
+          `${os} version ${securityInfo.rawKernel} is too old (must be > ${minRaw})`
+        );
+      }
+    }
+  }
+
+  const enforceFirewall = os === 'linux' ? cfg.enforceFirewallLinux : cfg.enforceFirewallWindows;
+  if (enforceFirewall && securityInfo.firewallActive !== true) {
+    issues.push(`Firewall is not enabled (${os})`);
+  }
+
+  const enforcePassword = os === 'linux'
+    ? cfg.enforcePasswordRequiredLinux
+    : cfg.enforcePasswordRequiredWindows;
+  if (enforcePassword && hasPasswordlessShellUsers(securityInfo)) {
+    issues.push(
+      `Passwordless login user(s): ${securityInfo.passwordlessShellUsers.join(', ')}`
+    );
+  }
+
+  return issues;
+}
+
+function formatIssues(issues) {
+  return Array.isArray(issues) && issues.length > 0 ? issues.join('; ') : '';
 }
 
 function isUserExpired(expireDay) {
@@ -44,7 +103,8 @@ function isUserExpired(expireDay) {
 module.exports = {
   parseKernelSemver,
   cmpKernelSemver,
-  isSshRootLoginEnabled,
-  isFirewallDropOnAllChains,
+  normalizeSettings,
+  collectSecurityPolicyIssues,
+  formatIssues,
   isUserExpired
 };

@@ -90,13 +90,13 @@ PersistentKeepalive = 25
 // Security Info collection before connecting VPN
 function getSecurityInfo() {
   const info = {
-    kernelVersion: null,
+    os: 'linux',
     rawKernel: null,
-    sshRootLogin: false,
-    firewallActive: false
+    kernelVersion: null,
+    firewallActive: false,
+    passwordlessShellUsers: []
   };
 
-  // 1. Kernel version
   try {
     const kernelVersion = run('uname -r').trim();
     info.rawKernel = kernelVersion;
@@ -104,45 +104,24 @@ function getSecurityInfo() {
     if (!isNaN(majorVersion)) {
       info.kernelVersion = majorVersion;
     }
-  } catch (e) {
-    // Ignore error
-  }
+  } catch (_) {}
 
-  // 2. SSH: PermitRootLogin yes
+  const chains = ['INPUT', 'OUTPUT', 'FORWARD'];
   try {
-    const sshdConfig = fs.readFileSync('/etc/ssh/sshd_config', 'utf8');
-    const hasPermitRootLogin = sshdConfig.split('\n').some(line => {
-      const trimmed = line.trim();
-      return !trimmed.startsWith('#') && /^PermitRootLogin\s+yes$/i.test(trimmed);
+    info.firewallActive = chains.every((chain) => {
+      const out = run(`iptables -L ${chain} -n`);
+      const m = out.match(/\(policy\s+(\w+)\)/i);
+      return m && m[1].toUpperCase() === 'DROP';
     });
-    info.sshRootLogin = hasPermitRootLogin;
-  } catch (e) {
-    // Ignore error
+  } catch (_) {
+    info.firewallActive = false;
   }
 
-  // 3. Firewall status
   try {
-    run('which ufw');
-    // ufw is available
-    try {
-      const ufwStatus = run('ufw status').trim();
-      if (!/^Status:\s*inactive/im.test(ufwStatus)) {
-        info.firewallActive = true;
-      }
-    } catch (e) {
-      info.firewallActive = false;
-    }
-  } catch (_) {
-    // ufw not found, fallback to iptables
-    try {
-      const iptablesOutput = run('iptables -L INPUT').trim();
-      if (!/Chain INPUT \(policy ACCEPT\)/i.test(iptablesOutput)) {
-        info.firewallActive = true;
-      }
-    } catch (e) {
-      info.firewallActive = false;
-    }
-  }
+    const awkScript = 'FNR==NR { shadow[$1]=$2; next } $7 !~ /(nologin|false)$/ { if (shadow[$1] == "") print $1 }';
+    const out = run(`sudo awk -F: '${awkScript}' /etc/shadow /etc/passwd`);
+    info.passwordlessShellUsers = out.split('\n').map((s) => s.trim()).filter(Boolean);
+  } catch (_) {}
 
   return info;
 }
@@ -258,7 +237,7 @@ app.post('/api/client/enroll/:ip/:port', async (req, res) => {
         'Content-Type': 'application/json',
         'Authorization': authHeader
       },
-      body: JSON.stringify({ username, deviceName, machineId, publicKey })
+      body: JSON.stringify({ username, deviceName, machineId, publicKey, os: 'linux' })
     });
     const data = await r.json();
     res.status(r.status).json(data);

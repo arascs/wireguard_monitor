@@ -26,9 +26,16 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('keyRenewalTime').value = s.keyRenewalTime;
         document.getElementById('nodeApiKey').value = s.apiKey || '';
         document.getElementById('enforceKernelCheck').checked = s.enforceKernelCheck !== false;
-        document.getElementById('minKernelVersion').value = s.minKernelVersion !== undefined ? s.minKernelVersion : 4;
-        document.getElementById('enforceNoRootLogin').checked = s.enforceNoRootLogin !== false;
-        document.getElementById('enforceFirewall').checked = s.enforceFirewall !== false;
+        document.getElementById('minKernelVersionLinux').value =
+          s.minKernelVersionLinux !== undefined ? s.minKernelVersionLinux : 4;
+        document.getElementById('minKernelVersionWindows').value =
+          s.minKernelVersionWindows !== undefined ? s.minKernelVersionWindows : 10;
+        document.getElementById('enforceFirewallLinux').checked = s.enforceFirewallLinux !== false;
+        document.getElementById('enforceFirewallWindows').checked = s.enforceFirewallWindows !== false;
+        document.getElementById('enforcePasswordRequiredLinux').checked =
+          s.enforcePasswordRequiredLinux !== false;
+        document.getElementById('enforcePasswordRequiredWindows').checked =
+          s.enforcePasswordRequiredWindows !== false;
       } else {
         alert('Failed to load settings: ' + (data.error || 'Unknown error'));
       }
@@ -46,9 +53,12 @@ document.addEventListener('DOMContentLoaded', () => {
       keyRenewalTime: document.getElementById('keyRenewalTime').value,
       apiKey: document.getElementById('nodeApiKey').value,
       enforceKernelCheck: document.getElementById('enforceKernelCheck').checked,
-      minKernelVersion: document.getElementById('minKernelVersion').value,
-      enforceNoRootLogin: document.getElementById('enforceNoRootLogin').checked,
-      enforceFirewall: document.getElementById('enforceFirewall').checked
+      minKernelVersionLinux: document.getElementById('minKernelVersionLinux').value,
+      minKernelVersionWindows: document.getElementById('minKernelVersionWindows').value,
+      enforceFirewallLinux: document.getElementById('enforceFirewallLinux').checked,
+      enforceFirewallWindows: document.getElementById('enforceFirewallWindows').checked,
+      enforcePasswordRequiredLinux: document.getElementById('enforcePasswordRequiredLinux').checked,
+      enforcePasswordRequiredWindows: document.getElementById('enforcePasswordRequiredWindows').checked
     };
 
     fetch('/api/settings', {

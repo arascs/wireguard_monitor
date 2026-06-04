@@ -59,8 +59,6 @@ func decodeBase(resp *http.Response) (baseResp, int, error) {
 	return r, resp.StatusCode, err
 }
 
-// --- Login ---
-
 func apiLogin(ip string, port int, username, password string) (string, error) {
 	resp, err := doPost(ip, port, "/api/login", "", map[string]string{
 		"username": username, "password": password,
@@ -77,8 +75,6 @@ func apiLogin(ip string, port int, username, password string) (string, error) {
 	}
 	return r.Token, nil
 }
-
-// --- Enroll ---
 
 func apiEnroll(ip string, port int, token, username, deviceName, machineID, publicKey string) error {
 	resp, err := doPost(ip, port, "/api/enroll-device", token, map[string]interface{}{
@@ -98,8 +94,6 @@ func apiEnroll(ip string, port int, token, username, deviceName, machineID, publ
 	return nil
 }
 
-// --- Check enrollment ---
-
 func apiCheckEnroll(ip string, port int, token, username, deviceName string) (bool, error) {
 	resp, err := doPost(ip, port, "/api/check-device-enroll", token, map[string]string{
 		"username": username, "deviceName": deviceName,
@@ -115,8 +109,6 @@ func apiCheckEnroll(ip string, port int, token, username, deviceName string) (bo
 	enrolled := r.Success && strings.Contains(msg, "enrolled") && !strings.Contains(msg, "not enrolled")
 	return enrolled, nil
 }
-
-// --- Connect VPN ---
 
 type connectResp struct {
 	Success          bool     `json:"success"`
@@ -153,8 +145,6 @@ func apiConnect(ip string, port int, token, username, deviceName string) (*conne
 	return &result, nil
 }
 
-// --- Disconnect VPN ---
-
 func apiDisconnect(ip string, port int, token, deviceName string) error {
 	resp, err := doPost(ip, port, "/api/disconnect-vpn", token, map[string]string{
 		"deviceName": deviceName,
@@ -166,16 +156,12 @@ func apiDisconnect(ip string, port int, token, deviceName string) error {
 	return nil
 }
 
-// --- Device Heartbeat ---
-
 type heartbeatResp struct {
 	Success bool     `json:"success"`
 	Error   string   `json:"error"`
 	Issues  []string `json:"issues"`
 }
 
-// apiSendHeartbeat sends attestation to /api/device-heartbeat.
-// Returns (false, err) when server responds 403 (device should disconnect).
 func apiSendHeartbeat(ip string, port int, token, deviceName, machineID string, secInfo SecurityInfo) (bool, error) {
 	data, _ := json.Marshal(map[string]interface{}{
 		"deviceName":   deviceName,

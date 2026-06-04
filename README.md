@@ -39,12 +39,13 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
 - RX / TX throughput per peer
 - Latest handshake time
 - Active connections
-- Traffic from peers to **local services**
+- Traffic from peers to **local applications**
 - Peer online/offline detection
 
 ### Audit logs
-- Support admin actions, session logging and security alerts on abnormal handshakes and peer endpoint changes.
+- Support admin actions, session logging and security alerts on expired WireGuard keys, abnormal handshakes and peer endpoint changes.
 - Real-time notification on security alerts. 
+- Export PDF/Excel reports from audit logs
 
 ### Periodical attestation check
 - Requires connected device to approve validity by checking JWT token, security settings and device identity on regular basis. 
@@ -88,7 +89,7 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
 - Bell icon with unread badge and notification panel, refreshed every 5 seconds
 
 ## Security
-- Session cookies, rate limiting, shell input validation, cors, apiKey, IP binding for internal apis, different HTTPS certificates for internal (admin/central) and public (site/devices) access. 
+- The whole VPN management system is secured by: session cookies, rate limiting, shell input validation, cors, IP binding for internal apis, API key for authentication/authorization between servers, different HTTPS certificates for internal (admin/central) and public (site/devices) access. 
 
 ## Requirements
 

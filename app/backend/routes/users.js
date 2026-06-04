@@ -5,10 +5,9 @@ const { logAction } = require('../auditLogger');
 const { deletePeerFromConf } = require('../lib/wireguardConfig');
 const { registerExpireHandler, touch: heartbeatTouch, clear: heartbeatClear } = require('../deviceHeartbeat');
 const {
-  parseKernelSemver,
-  cmpKernelSemver,
-  isSshRootLoginEnabled,
-  isFirewallDropOnAllChains
+  collectSecurityPolicyIssues,
+  formatIssues,
+  normalizeSettings
 } = require('../lib/securityChecks');
 
 function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authenticateToken }) {
@@ -19,18 +18,25 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
   function loadSecuritySettings() {
     const defaults = {
       enforceKernelCheck: true,
-      minKernelVersion: 4,
-      enforceNoRootLogin: true,
-      enforceFirewall: true
+      minKernelVersionLinux: 4,
+      minKernelVersionWindows: 10,
+      enforceFirewallLinux: true,
+      enforceFirewallWindows: true,
+      enforcePasswordRequiredLinux: true,
+      enforcePasswordRequiredWindows: true
     };
     try {
       if (!fs.existsSync(SETTINGS_FILE)) return defaults;
       const raw = fs.readFileSync(SETTINGS_FILE, 'utf8');
-      const parsed = JSON.parse(raw);
-      return { ...defaults, ...parsed };
+      return normalizeSettings({ ...defaults, ...JSON.parse(raw) });
     } catch (_) {
       return defaults;
     }
+  }
+
+  function normalizeDeviceOs(os) {
+    const v = String(os || '').trim().toLowerCase();
+    return v === 'linux' || v === 'windows' ? v : '';
   }
 
   function getPeerLatestHandshakeEpochSeconds(interfaceName, publicKey) {
@@ -226,7 +232,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       connection = await mysql.createConnection(dbConfig);
       // include status so frontend can know whether a device is enabled or disabled
       const [rows] = await connection.execute(
-        'SELECT id, device_name, username, interface, allowed_ips, public_key, machine_id, expire_date, status, last_seen FROM devices ORDER BY id DESC'
+        'SELECT id, device_name, username, interface, allowed_ips, public_key, machine_id, os, expire_date, status, last_seen FROM devices ORDER BY id DESC'
       );
       res.json({ success: true, devices: rows });
     } catch (error) {
@@ -251,7 +257,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
       // Get enrollment request info
       const [reqs] = await connection.execute(
-        'SELECT device_name, username, machine_id, public_key FROM device_enrollment_requests WHERE id = ?',
+        'SELECT device_name, username, machine_id, public_key, os FROM device_enrollment_requests WHERE id = ?',
         [id]
       );
 
@@ -263,8 +269,8 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       const deviceName = reqItem.device_name;
       const username = reqItem.username;
       const machineId = reqItem.machine_id;
+      const deviceOs = normalizeDeviceOs(reqItem.os);
 
-      // Use the client's public key if provided
       let publicKey = reqItem.public_key;
 
       // Calculate expire epoch
@@ -278,8 +284,8 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
       // Insert into approved devices table
       await connection.execute(
-        'INSERT INTO devices (device_name, username, interface, allowed_ips, public_key, machine_id, expire_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [deviceName, username, selectedInterface, allowedIPs, publicKey, machineId, expireEpoch, 1]
+        'INSERT INTO devices (device_name, username, interface, allowed_ips, public_key, machine_id, os, expire_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [deviceName, username, selectedInterface, allowedIPs, publicKey, machineId, deviceOs || null, expireEpoch, 1]
       );
 
       // audit
@@ -471,7 +477,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
     try {
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        'SELECT id, device_name, username, status, machine_id, public_key FROM device_enrollment_requests ORDER BY id DESC'
+        'SELECT id, device_name, username, status, machine_id, public_key, os FROM device_enrollment_requests ORDER BY id DESC'
       );
       res.json({ success: true, requests: rows });
     } catch (error) {
@@ -524,17 +530,20 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
 
   // Enroll device (client endpoint)
   router.post('/enroll-device', authenticateToken, async (req, res) => {
-    const { deviceName, machineId, publicKey } = req.body || {};
+    const { deviceName, machineId, publicKey, os } = req.body || {};
     const username = req.user.username;
     if (!deviceName) {
       return res.status(400).json({ success: false, error: 'Missing deviceName' });
+    }
+    const deviceOs = normalizeDeviceOs(os);
+    if (!deviceOs) {
+      return res.status(400).json({ success: false, error: 'Missing or invalid os (linux or windows)' });
     }
 
     let connection;
     try {
       connection = await mysql.createConnection(dbConfig);
 
-      // Check if enrollment request already exists for this device and user
       const [existing] = await connection.execute(
         'SELECT id FROM device_enrollment_requests WHERE device_name = ? AND username = ?',
         [deviceName, username]
@@ -544,10 +553,9 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
         return res.status(409).json({ success: false, error: 'Enrollment request already exists for this device' });
       }
 
-      // Create enrollment request in separate table
       await connection.execute(
-        'INSERT INTO device_enrollment_requests (device_name, username, status, machine_id, public_key) VALUES (?, ?, "pending", ?, ?)',
-        [deviceName, username, machineId || '', publicKey || null]
+        'INSERT INTO device_enrollment_requests (device_name, username, status, machine_id, public_key, os) VALUES (?, ?, "pending", ?, ?, ?)',
+        [deviceName, username, machineId || '', publicKey || null, deviceOs]
       );
 
       res.json({ success: true, message: 'Enrollment request submitted' });
@@ -605,25 +613,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
     let connection;
     try {
       const settings = loadSecuritySettings();
-      const issues = [];
-
-      if (!securityInfo) {
-        issues.push('Missing securityInfo');
-      } else {
-        if (settings.enforceKernelCheck && securityInfo.rawKernel != null) {
-          const clientVer = parseKernelSemver(securityInfo.rawKernel);
-          const minVer = parseKernelSemver(String(settings.minKernelVersion));
-          if (cmpKernelSemver(clientVer, minVer) <= 0) {
-            issues.push(`Kernel version ${securityInfo.rawKernel} is too old (must be > ${settings.minKernelVersion})`);
-          }
-        }
-        if (settings.enforceNoRootLogin && isSshRootLoginEnabled(securityInfo)) {
-          issues.push('SSH root login is permitted');
-        }
-        if (settings.enforceFirewall && !isFirewallDropOnAllChains(securityInfo)) {
-          issues.push('Firewall DROP policy not set on all chains (INPUT, OUTPUT, FORWARD)');
-        }
-      }
+      const issues = collectSecurityPolicyIssues(securityInfo, settings);
 
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
@@ -643,7 +633,11 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, run, requireAuth, authentic
       if (issues.length > 0) {
         await disconnectDeviceNow(username, deviceName);
         await heartbeatClear(username, deviceName);
-        return res.status(403).json({ success: false, error: 'Heartbeat validation failed, device disconnected', issues });
+        return res.status(403).json({
+          success: false,
+          error: `Validation failed: ${formatIssues(issues)}`,
+          issues
+        });
       }
 
       const touched = await heartbeatTouch(username, deviceName);

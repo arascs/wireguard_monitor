@@ -19,6 +19,7 @@
     "https": "^1.0.0",
     "ip-range-check": "^0.2.0",
     "jsonwebtoken": "^9.0.0",
+    "morgan": "^1.10.1",
     "mysql2": "^3.9.1",
     "node-fetch": "^2.7.0",
     "redis": "^5.8.2"
