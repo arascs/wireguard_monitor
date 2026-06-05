@@ -1,0 +1,6 @@
+[Unit]
+Description=Collect WireGuard traffic for main dashboard
+
+[Service]
+Type=oneshot
+ExecStart=/root/.local/share/virtualenvs/root-BuDEOXnJ/bin/python /usr/local/bin/collect_traffic.py

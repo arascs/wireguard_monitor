@@ -1,66 +1,86 @@
 #!/bin/bash
+set -euo pipefail
 
-if [ "$EUID" -ne 0 ]; then 
+if [ "$EUID" -ne 0 ]; then
   echo "Run the script as root."
   exit 1
 fi
 
-echo "Installing neccesary packages..."
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BIN_DIR="/usr/local/bin"
+SYSTEMD_DIR="/etc/systemd/system"
+APP_DIR="/opt/wireguard_monitor"
+LOG_DIR="/etc/wireguard/logs"
+
+echo "Installing packages..."
 apt update
-apt install -y wireguard conntrack
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+apt install -y wireguard conntrack python3 python3-pymysql logrotate
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 apt install -y nodejs
 
 echo "Kernel setup..."
-# IP Forwarding
 sysctl -w net.ipv4.ip_forward=1
-echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-my-app.conf
-
+echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-wireguard-monitor.conf
 sysctl -w net.netfilter.nf_conntrack_acct=1
-echo "net.netfilter.nf_conntrack_acct=1" >> /etc/sysctl.d/99-my-app.conf
-
+echo "net.netfilter.nf_conntrack_acct=1" >> /etc/sysctl.d/99-wireguard-monitor.conf
 echo "options nf_conntrack acct=1" > /etc/modprobe.d/nf_conntrack.conf
-modprobe -r nf_conntrack || true
+modprobe -r nf_conntrack 2>/dev/null || true
 modprobe nf_conntrack
 
-mkdir -p /opt/wireguard_monitor
-cp -r ./app /opt/wireguard_monitor
+mkdir -p "$LOG_DIR" "$APP_DIR"
+cp -r "$ROOT_DIR/app" "$APP_DIR/"
 
-cp ./collector_scripts/services_monitor.py /usr/local/bin
-cp ./collector_scripts/general_interface_collector.sh /usr/local/bin
-cp ./collector_scripts/peer_details_collector.py /usr/local/bin
-cp ./key_management_scripts/wg-sync-key.py /usr/local/bin
+echo "Installing collector scripts..."
+install -m 755 "$ROOT_DIR/collector_scripts/services_monitor.py" "$BIN_DIR/"
+install -m 755 "$ROOT_DIR/collector_scripts/general_interface_collector.sh" "$BIN_DIR/"
+install -m 755 "$ROOT_DIR/collector_scripts/wg_stats_collector.py" "$BIN_DIR/"
+install -m 755 "$ROOT_DIR/collector_scripts/exporter.sh" "$BIN_DIR/"
 
-chmod +x /usr/local/bin/general_interface_collector.sh
-chmod +x /usr/local/bin/services_monitor.py
-chmod +x /usr/local/bin/peer_details_collector.py
-chmod +x /usr/local/bin/wg-sync-key.py
+echo "Installing scripts..."
+install -m 755 "$ROOT_DIR/scripts/logrotate-wireguard.sh" "$BIN_DIR/"
+install -m 755 "$ROOT_DIR/scripts/unknown_handshake.py" "$BIN_DIR/"
+install -m 755 "$ROOT_DIR/scripts/collect_traffic.py" "$BIN_DIR/"
+install -m 755 "$ROOT_DIR/scripts/wg_disable_peer.sh" "$BIN_DIR/"
 
-echo "Setting up services..."
-cp ./services/services_monitor.service /etc/systemd/system
-cp ./services/general_interface_monitor.service /etc/systemd/system
-cp ./services/general_interface_monitor.timer /etc/systemd/system
-cp ./services/wireguard_monitor.service /etc/systemd/system
-cp ./services/peer_details.service /etc/systemd/system
-cp ./services/peer_details.timer /etc/systemd/system
-cp ./key_management_scripts/wg-sync-key.service /etc/systemd/system
-cp ./key_management_scripts/wg-sync-key.timer /etc/systemd/system
+echo "Installing endpoint_monitor..."
+if [ -x "$ROOT_DIR/binaries/endpoint_monitor" ]; then
+  install -m 755 "$ROOT_DIR/binaries/endpoint_monitor" "$BIN_DIR/endpoint_monitor"
+elif command -v go >/dev/null 2>&1; then
+  build_dir="$(mktemp -d)"
+  cp "$ROOT_DIR/scripts/endpoint_monitor.go" "$build_dir/main.go"
+  (
+    cd "$build_dir"
+    go mod init endpoint_monitor
+    go get github.com/go-sql-driver/mysql golang.zx2c4.com/wireguard/wgctrl
+    go build -o "$BIN_DIR/endpoint_monitor" .
+  )
+  rm -rf "$build_dir"
+else
+  echo "WARNING: endpoint_monitor not installed (place binary at binaries/endpoint_monitor or install Go)."
+fi
+
+echo "Installing systemd units..."
+for unit in "$ROOT_DIR/services/"*.service "$ROOT_DIR/services/"*.timer; do
+  [ -f "$unit" ] || continue
+  install -m 644 "$unit" "$SYSTEMD_DIR/"
+done
 
 systemctl daemon-reload
 
-systemctl enable services_monitor
-systemctl start services_monitor
+echo "Enabling services..."
+systemctl enable --now wireguard_monitor.service
+systemctl enable --now services_monitor.service
+if [ -x "$BIN_DIR/endpoint_monitor" ]; then
+  systemctl enable --now endpoint_monitor.service
+else
+  echo "WARNING: skipping endpoint_monitor.service (binary missing)."
+fi
+systemctl enable --now wg_handshake_monitor.service
+systemctl enable --now wg_systemd.service
 
-systemctl enable general_interface_monitor.timer
-systemctl start general_interface_monitor.timer
-
-systemctl enable peer_details.timer
-systemctl start peer_details.timer
-
-systemctl enable wireguard_monitor
-systemctl start wireguard_monitor
-
-systemctl enable wg-sync-key.timer
-systemctl start wg-sync-key.timer
+systemctl enable --now general_interface_monitor.timer
+systemctl enable --now wg_stats.timer
+systemctl enable --now collect-traffic.timer
+systemctl enable --now logrotate-wireguard.timer
 
 echo "WireGuard Monitor installation complete."

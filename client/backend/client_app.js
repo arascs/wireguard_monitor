@@ -223,9 +223,9 @@ app.post('/api/client/enroll/:ip/:port', async (req, res) => {
     // Read machine-id from local filesystem
     let machineId = '';
     try {
-      machineId = fs.readFileSync('/etc/machine-id', 'utf8').trim();
+      machineId = fs.readFileSync('/sys/class/dmi/id/product_uuid', 'utf8').trim();
     } catch (e) {
-      console.warn('Could not read /etc/machine-id:', e.message);
+      console.warn('Could not read /sys/class/dmi/id/product_uuid:', e.message);
     }
 
     const { publicKey } = ensureClientKeypair();
@@ -382,7 +382,7 @@ app.get('/api/client/device-name', (req, res) => {
 // 10b. Get machine ID
 app.get('/api/client/machine-id', (req, res) => {
   try {
-    const machineId = fs.readFileSync('/etc/machine-id', 'utf8').trim();
+    const machineId = fs.readFileSync('/sys/class/dmi/id/product_uuid', 'utf8').trim();
     res.json({ success: true, machineId });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message, machineId: '' });

@@ -160,15 +160,14 @@ func getMachineID() string {
 			return id
 		}
 	}
-	out, err := exec.Command("wmic", "csproduct", "get", "UUID").CombinedOutput()
+	out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command",
+		"(Get-CimInstance Win32_ComputerSystemProduct).UUID",
+	).Output()
 	if err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.EqualFold(line, "UUID") {
-				_ = os.MkdirAll(appDataDir(), 0700)
-				_ = os.WriteFile(path, []byte(line), 0600)
-				return line
-			}
+		if id := strings.TrimSpace(string(out)); id != "" {
+			_ = os.MkdirAll(appDataDir(), 0700)
+			_ = os.WriteFile(path, []byte(id), 0600)
+			return id
 		}
 	}
 	return ""
