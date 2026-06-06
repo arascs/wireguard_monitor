@@ -18,6 +18,7 @@ const https = require('https');
 const crypto = require('crypto');
 const dashboardRoutes = require('./routes/dashboard');
 const createUserRoutes = require('./routes/users');
+const createDeviceRoutes = require('./routes/devices');
 const createApplicationRoutes = require('./routes/applications');
 const createAccessRuleRoutes = require('./routes/accessRules');
 const createAuthRoutes = require('./routes/auth');
@@ -1531,6 +1532,15 @@ app.use(
     mysql,
     dbConfig,
     bcrypt,
+    requireAuth
+  })
+);
+
+app.use(
+  '/api',
+  createDeviceRoutes({
+    mysql,
+    dbConfig,
     run,
     requireAuth,
     authenticateToken
