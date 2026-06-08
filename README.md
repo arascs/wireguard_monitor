@@ -39,7 +39,7 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
 - RX / TX throughput per peer
 - Latest handshake time
 - Active connections
-- Traffic from peers to **local applications**
+- Traffic from peers to **internal services**
 - Peer online/offline detection
 
 ### Audit logs

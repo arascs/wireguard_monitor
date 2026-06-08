@@ -21,9 +21,8 @@ document.addEventListener('DOMContentLoaded', () => {
     .then((data) => {
       if (data.success && data.settings) {
         const s = data.settings;
-        document.getElementById('keyExpiryDays').value = s.keyExpiryDays;
         document.getElementById('peerDisableHours').value = s.peerDisableHours;
-        document.getElementById('keyRenewalTime').value = s.keyRenewalTime;
+        document.getElementById('physicalInterface').value = s.physicalInterface || '';
         document.getElementById('nodeApiKey').value = s.apiKey || '';
         document.getElementById('enforceKernelCheck').checked = s.enforceKernelCheck !== false;
         document.getElementById('minKernelVersionLinux').value =
@@ -48,9 +47,8 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.textContent = 'Saving...';
 
     const payload = {
-      keyExpiryDays: document.getElementById('keyExpiryDays').value,
       peerDisableHours: document.getElementById('peerDisableHours').value,
-      keyRenewalTime: document.getElementById('keyRenewalTime').value,
+      physicalInterface: document.getElementById('physicalInterface').value.trim(),
       apiKey: document.getElementById('nodeApiKey').value,
       enforceKernelCheck: document.getElementById('enforceKernelCheck').checked,
       minKernelVersionLinux: document.getElementById('minKernelVersionLinux').value,

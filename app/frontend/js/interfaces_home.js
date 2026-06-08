@@ -106,6 +106,7 @@ async function submitAddInterfaceForm(e) {
         return;
     }
     const type = document.getElementById('new-interface-type').value;
+    const keyExpiryDays = document.getElementById('new-interface-keyExpiryDays').value;
     const dns = document.getElementById('new-interface-dns').value.trim();
     const mtu = document.getElementById('new-interface-mtu').value.trim();
     const preUp = document.getElementById('new-interface-preUp').value.trim();
@@ -114,7 +115,7 @@ async function submitAddInterfaceForm(e) {
     const postDown = document.getElementById('new-interface-postDown').value.trim();
 
     try {
-        const payload = { name, type, address, listenPort };
+        const payload = { name, type, address, listenPort, keyExpiryDays };
         if (dns) payload.dns = dns;
         if (mtu) payload.mtu = mtu;
         if (preUp) payload.preUp = preUp;

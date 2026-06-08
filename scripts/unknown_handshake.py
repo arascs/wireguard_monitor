@@ -10,6 +10,7 @@ import pymysql
 
 EVENT_FILE = "/etc/wireguard/logs/endpoint_events.json"
 WIREGUARD_CONFIG_GLOB = "/etc/wireguard/*.conf"
+SETTINGS_FILE = "/opt/wireguard_monitor/app/backend/settings.json"
 RELOAD_SECONDS = 15
 
 DB_CONFIG = {
@@ -41,6 +42,18 @@ def get_file_handle(path):
         _FILE_HANDLES[path] = open(path, "a", encoding="utf-8")
     return _FILE_HANDLES[path]
 # -----------------------------------------------------------
+
+def load_settings():
+    try:
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def load_physical_interface():
+    settings = load_settings()
+    iface = str(settings.get("physicalInterface") or "").strip()
+    return iface if iface else None
 
 def load_valid_endpoints():
     try:
@@ -113,14 +126,17 @@ def log_handshake_line(interface_name, line):
     f.write(line + "\n")
     f.flush()
 
-def build_tcpdump_cmd(site_ports):
+def build_tcpdump_cmd(site_ports, physical_interface):
+    if not physical_interface:
+        return None
     port_filter = " or ".join([f"udp dst port {p}" for p in site_ports])
     bpf_filter = f"udp and ({port_filter}) and udp[8] = 1"
-    # Set interface ens37 in global settings
-    return ["tcpdump", "-i", "ens37", "-Q", "in", "-n", "-tttt", "-l", bpf_filter]
+    return ["tcpdump", "-i", physical_interface, "-Q", "in", "-n", "-tttt", "-l", bpf_filter]
 
-def start_tcpdump(site_ports):
-    cmd = build_tcpdump_cmd(site_ports)
+def start_tcpdump(site_ports, physical_interface):
+    cmd = build_tcpdump_cmd(site_ports, physical_interface)
+    if not cmd:
+        return None
     return subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1
     )
@@ -139,6 +155,7 @@ def main():
     valid_endpoints = set()
     port_to_iface = {}
     site_ports = []
+    physical_interface = None
     proc = None
     last_reload = 0.0
 
@@ -150,14 +167,16 @@ def main():
                 valid_endpoints = load_valid_endpoints()
                 latest_port_to_iface = parse_site_interfaces()
                 latest_ports = sorted(latest_port_to_iface.keys())
+                latest_physical_interface = load_physical_interface()
 
-                if latest_ports != site_ports:
+                if latest_ports != site_ports or latest_physical_interface != physical_interface:
                     safe_stop_tcpdump(proc)
                     proc = None
                     site_ports = latest_ports
                     port_to_iface = latest_port_to_iface
-                    if site_ports:
-                        proc = start_tcpdump(site_ports)
+                    physical_interface = latest_physical_interface
+                    if site_ports and physical_interface:
+                        proc = start_tcpdump(site_ports, physical_interface)
                 else:
                     port_to_iface = latest_port_to_iface
 
@@ -168,7 +187,7 @@ def main():
             line = proc.stdout.readline()
             if not line:
                 if proc.poll() is not None:
-                    proc = start_tcpdump(site_ports) if site_ports else None
+                    proc = start_tcpdump(site_ports, physical_interface) if site_ports and physical_interface else None
                 else:
                     time.sleep(0.2)
                 continue

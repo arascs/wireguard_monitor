@@ -52,7 +52,7 @@
   <div class="sidebar-menu">
     <button class="sidebar-item" data-section="main-dashboard" data-path="/">Dashboard</button>
     <button class="sidebar-item" data-section="connections"    data-path="/interfaces">Interfaces</button>
-    <button class="sidebar-item" data-section="users"         data-path="/users">Identity</button>
+    <button class="sidebar-item" data-section="users"         data-path="/users">Users</button>
     <button class="sidebar-item" data-section="devices"       data-path="/devices">Devices</button>
     <button class="sidebar-item" data-section="applications"  data-path="/applications">Applications</button>
     <button class="sidebar-item" data-section="access"        data-path="/access-rules">Access rules</button>

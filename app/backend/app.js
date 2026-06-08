@@ -203,13 +203,14 @@ if (!fs.existsSync(BACKUP_DIR)) {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
 }
 
+const DEFAULT_KEY_EXPIRY_DAYS = 90;
+
 // Global settings
 const SETTINGS_FILE = path.join(__dirname, 'settings.json');
 function loadGlobalSettings() {
   const defaultSettings = {
-    keyExpiryDays: 90,
     peerDisableHours: 12,
-    keyRenewalTime: "08:00",
+    physicalInterface: '',
     enforceKernelCheck: true,
     minKernelVersionLinux: 4,
     minKernelVersionWindows: 10,
@@ -283,9 +284,8 @@ function getRemainingDays(config) {
 }
 
 async function checkAndDisconnectIfExpired() {
-  const defaults = loadGlobalSettings();
   for (const iface of listInterfaces()) {
-    const config = loadInterfaceConfig(iface.name, { defaultKeyExpiryDays: defaults.keyExpiryDays });
+    const config = loadInterfaceConfig(iface.name, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
     const remaining = getRemainingDays(config);
     if (remaining !== null && remaining <= 3) {
       logSecurityEvent({
@@ -476,7 +476,7 @@ app.get('/api/interfaces/:interface/key-status', (req, res) => {
   if (!iface) {
     return res.status(400).json({ success: false, error: 'Invalid interface name' });
   }
-  const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+  const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
   res.json({
     success: true,
     expired: isInterfaceKeyExpired(config),
@@ -509,7 +509,7 @@ app.get('/api/interfaces/client', (req, res) => {
 // Add a new interface (create conf file with Type comment + generate keys)
 app.post('/api/add-interface', async (req, res) => {
   try {
-    const { name, type, address, listenPort, dns, mtu, preUp, postUp, preDown, postDown } = req.body;
+    const { name, type, address, listenPort, dns, mtu, preUp, postUp, preDown, postDown, keyExpiryDays } = req.body;
     if (!String(name || '').trim()) {
       return res.status(400).json({ success: false, error: 'Interface name is required' });
     }
@@ -533,8 +533,8 @@ app.post('/api/add-interface', async (req, res) => {
     let content = `# Type = ${interfaceType}\n`;
     content += '[Interface]\n';
     content += `# Key Creation = ${new Date().toISOString()}\n`;
-    const settings = loadGlobalSettings();
-    content += `# Key Expiry Days = ${settings.keyExpiryDays}\n`;
+    const expiryDays = parseInt(keyExpiryDays, 10) || DEFAULT_KEY_EXPIRY_DAYS;
+    content += `# Key Expiry Days = ${expiryDays}\n`;
     content += `PrivateKey = ${privateKey}\n`;
     content += `Address = ${String(address).trim()}\n`;
     content += `ListenPort = ${String(listenPort).trim()}\n`;
@@ -553,7 +553,7 @@ app.post('/api/add-interface', async (req, res) => {
     // Audit log
     try {
       const admin = req.session && req.session.user ? req.session.user : 'unknown';
-      logAction(admin, 'add_interface', { interface: name, type: interfaceType, publicKey, address });
+      logAction(admin, 'add_interface', { interface: name, type: interfaceType, publicKey, address, keyExpiryDays: expiryDays });
     } catch (e) { }
 
     res.json({ success: true, name, type: interfaceType, publicKey });
@@ -639,10 +639,12 @@ app.get('/api/settings', (req, res) => {
 app.post('/api/settings', (req, res) => {
   try {
     const currentSettings = loadGlobalSettings();
+    const physicalInterface = req.body.physicalInterface !== undefined
+      ? String(req.body.physicalInterface || '').trim().replace(/[^a-zA-Z0-9._-]/g, '')
+      : currentSettings.physicalInterface;
     const newSettings = {
-      keyExpiryDays: req.body.keyExpiryDays ? parseInt(req.body.keyExpiryDays, 10) : currentSettings.keyExpiryDays,
       peerDisableHours: req.body.peerDisableHours ? parseInt(req.body.peerDisableHours, 10) : currentSettings.peerDisableHours,
-      keyRenewalTime: req.body.keyRenewalTime || currentSettings.keyRenewalTime,
+      physicalInterface,
       enforceKernelCheck: req.body.enforceKernelCheck !== undefined ? req.body.enforceKernelCheck : currentSettings.enforceKernelCheck,
       minKernelVersionLinux: req.body.minKernelVersionLinux !== undefined
         ? parseInt(req.body.minKernelVersionLinux, 10) : currentSettings.minKernelVersionLinux,
@@ -659,22 +661,6 @@ app.post('/api/settings', (req, res) => {
     };
 
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(newSettings, null, 2), 'utf8');
-
-    if (newSettings.keyRenewalTime !== currentSettings.keyRenewalTime) {
-      const timerPath = '/etc/systemd/system/wg-key-renewal.timer';
-      if (fs.existsSync(timerPath)) {
-        let timerContent = fs.readFileSync(timerPath, 'utf8');
-        timerContent = timerContent.replace(/^OnCalendar=.*$/m, `OnCalendar=*-*-* ${newSettings.keyRenewalTime}:00`);
-        fs.writeFileSync(timerPath, timerContent, 'utf8');
-        try {
-          run('systemctl', ['daemon-reload']);
-          run('systemctl', ['reenable', 'wg-key-renewal.timer']);
-          run('systemctl', ['restart', 'wg-key-renewal.timer']);
-        } catch (e) {
-          console.error('[ERROR] Failed to restart systemd timer:', e.message);
-        }
-      }
-    }
 
     if (req.body && typeof req.body.apiKey === 'string' && req.body.apiKey.trim()) {
       saveNodeApiKey(req.body.apiKey.trim());
@@ -700,8 +686,7 @@ app.post('/api/interfaces/:interface/generate-keys', async (req, res) => {
     return res.status(400).json({ success: false, error: 'Invalid interface name' });
   }
   try {
-    const defaults = loadGlobalSettings();
-    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: defaults.keyExpiryDays });
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
     const hasExistingKey = config.interface.privateKey && config.interface.privateKey.length > 0;
     const forceGenerate = req.body.force === true;
 
@@ -722,7 +707,7 @@ app.post('/api/interfaces/:interface/generate-keys', async (req, res) => {
     config.interface.publicKey = newPublicKey;
     config.interface.keyCreationDate = new Date().toISOString();
     if (!config.interface.keyExpiryDays) {
-      config.interface.keyExpiryDays = defaults.keyExpiryDays;
+      config.interface.keyExpiryDays = DEFAULT_KEY_EXPIRY_DAYS;
     }
 
     saveInterfaceConfig(iface, config);
@@ -791,8 +776,7 @@ app.post('/api/interfaces/:interface/configure', (req, res) => {
     return res.status(400).json({ success: false, error: 'Invalid interface name' });
   }
   try {
-    const defaults = loadGlobalSettings();
-    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: defaults.keyExpiryDays });
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
     const isNew = !fs.existsSync(path.join(CONFIG_DIR, `${iface}.conf`));
     const existingType = config.interface.type;
 
@@ -807,9 +791,9 @@ app.post('/api/interfaces/:interface/configure', (req, res) => {
     config.interface.postDown = req.body.postDown || '';
     if (existingType) config.interface.type = existingType;
     if (req.body.keyExpiryDays) {
-      config.interface.keyExpiryDays = parseInt(req.body.keyExpiryDays, 10) || 90;
+      config.interface.keyExpiryDays = parseInt(req.body.keyExpiryDays, 10) || DEFAULT_KEY_EXPIRY_DAYS;
     } else if (!config.interface.keyExpiryDays) {
-      config.interface.keyExpiryDays = defaults.keyExpiryDays;
+      config.interface.keyExpiryDays = DEFAULT_KEY_EXPIRY_DAYS;
     }
 
     let savedContent = null;
@@ -853,7 +837,7 @@ app.post('/api/interfaces/:interface/peers', async (req, res) => {
     return res.status(400).json({ success: false, error: 'Invalid interface name' });
   }
   try {
-    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
     if (isInterfaceKeyExpired(config)) {
       return res.status(403).json({ success: false, error: 'Key has expired. Please generate new keys and reconfigure interface first.' });
     }
@@ -943,7 +927,7 @@ app.put('/api/interfaces/:interface/peers/:publicKey', async (req, res) => {
     return res.status(400).json({ success: false, error: 'Invalid interface or public key' });
   }
   try {
-    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
     if (isInterfaceKeyExpired(config)) {
       return res.status(403).json({ success: false, error: 'Key has expired. Please generate new keys first.' });
     }
@@ -1010,7 +994,7 @@ app.delete('/api/interfaces/:interface/peers/:publicKey', async (req, res) => {
     return res.status(400).json({ success: false, error: 'Invalid interface or public key' });
   }
   try {
-    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
     if (isInterfaceKeyExpired(config)) {
       return res.status(403).json({ success: false, error: 'Key has expired. Please generate new keys first.' });
     }
@@ -1052,7 +1036,7 @@ app.post('/api/interfaces/:interface/peers/:publicKey/enable', async (req, res) 
   }
   let connection;
   try {
-    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
     if (isInterfaceKeyExpired(config)) {
       return res.status(403).json({ success: false, error: 'Key has expired. Please generate new keys first.' });
     }
@@ -1095,7 +1079,7 @@ app.post('/api/interfaces/:interface/peers/:publicKey/disable', (req, res) => {
     return res.status(400).json({ success: false, error: 'Invalid interface or public key' });
   }
   try {
-    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
     if (isInterfaceKeyExpired(config)) {
       return res.status(403).json({ success: false, error: 'Key has expired. Please generate new keys first.' });
     }
@@ -1250,7 +1234,7 @@ app.get('/api/interfaces/:interface/config', async (req, res) => {
     return res.status(400).json({ success: false, error: 'Invalid interface name' });
   }
   try {
-    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
     await hydrateRotationKeysFromDb(iface, config);
     res.json({ success: true, config });
   } catch (error) {
@@ -1264,7 +1248,7 @@ app.get('/api/interfaces/:interface/reload', async (req, res) => {
     return res.status(400).json({ success: false, error: 'Invalid interface name' });
   }
   try {
-    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
     await hydrateRotationKeysFromDb(iface, config);
     const loaded = fs.existsSync(path.join(CONFIG_DIR, `${iface}.conf`));
     res.json({ success: true, config, loaded });
@@ -1279,7 +1263,7 @@ app.post('/api/interfaces/:interface/save', (req, res) => {
     return res.status(400).json({ success: false, error: 'Invalid interface name' });
   }
   try {
-    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
     const content = saveInterfaceConfig(iface, config);
     try {
       const status = run('wg', ['show', 'interfaces']);
@@ -1306,7 +1290,7 @@ app.post('/api/interfaces/:interface/connect', (req, res) => {
       logAction(admin, 'start_interface', { interface: iface });
     } catch (e) { }
 
-    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    const config = loadInterfaceConfig(iface, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
     if (isInterfaceKeyExpired(config)) {
       return res.status(403).json({ success: false, error: 'Key has expired. Cannot connect VPN. Please generate new keys first.' });
     }
@@ -1648,7 +1632,7 @@ app.post('/api/connect-vpn', authenticateToken, async (req, res) => {
       throw new Error(`Interface ${targetIface} config not found on server`);
     }
 
-    const config = loadInterfaceConfig(targetIface, { defaultKeyExpiryDays: loadGlobalSettings().keyExpiryDays });
+    const config = loadInterfaceConfig(targetIface, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
     await hydrateRotationKeysFromDb(targetIface, config);
 
     let peer = config.peers.find((p) => p.publicKey === publicKey);
