@@ -122,24 +122,30 @@ export default function AppShell() {
                 )}
                 {grouped.map((g) => (
                   <div key={g.type} className="rounded-md border border-zinc-200 bg-zinc-50/80 p-2">
-                    <div className="text-xs font-semibold text-primary uppercase tracking-wide mb-1.5">
+                    <div
+                      className={`text-xs font-semibold text-primary uppercase tracking-wide${
+                        g.type === 'ingest' ? '' : ' mb-1.5'
+                      }`}
+                    >
                       {g.items[0]?.title || g.type}
                     </div>
-                    <div className="space-y-2">
-                      {g.items.map((it) => (
-                        <div
-                          key={it.id}
-                          className="rounded border border-zinc-100 bg-white px-2 py-1.5 text-xs text-zinc-700"
-                        >
-                          {it.nodeName ? (
-                            <div className="font-medium text-zinc-900 mb-0.5">{it.nodeName}</div>
-                          ) : null}
-                          {it.type === 'ingest' ? null : it.detail ? (
-                            <div className="text-zinc-600 whitespace-pre-wrap break-words">{it.detail}</div>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
+                    {g.type !== 'ingest' && (
+                      <div className="space-y-2">
+                        {g.items.map((it) => (
+                          <div
+                            key={it.id}
+                            className="rounded border border-zinc-100 bg-white px-2 py-1.5 text-xs text-zinc-700"
+                          >
+                            {it.nodeName ? (
+                              <div className="font-medium text-zinc-900 mb-0.5">{it.nodeName}</div>
+                            ) : null}
+                            {it.detail ? (
+                              <div className="text-zinc-600 whitespace-pre-wrap break-words">{it.detail}</div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

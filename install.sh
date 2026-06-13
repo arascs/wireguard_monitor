@@ -83,4 +83,7 @@ systemctl enable --now wg_stats.timer
 systemctl enable --now collect-traffic.timer
 systemctl enable --now logrotate-wireguard.timer
 
+echo "Enable dynamic debugging for WireGuard..."
+echo "module wireguard +p" | sudo tee /etc/modprobe.d/wireguard-debug.conf
+
 echo "WireGuard Monitor installation complete."

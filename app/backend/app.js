@@ -734,8 +734,8 @@ app.post('/api/interfaces/:interface/generate-keys', async (req, res) => {
       } else {
         logAction(admin, 'change_key_pair', {
           interface: iface,
-          old_private_key: oldPrivateKey,
-          new_private_key: newPrivateKey
+          old_public_key: oldPublicKey,
+          new_public_key: newPublicKey
         });
       }
     } catch (e) { }
@@ -749,18 +749,36 @@ app.post('/api/interfaces/:interface/generate-keys', async (req, res) => {
       if (!peer.endpoint) continue;
       const endpointParts = peer.endpoint.split(':');
       if (endpointParts.length !== 2) continue;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 60000);
       try {
-        await fetch(`https://${endpointParts[0]}:3000/api/update-key`, {
+        const response = await fetch(`https://${endpointParts[0]}:3000/api/update-key`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             oldPublicKey,
             newPublicKey,
             rotationKey: peer.rotationKey || ''
-          })
+          }),
+          signal: controller.signal
         });
+        let data = {};
+        try {
+          data = await response.json();
+        } catch (_) { /* ignore */ }
+        if (response.ok && data.success) {
+          console.log(`[Key rotation] Successfully notified peer ${peer.endpoint}`);
+        } else {
+          console.error(`[Key rotation] Failed to notify peer ${peer.endpoint}:`, data.error || response.status);
+        }
       } catch (e) {
-        console.error(`Failed to notify peer ${peer.endpoint}:`, e.message);
+        if (e.name === 'AbortError') {
+          console.error(`[Key rotation] Timeout notifying peer ${peer.endpoint}: no success response within 60s`);
+        } else {
+          console.error(`[Key rotation] Failed to notify peer ${peer.endpoint}:`, e.message);
+        }
+      } finally {
+        clearTimeout(timer);
       }
     }
 
@@ -1215,7 +1233,7 @@ app.post('/api/update-key', async (req, res) => {
 
     try {
       const admin = req.session && req.session.user ? req.session.user : 'unknown';
-      logAction(admin, 'update_key', {
+      logAction(admin, 'update_key_from_peer', {
         interface: foundInterface,
         old_public_key: oldPublicKey,
         new_public_key: newPublicKey
