@@ -9,7 +9,7 @@ const {
   loadInterfaceConfig,
   findPeer,
   peerLogDir
-} = require('../lib/wireguardConfig');
+} = require('../../../common/wireguardConfig');
 
 const dbConfig = {
   host: process.env.WG_DB_HOST || 'localhost',

@@ -1,7 +1,7 @@
 const ipRangeCheck = require('ip-range-check');
 const rateLimit = require('express-rate-limit');
 const cors = require('cors');
-const { logSecurityEvent } = require('./auditLogger');
+const { logSecurityEvent } = require('../modules/logging/auditLogger');
 
 function parseList(env) {
   return String(env || '')

@@ -7,7 +7,7 @@ const {
   disablePeerInConf,
   loadInterfaceConfig,
   findPeer
-} = require('../lib/wireguardConfig');
+} = require('../../../common/wireguardConfig');
 
 const TRAFFIC_FILE = '/etc/wireguard/logs/traffic_history.json';
 
@@ -178,7 +178,7 @@ function createMainDashboardRoutes({ mysql, dbConfig }) {
       }
 
       try {
-        const { logAction } = require('../auditLogger');
+        const { logAction } = require('../../logging/auditLogger');
         const admin = req.session && req.session.user ? req.session.user : 'unknown';
         logAction(admin, 'disable_peer', { interface: interfaceName, publicKey });
       } catch (e) {

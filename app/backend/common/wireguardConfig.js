@@ -1,8 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { spawnSync } = require('child_process');
-const { run } = require('../runCmd');
+const { spawnSync, execFileSync } = require('child_process');
+const { run } = require('./runCmd');
 
 const CONFIG_DIR = '/etc/wireguard/';
 const LOG_BASE = '/etc/wireguard/logs';
@@ -275,6 +275,31 @@ function findPeerBlockRange(lines, publicKey) {
   return null;
 }
 
+/** `wg syncconf` — throws on failure (used by key rotation). */
+function wgSyncconf(iface) {
+  let stripOutput;
+  try {
+    stripOutput = execFileSync('wg-quick', ['strip', iface], { encoding: 'utf8' });
+  } catch (e) {
+    console.error(`[wgSyncconf] wg-quick strip error for ${iface}:`, e.stderr || e.message);
+    throw new Error(e.stderr || e.message || `wg-quick strip ${iface} failed`);
+  }
+
+  const tmpFile = path.join(CONFIG_DIR, `.tmp-sync-${iface}.conf`);
+  fs.writeFileSync(tmpFile, stripOutput, { mode: 0o600 });
+
+  try {
+    execFileSync('wg', ['syncconf', iface, tmpFile], { encoding: 'utf8' });
+  } catch (e) {
+    console.error(`[wgSyncconf] wg syncconf error for ${iface} using file ${tmpFile}:`, e.stderr || e.message);
+    throw new Error(e.stderr || e.message || `wg syncconf ${iface} failed`);
+  } finally {
+    if (fs.existsSync(tmpFile)) {
+      fs.unlinkSync(tmpFile);
+    }
+  }
+}
+
 function wgSyncconfIfRunning(ifaceName) {
   try {
     const status = run('wg', ['show', 'interfaces']);
@@ -398,6 +423,7 @@ module.exports = {
   findPeerIndex,
   disablePeerInConf,
   deletePeerFromConf,
+  wgSyncconf,
   wgSyncconfIfRunning,
   interfaceAddressAsHost32,
   buildClientVpnRouteAllowedIPs

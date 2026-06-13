@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
-const { loginLimiter, clientIp } = require('../security');
-const { isUserExpired } = require('../lib/securityChecks');
+const { loginLimiter, clientIp } = require('../../../common/security');
+const { isUserExpired } = require('../../../common/securityChecks');
 
 
 function createAuthRoutes({ jwt, JWT_SECRET, mysql, dbConfig }) {

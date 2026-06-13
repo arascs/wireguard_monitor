@@ -139,6 +139,12 @@
                 </div>
 
                 <div class="form-group">
+                    <label for="keyRotationTimeoutSeconds">WireGuard key rotation timeout (seconds)</label>
+                    <input type="number" id="keyRotationTimeoutSeconds" min="5" max="600" required>
+                    <span class="form-text">Maximum wait time for each remote peer to acknowledge a key rotation request.</span>
+                </div>
+
+                <div class="form-group">
                     <label for="physicalInterface">Physical Interface for WireGuard</label>
                     <input type="text" id="physicalInterface" required pattern="[a-zA-Z0-9._-]+">
                     <span class="form-text">Physical network interface used to capture inbound WireGuard handshakes (e.g. ens37, eth0).</span>

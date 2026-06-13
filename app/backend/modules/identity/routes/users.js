@@ -1,6 +1,6 @@
 const express = require('express');
-const { logAction } = require('../auditLogger');
-const { deletePeerFromConf } = require('../lib/wireguardConfig');
+const { logAction } = require('../../logging/auditLogger');
+const { deletePeerFromConf } = require('../../../common/wireguardConfig');
 
 function createUserRoutes({ mysql, dbConfig, bcrypt, requireAuth }) {
   const router = express.Router();

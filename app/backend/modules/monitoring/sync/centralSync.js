@@ -2,16 +2,10 @@ const fetch = require('node-fetch');
 const https = require('https');
 const crypto = require('crypto');
 const mysql = require('mysql2/promise');
-const { HOSTNAME } = require('./config');
+const { HOSTNAME } = require('../../../common/config');
+const { dbConfig } = require('../../../common/db');
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
-
-const dbConfig = {
-  host: process.env.WG_DB_HOST || 'localhost',
-  user: process.env.WG_DB_USER || 'root',
-  password: process.env.WG_DB_PASSWORD || 'root',
-  database: process.env.WG_DB_NAME || 'wg_monitor'
-};
 
 function normalizeBaseUrl(u) {
   const trimmed = String(u || '').trim().replace(/\/+$/, '');

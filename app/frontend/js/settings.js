@@ -22,6 +22,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (data.success && data.settings) {
         const s = data.settings;
         document.getElementById('peerDisableHours').value = s.peerDisableHours;
+        document.getElementById('keyRotationTimeoutSeconds').value =
+          s.keyRotationTimeoutSeconds !== undefined ? s.keyRotationTimeoutSeconds : 60;
         document.getElementById('physicalInterface').value = s.physicalInterface || '';
         document.getElementById('nodeApiKey').value = s.apiKey || '';
         document.getElementById('enforceKernelCheck').checked = s.enforceKernelCheck !== false;
@@ -48,6 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const payload = {
       peerDisableHours: document.getElementById('peerDisableHours').value,
+      keyRotationTimeoutSeconds: document.getElementById('keyRotationTimeoutSeconds').value,
       physicalInterface: document.getElementById('physicalInterface').value.trim(),
       apiKey: document.getElementById('nodeApiKey').value,
       enforceKernelCheck: document.getElementById('enforceKernelCheck').checked,

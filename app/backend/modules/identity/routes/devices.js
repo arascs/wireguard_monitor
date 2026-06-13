@@ -1,19 +1,19 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { logAction } = require('../auditLogger');
-const { deletePeerFromConf } = require('../lib/wireguardConfig');
-const { registerExpireHandler, touch: heartbeatTouch, clear: heartbeatClear } = require('../deviceHeartbeat');
+const { logAction } = require('../../logging/auditLogger');
+const { deletePeerFromConf } = require('../../../common/wireguardConfig');
+const { registerExpireHandler, touch: heartbeatTouch, clear: heartbeatClear } = require('../services/deviceHeartbeat');
 const {
   collectSecurityPolicyIssues,
   formatIssues,
   normalizeSettings
-} = require('../lib/securityChecks');
+} = require('../../../common/securityChecks');
 
 function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateToken }) {
   const router = express.Router();
   const CONFIG_DIR = '/etc/wireguard/';
-  const SETTINGS_FILE = path.join(__dirname, '../settings.json');
+  const SETTINGS_FILE = require('../../../common/paths').SETTINGS_FILE;
 
   function loadSecuritySettings() {
     const defaults = {
