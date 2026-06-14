@@ -148,6 +148,13 @@ function findNodeByApiKey(plain) {
   return nodes.find((n) => n.apiKey === plain) || null;
 }
 
+function requestNodeUuid(req) {
+  const fromHeader = String(req.header('x-node-uuid') || '').trim();
+  const fromBody = String(req.body?.machineId || req.body?.nodeMachineId || '').trim();
+  const raw = fromHeader || fromBody;
+  return raw ? raw.toLowerCase() : '';
+}
+
 function apiKeyAuth(req, res, next) {
   const auth = req.header('authorization') || '';
   const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
@@ -155,6 +162,29 @@ function apiKeyAuth(req, res, next) {
   if (!provided) return res.status(401).json({ ok: false, error: 'missing api key' });
   const row = findNodeByApiKey(provided);
   if (!row) return res.status(401).json({ ok: false, error: 'invalid api key' });
+
+  const path = req.path || '';
+  const uuid = requestNodeUuid(req);
+
+  if (path === '/api/register') {
+    if (!uuid) return res.status(400).json({ ok: false, error: 'machineId required' });
+    if (row.machineId && row.machineId.toLowerCase() !== uuid) {
+      return res.status(409).json({ ok: false, error: 'api key already bound to another machine' });
+    }
+    req.nodeKey = row;
+    return next();
+  }
+
+  if (path !== '/api/logs/push') {
+    if (!row.machineId) {
+      return res.status(409).json({ ok: false, error: 'node not registered yet' });
+    }
+    if (!uuid) return res.status(401).json({ ok: false, error: 'missing node uuid' });
+    if (row.machineId.toLowerCase() !== uuid) {
+      return res.status(401).json({ ok: false, error: 'node uuid mismatch' });
+    }
+  }
+
   req.nodeKey = row;
   next();
 }
@@ -468,7 +498,7 @@ app.post('/api/register', apiKeyAuth, async (req, res) => {
 
   node.id = id;
   node.name = name;
-  node.machineId = machineId;
+  node.machineId = machineId.toLowerCase();
   node.baseUrl = baseUrl;
   node.publicIp = publicIp;
   node.region = geo ? geo.country : node.region || '';

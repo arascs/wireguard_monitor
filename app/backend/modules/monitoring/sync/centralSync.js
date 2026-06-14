@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const mysql = require('mysql2/promise');
 const { HOSTNAME } = require('../../../common/config');
 const { dbConfig } = require('../../../common/db');
+const { getNodeProductUuid } = require('../../../common/nodeUuid');
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
@@ -46,8 +47,12 @@ function getApiKey() {
 }
 
 function authHeaders() {
+  const headers = {};
   const key = getApiKey();
-  return key ? { Authorization: `Bearer ${key}` } : {};
+  if (key) headers.Authorization = `Bearer ${key}`;
+  const uuid = getNodeProductUuid();
+  if (uuid) headers['X-Node-UUID'] = uuid;
+  return headers;
 }
 
 async function postJson(url, body) {
@@ -108,6 +113,7 @@ module.exports = {
   getCentralBase,
   getApiKey,
   authHeaders,
+  getNodeProductUuid,
   nodeIdFor,
   normalizeBaseUrl,
   httpsAgent

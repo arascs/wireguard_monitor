@@ -132,7 +132,6 @@ func getDeviceName() string {
 	return strings.TrimSpace(name)
 }
 
-// getMachineID returns the /etc/machine-id content
 func getMachineID() string {
 	if data, err := os.ReadFile("/sys/class/dmi/id/product_uuid"); err == nil {
 		return strings.TrimSpace(string(data))
