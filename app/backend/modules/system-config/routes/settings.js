@@ -41,7 +41,29 @@ module.exports = function createSettingsRoutes() {
         enforcePasswordRequiredLinux: req.body.enforcePasswordRequiredLinux !== undefined
           ? req.body.enforcePasswordRequiredLinux : currentSettings.enforcePasswordRequiredLinux,
         enforcePasswordRequiredWindows: req.body.enforcePasswordRequiredWindows !== undefined
-          ? req.body.enforcePasswordRequiredWindows : currentSettings.enforcePasswordRequiredWindows
+          ? req.body.enforcePasswordRequiredWindows : currentSettings.enforcePasswordRequiredWindows,
+        enforceWifiSecureLinux: req.body.enforceWifiSecureLinux !== undefined
+          ? req.body.enforceWifiSecureLinux : currentSettings.enforceWifiSecureLinux,
+        enforceWifiSecureWindows: req.body.enforceWifiSecureWindows !== undefined
+          ? req.body.enforceWifiSecureWindows : currentSettings.enforceWifiSecureWindows,
+        enforceNoUnallowedSharesLinux: req.body.enforceNoUnallowedSharesLinux !== undefined
+          ? req.body.enforceNoUnallowedSharesLinux : currentSettings.enforceNoUnallowedSharesLinux,
+        enforceNoUnallowedSharesWindows: req.body.enforceNoUnallowedSharesWindows !== undefined
+          ? req.body.enforceNoUnallowedSharesWindows : currentSettings.enforceNoUnallowedSharesWindows,
+        enforceNoMobileHotspotLinux: req.body.enforceNoMobileHotspotLinux !== undefined
+          ? req.body.enforceNoMobileHotspotLinux : currentSettings.enforceNoMobileHotspotLinux,
+        enforceNoMobileHotspotWindows: req.body.enforceNoMobileHotspotWindows !== undefined
+          ? req.body.enforceNoMobileHotspotWindows : currentSettings.enforceNoMobileHotspotWindows,
+        enforceNoUsbStorageLinux: req.body.enforceNoUsbStorageLinux !== undefined
+          ? req.body.enforceNoUsbStorageLinux : currentSettings.enforceNoUsbStorageLinux,
+        enforceNoUsbStorageWindows: req.body.enforceNoUsbStorageWindows !== undefined
+          ? req.body.enforceNoUsbStorageWindows : currentSettings.enforceNoUsbStorageWindows,
+        enforceAntivirusWindows: req.body.enforceAntivirusWindows !== undefined
+          ? req.body.enforceAntivirusWindows : currentSettings.enforceAntivirusWindows,
+        enforceUacWindows: req.body.enforceUacWindows !== undefined
+          ? req.body.enforceUacWindows : currentSettings.enforceUacWindows,
+        enforceBitlockerWindows: req.body.enforceBitlockerWindows !== undefined
+          ? req.body.enforceBitlockerWindows : currentSettings.enforceBitlockerWindows
       };
 
       fs.writeFileSync(SETTINGS_FILE, JSON.stringify(newSettings, null, 2), 'utf8');

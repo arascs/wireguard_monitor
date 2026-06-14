@@ -86,6 +86,53 @@ function collectSecurityPolicyIssues(securityInfo, settings) {
     );
   }
 
+  if (os === 'linux') {
+    if (cfg.enforceWifiSecureLinux && securityInfo.wifiInsecure === true) {
+      issues.push('Insecure Wi-Fi (weak cipher or open authentication)');
+    }
+    if (cfg.enforceNoUnallowedSharesLinux) {
+      const shares = Array.isArray(securityInfo.unallowedShares) ? securityInfo.unallowedShares : [];
+      if (shares.length > 0) {
+        issues.push(`Disallowed SMB shares: ${shares.join(', ')}`);
+      }
+    }
+    if (cfg.enforceNoMobileHotspotLinux && securityInfo.mobileHotspotActive === true) {
+      issues.push('Mobile hotspot is active');
+    }
+    if (cfg.enforceNoUsbStorageLinux && securityInfo.usbStoragePresent === true) {
+      issues.push('External USB storage is connected');
+    }
+  }
+
+  if (os === 'windows') {
+    if (cfg.enforceWifiSecureWindows && securityInfo.wifiInsecure === true) {
+      issues.push('Insecure Wi-Fi (weak cipher or open authentication)');
+    }
+    if (cfg.enforceNoUnallowedSharesWindows) {
+      const shares = Array.isArray(securityInfo.unallowedShares) ? securityInfo.unallowedShares : [];
+      if (shares.length > 0) {
+        issues.push(`Disallowed SMB shares: ${shares.join(', ')}`);
+      }
+    }
+    if (cfg.enforceNoMobileHotspotWindows && securityInfo.mobileHotspotActive === true) {
+      issues.push('Mobile hotspot (Wi-Fi Direct) is active');
+    }
+    if (cfg.enforceNoUsbStorageWindows && securityInfo.usbStoragePresent === true) {
+      issues.push('External USB storage is connected');
+    }
+    if (cfg.enforceAntivirusWindows) {
+      if (securityInfo.antivirusEnabled !== true || securityInfo.realTimeProtectionEnabled !== true) {
+        issues.push('Antivirus or real-time protection is not enabled');
+      }
+    }
+    if (cfg.enforceUacWindows && securityInfo.uacEnabled !== true) {
+      issues.push('UAC is not enabled');
+    }
+    if (cfg.enforceBitlockerWindows && securityInfo.bitlockerCompliant !== true) {
+      issues.push('BitLocker is not fully enabled on all mounted volumes');
+    }
+  }
+
   return issues;
 }
 

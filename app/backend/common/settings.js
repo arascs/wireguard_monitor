@@ -12,7 +12,18 @@ const defaultSettings = {
   enforceFirewallLinux: true,
   enforceFirewallWindows: true,
   enforcePasswordRequiredLinux: true,
-  enforcePasswordRequiredWindows: true
+  enforcePasswordRequiredWindows: true,
+  enforceWifiSecureLinux: false,
+  enforceWifiSecureWindows: false,
+  enforceNoUnallowedSharesLinux: false,
+  enforceNoUnallowedSharesWindows: false,
+  enforceNoMobileHotspotLinux: false,
+  enforceNoMobileHotspotWindows: false,
+  enforceNoUsbStorageLinux: false,
+  enforceNoUsbStorageWindows: false,
+  enforceAntivirusWindows: false,
+  enforceUacWindows: false,
+  enforceBitlockerWindows: false
 };
 
 function loadGlobalSettings() {

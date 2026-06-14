@@ -23,7 +23,18 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
       enforceFirewallLinux: true,
       enforceFirewallWindows: true,
       enforcePasswordRequiredLinux: true,
-      enforcePasswordRequiredWindows: true
+      enforcePasswordRequiredWindows: true,
+      enforceWifiSecureLinux: false,
+      enforceWifiSecureWindows: false,
+      enforceNoUnallowedSharesLinux: false,
+      enforceNoUnallowedSharesWindows: false,
+      enforceNoMobileHotspotLinux: false,
+      enforceNoMobileHotspotWindows: false,
+      enforceNoUsbStorageLinux: false,
+      enforceNoUsbStorageWindows: false,
+      enforceAntivirusWindows: false,
+      enforceUacWindows: false,
+      enforceBitlockerWindows: false
     };
     try {
       if (!fs.existsSync(SETTINGS_FILE)) return defaults;
