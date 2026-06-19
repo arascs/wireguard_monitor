@@ -75,14 +75,14 @@ function buildSessionExport(rows) {
     'Protocol',
     'Duration (sec)',
     'Total bytes',
-    'Direction1 packets',
-    'Direction1 bytes',
-    'Direction2 packets',
-    'Direction2 bytes'
+    'Upload packets',
+    'Upload bytes',
+    'Download packets',
+    'Download bytes'
   ];
   const out = rows.map((e) => {
-    const d1 = e.direction1 || {};
-    const d2 = e.direction2 || {};
+    const d1 = e.upload || {};
+    const d2 = e.download || {};
     return [
       new Date(e.start_time).toLocaleString(),
       new Date(e.end_time).toLocaleString(),
@@ -276,8 +276,8 @@ function renderSessionRows() {
         end_time:     entry.end_time,
         duration_sec: entry.duration_sec,
         total_bytes:  entry.total_bytes,
-        direction1:   entry.direction1,
-        direction2:   entry.direction2
+        upload:       entry.upload,
+        download:     entry.download
       })
     );
     document.getElementById('log-body').appendChild(tr);

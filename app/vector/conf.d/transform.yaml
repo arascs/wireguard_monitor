@@ -95,8 +95,8 @@ transforms:
       .timestamp = to_timestamp!(.start_time)
 
       # flatten để dễ query nếu đẩy sang SIEM
-      .bytes_in = .direction1.bytes
-      .bytes_out = .direction2.bytes
+      .bytes_in = .upload.bytes
+      .bytes_out = .download.bytes
 
   fmt_session_syslog:
     type: remap

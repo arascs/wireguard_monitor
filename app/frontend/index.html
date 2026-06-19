@@ -135,6 +135,16 @@
         .btn-terminate:hover {
             background: rgba(220, 53, 69, 1);
         }
+
+        .peer-link {
+            color: rgba(134, 22, 24, 1);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .peer-link:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 
@@ -256,9 +266,10 @@
                 + '<th>Name</th><th>Interface</th><th>Handshake</th><th></th>'
                 + '</tr></thead><tbody>';
             peers.forEach(p => {
+                const detailUrl = `/dashboard/${encodeURIComponent(p.interfaceName)}/peer/${encodeURIComponent(p.publicKey)}`;
                 html += `<tr>
-                    <td>${escHtml(p.name)}</td>
-                    <td>${escHtml(p.interfaceName)}</td>
+                    <td><a href="${detailUrl}" class="peer-link">${escHtml(p.name)}</a></td>
+                    <td><a href="${detailUrl}" class="peer-link">${escHtml(p.interfaceName)}</a></td>
                     <td>${p.lastHandshake ? timeAgo(p.lastHandshake) : '–'}</td>
                     <td><button class="btn-terminate"
                         data-iface="${escHtml(p.interfaceName)}"

@@ -150,8 +150,8 @@ class VPNMonitor:
                 "end_time": datetime.fromtimestamp(end_timestamp).isoformat(),
                 "duration_sec": duration,
                 "total_bytes": session_data['bytes'],
-                "direction1": session_data.get('direction1', {'packets': 0, 'bytes': 0}),
-                "direction2": session_data.get('direction2', {'packets': 0, 'bytes': 0})
+                "upload": session_data.get('upload', {'packets': 0, 'bytes': 0}),
+                "download": session_data.get('download', {'packets': 0, 'bytes': 0})
             }
 
             with open(history_file, 'a') as f:
@@ -199,8 +199,8 @@ class VPNMonitor:
                         session_key = (src_ip, sport, dst_ip, dport)
                         current_scan_keys.add(session_key)
 
-                        direction1_packets, direction1_bytes = 0, 0
-                        direction2_packets, direction2_bytes = 0, 0
+                        upload_packets, upload_bytes = 0, 0
+                        download_packets, download_bytes = 0, 0
                         total_bytes = 0
 
                         if len(meta_tags) >= 1:
@@ -208,20 +208,20 @@ class VPNMonitor:
                             if counters1 is not None:
                                 p1 = counters1.find('packets')
                                 b1 = counters1.find('bytes')
-                                if p1 is not None: direction1_packets = int(p1.text)
+                                if p1 is not None: upload_packets = int(p1.text)
                                 if b1 is not None:
-                                    direction1_bytes = int(b1.text)
-                                    total_bytes += direction1_bytes
+                                    upload_bytes = int(b1.text)
+                                    total_bytes += upload_bytes
 
                         if len(meta_tags) >= 2:
                             counters2 = meta_tags[1].find('counters')
                             if counters2 is not None:
                                 p2 = counters2.find('packets')
                                 b2 = counters2.find('bytes')
-                                if p2 is not None: direction2_packets = int(p2.text)
+                                if p2 is not None: download_packets = int(p2.text)
                                 if b2 is not None:
-                                    direction2_bytes = int(b2.text)
-                                    total_bytes += direction2_bytes
+                                    download_bytes = int(b2.text)
+                                    total_bytes += download_bytes
 
                         if session_key not in self.sessions:
                             logging.info(f"START: {peer_info['interface']}/{peer_info['name']} ({src_ip}:{sport}) -> {service_name}")
@@ -239,13 +239,13 @@ class VPNMonitor:
                                 'protocol': protocol,
                                 'start_time': timestamp,
                                 'bytes': total_bytes,
-                                'direction1': {'packets': direction1_packets, 'bytes': direction1_bytes},
-                                'direction2': {'packets': direction2_packets, 'bytes': direction2_bytes}
+                                'upload': {'packets': upload_packets, 'bytes': upload_bytes},
+                                'download': {'packets': download_packets, 'bytes': download_bytes}
                             }
                         else:
                             self.sessions[session_key]['bytes'] = total_bytes
-                            self.sessions[session_key]['direction1'] = {'packets': direction1_packets, 'bytes': direction1_bytes}
-                            self.sessions[session_key]['direction2'] = {'packets': direction2_packets, 'bytes': direction2_bytes}
+                            self.sessions[session_key]['upload'] = {'packets': upload_packets, 'bytes': upload_bytes}
+                            self.sessions[session_key]['download'] = {'packets': download_packets, 'bytes': download_bytes}
 
                     except (AttributeError, ValueError):
                         continue
@@ -283,8 +283,8 @@ class VPNMonitor:
                 "start_time": datetime.fromtimestamp(s['start_time']).isoformat(),
                 "duration_sec": int(time.time() - s['start_time']),
                 "bytes": s['bytes'],
-                "direction1": s.get('direction1', {'packets': 0, 'bytes': 0}),
-                "direction2": s.get('direction2', {'packets': 0, 'bytes': 0})
+                "upload": s.get('upload', {'packets': 0, 'bytes': 0}),
+                "download": s.get('download', {'packets': 0, 'bytes': 0})
             })
 
         tmp = f"{file_path}.tmp"

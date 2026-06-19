@@ -280,6 +280,16 @@
         </form>
     </div>
 
+    <div id="session-detail-modal"
+        style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:25px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.15);z-index:2000;max-width:520px;width:calc(100% - 32px);">
+        <h3 style="margin-top:0;">Session details</h3>
+        <div id="session-detail-body" style="font-size:0.9rem;line-height:1.6;"></div>
+        <div style="text-align:right;margin-top:16px;">
+            <button type="button" id="close-session-detail">Close</button>
+        </div>
+    </div>
+    <div id="session-detail-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:1999;"></div>
+
     <script src="/js/navbar.js"></script>
     <script src="/js/peer_detail.js"></script>
 </body>

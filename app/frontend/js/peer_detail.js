@@ -218,6 +218,8 @@ function updatePeerCharts() {
 }
 
 // Load peer connections from JSON file
+let activeSessions = [];
+
 async function loadPeerConnections(interfaceId, peerName) {
     try {
         if (!peerName) {
@@ -225,7 +227,6 @@ async function loadPeerConnections(interfaceId, peerName) {
             return;
         }
         const url = `/api/dashboard/${encodeURIComponent(interfaceId)}/peer/${encodeURIComponent(peerName)}/connections`;
-        console.log('Fetching connections from:', url);
         const response = await fetch(url);
         
         if (!response.ok) {
@@ -234,7 +235,7 @@ async function loadPeerConnections(interfaceId, peerName) {
         }
         
         const data = await response.json();
-        console.log('Connections data received:', data);
+        activeSessions = data.sessions || [];
         
         // Find the connections section or create it
         let connectionsSection = document.getElementById('connections-section');
@@ -256,7 +257,7 @@ async function loadPeerConnections(interfaceId, peerName) {
             </div>
         `;
         
-        if (data.sessions && data.sessions.length > 0) {
+        if (activeSessions.length > 0) {
             tableHTML += `
                 <table style="width: 100%; border-collapse: collapse; border: 1px solid #861618;">
                     <thead>
@@ -273,11 +274,8 @@ async function loadPeerConnections(interfaceId, peerName) {
                     </thead>
                     <tbody>
             `;
-            
-            data.sessions.forEach((session, index) => {
-                const sessionId = `session-${index}`;
-                const dir1 = session.direction1 || { packets: 0, bytes: 0 };
-                const dir2 = session.direction2 || { packets: 0, bytes: 0 };
+
+            activeSessions.forEach((session, index) => {
                 tableHTML += `
                     <tr>
                         <td style="padding: 10px; border: 1px solid #861618;">${session.source || 'N/A'}</td>
@@ -288,21 +286,7 @@ async function loadPeerConnections(interfaceId, peerName) {
                         <td style="padding: 10px; border: 1px solid #861618;">${formatDuration(session.duration_sec)}</td>
                         <td style="padding: 10px; border: 1px solid #861618;">${formatBytes(session.bytes || 0)}</td>
                         <td style="padding: 10px; border: 1px solid #861618; text-align: center;">
-                            <button onclick="toggleConnectionDetails(${index})" style="padding: 5px 10px; cursor: pointer; border: 1px solid #861618; background: #fff; color: #861618;">View Details</button>
-                        </td>
-                    </tr>
-                    <tr id="detail-${index}" style="display: none;">
-                        <td colspan="8" style="padding: 15px; border: 1px solid #861618; background-color: #f9f9f9;">
-                            <div style="margin-left: 20px;">
-                                <div style="margin-bottom: 10px;">
-                                    <strong>Direction 1: ${session.source || 'N/A'} → ${session.resource_ip_port || 'N/A'}</strong><br>
-                                    Packets: ${dir1.packets || 0} | Bytes: ${formatBytes(dir1.bytes || 0)}
-                                </div>
-                                <div>
-                                    <strong>Direction 2: ${session.resource_ip_port || 'N/A'} → ${session.source || 'N/A'}</strong><br>
-                                    Packets: ${dir2.packets || 0} | Bytes: ${formatBytes(dir2.bytes || 0)}
-                                </div>
-                            </div>
+                            <button type="button" class="btn-session-detail" data-index="${index}" style="padding: 5px 10px; cursor: pointer; border: 1px solid #861618; background: #fff; color: #861618;">View Details</button>
                         </td>
                     </tr>
                 `;
@@ -318,21 +302,44 @@ async function loadPeerConnections(interfaceId, peerName) {
         }
         
         connectionsSection.innerHTML = tableHTML;
-        
+        connectionsSection.querySelectorAll('.btn-session-detail').forEach(btn => {
+            btn.addEventListener('click', () => showSessionDetail(Number(btn.dataset.index)));
+        });
+
     } catch (error) {
         console.error('Error loading peer connections:', error);
     }
 }
 
-function toggleConnectionDetails(index) {
-    const detailRow = document.getElementById(`detail-${index}`);
-    if (detailRow) {
-        if (detailRow.style.display === 'none') {
-            detailRow.style.display = '';
-        } else {
-            detailRow.style.display = 'none';
-        }
-    }
+function showSessionDetail(index) {
+    const session = activeSessions[index];
+    if (!session) return;
+
+    const upload = session.upload || { packets: 0, bytes: 0 };
+    const download = session.download || { packets: 0, bytes: 0 };
+    const body = document.getElementById('session-detail-body');
+    body.innerHTML = `
+        <div><strong>Service:</strong> ${session.service || 'N/A'}</div>
+        <div><strong>Source:</strong> ${session.source || 'N/A'}</div>
+        <div><strong>Resource:</strong> ${session.resource_ip_port || 'N/A'}</div>
+        <div><strong>Protocol:</strong> ${(session.protocol || 'N/A').toUpperCase()}</div>
+        <hr style="border:none;border-top:1px solid #eee;margin:12px 0;">
+        <div style="margin-bottom:10px;">
+            <strong>Upload: ${session.source || 'N/A'} → ${session.resource_ip_port || 'N/A'}</strong><br>
+            Packets: ${upload.packets || 0} | Bytes: ${formatBytes(upload.bytes || 0)}
+        </div>
+        <div>
+            <strong>Download: ${session.resource_ip_port || 'N/A'} → ${session.source || 'N/A'}</strong><br>
+            Packets: ${download.packets || 0} | Bytes: ${formatBytes(download.bytes || 0)}
+        </div>
+    `;
+    document.getElementById('session-detail-modal').style.display = 'block';
+    document.getElementById('session-detail-backdrop').style.display = 'block';
+}
+
+function closeSessionDetail() {
+    document.getElementById('session-detail-modal').style.display = 'none';
+    document.getElementById('session-detail-backdrop').style.display = 'none';
 }
 
 // Peer Charts Logic
@@ -494,6 +501,8 @@ function setupEditPeerModal() {
 function initPeerDetail() {
     initSidebar();
     setupEditPeerModal();
+    document.getElementById('close-session-detail')?.addEventListener('click', closeSessionDetail);
+    document.getElementById('session-detail-backdrop')?.addEventListener('click', closeSessionDetail);
     loadPeerPage();
 
     setInterval(() => {

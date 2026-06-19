@@ -66,8 +66,8 @@
         }
 
         #detail-modal .modal-content {
-            width: 520px;
-            max-width: min(520px, calc(100vw - 32px));
+            width: 640px;
+            max-width: min(640px, calc(100vw - 32px));
             max-height: min(90vh, calc(100vh - 32px));
             margin: 0;
             padding: 28px 32px;
@@ -103,8 +103,8 @@
 
         #detail-modal .detail-grid {
             display: grid;
-            grid-template-columns: 140px 1fr;
-            gap: 8px 12px;
+            grid-template-columns: minmax(0, 46%) minmax(0, 54%);
+            gap: 10px 20px;
             font-size: 0.9rem;
         }
 
@@ -113,11 +113,15 @@
             color: #555;
             text-transform: capitalize;
             padding-top: 2px;
+            word-break: break-word;
+            overflow-wrap: anywhere;
         }
 
         #detail-modal .detail-value {
             color: #222;
-            word-break: break-all;
+            word-break: break-word;
+            overflow-wrap: anywhere;
+            min-width: 0;
         }
 
         /* ── Tabs ── */
