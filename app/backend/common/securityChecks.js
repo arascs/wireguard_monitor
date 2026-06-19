@@ -93,7 +93,7 @@ function collectSecurityPolicyIssues(securityInfo, settings) {
     if (cfg.enforceNoUnallowedSharesLinux) {
       const shares = Array.isArray(securityInfo.unallowedShares) ? securityInfo.unallowedShares : [];
       if (shares.length > 0) {
-        issues.push(`Disallowed SMB shares: ${shares.join(', ')}`);
+        issues.push('Disallowed SMB shares');
       }
     }
     if (cfg.enforceNoMobileHotspotLinux && securityInfo.mobileHotspotActive === true) {
@@ -111,7 +111,7 @@ function collectSecurityPolicyIssues(securityInfo, settings) {
     if (cfg.enforceNoUnallowedSharesWindows) {
       const shares = Array.isArray(securityInfo.unallowedShares) ? securityInfo.unallowedShares : [];
       if (shares.length > 0) {
-        issues.push(`Disallowed SMB shares: ${shares.join(', ')}`);
+        issues.push('Disallowed SMB shares');
       }
     }
     if (cfg.enforceNoMobileHotspotWindows && securityInfo.mobileHotspotActive === true) {

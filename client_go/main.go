@@ -562,18 +562,18 @@ func updateHeartbeatLabel() {
 	st.mu.RUnlock()
 
 	if !anyConnected {
-		hbLabel.SetText("💤  No active VPN connection")
+		hbLabel.SetText("No active VPN connection")
 		return
 	}
 	if failed {
-		hbLabel.SetText(fmt.Sprintf("💀  Heartbeat FAILED — %s", reason))
+		hbLabel.SetText(fmt.Sprintf("Heartbeat FAILED — %s", reason))
 		return
 	}
 	if count == 0 {
-		hbLabel.SetText("💓  Heartbeat: waiting for first tick (60s)…")
+		hbLabel.SetText("Heartbeat: waiting for first tick (60s)…")
 		return
 	}
-	hbLabel.SetText(fmt.Sprintf("💓  Heartbeat: #%d  last sent at %s  (every 60s)", count, lastAt.Format("15:04:05")))
+	hbLabel.SetText(fmt.Sprintf("Heartbeat: #%d  last sent at %s  (every 60s)", count, lastAt.Format("15:04:05")))
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
