@@ -394,6 +394,35 @@ function deletePeerFromConf(ifaceName, publicKey) {
   return { updated: false, reason: 'Peer not found in config' };
 }
 
+function getPeerLatestHandshakeEpochSeconds(interfaceName, publicKey) {
+  if (!interfaceName || !publicKey) {
+    return null;
+  }
+
+  let out = '';
+  try {
+    out = run('wg', ['show', interfaceName, 'latest-handshakes']).trim();
+  } catch (e) {
+    return null;
+  }
+
+  if (!out) {
+    return null;
+  }
+  for (const line of out.split('\n')) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 2) {
+      continue;
+    }
+    const key = parts[0];
+    const ts = parseInt(parts[1], 10);
+    if (key === publicKey && !Number.isNaN(ts)) {
+      return ts;
+    }
+  }
+  return null;
+}
+
 function interfaceAddressAsHost32(addressField) {
   const first = String(addressField || '').split(',')[0].trim();
   if (!first) return null;

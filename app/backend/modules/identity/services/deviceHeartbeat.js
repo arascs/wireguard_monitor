@@ -9,8 +9,8 @@ let onExpiredDeviceKey = null;
 
 const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 
-function createDeviceKey(username, deviceName) {
-  return `${username}:${deviceName}`;
+function createDeviceKey(username, machineId) {
+  return `${username}:${String(machineId || '').trim()}`;
 }
 
 function registerExpireHandler(handler) {
@@ -26,15 +26,19 @@ async function ensureStarted() {
   started = true;
 
   try {
+    // turn on redis keyspace expire events notifications
+    // E: Keyevent notification, x: expired event
     await pub.configSet('notify-keyspace-events', 'Ex');
   } catch (e) {
     console.warn('[heartbeat] Cannot set notify-keyspace-events:', e.message);
   }
 
+  // subscriber listening for expired keys
   await sub.pSubscribe('__keyevent@0__:expired', async (message) => {
     if (typeof message !== 'string' || message.indexOf(':') < 1) return;
     if (!onExpiredDeviceKey) return;
     try {
+      // call the handler function
       await onExpiredDeviceKey(message);
     } catch (e) {
       console.error('[heartbeat] Expired key handler failed:', e.message);
@@ -42,16 +46,17 @@ async function ensureStarted() {
   });
 }
 
-async function touch(username, deviceName) {
+async function touch(username, machineId) {
   await ensureStarted();
-  const key = createDeviceKey(username, deviceName);
+  const key = createDeviceKey(username, machineId);
+  // publisher sets the key with the TTL
   await pub.setEx(key, HEARTBEAT_TTL_SECONDS, '1');
   return { key, ttl: HEARTBEAT_TTL_SECONDS };
 }
 
-async function clear(username, deviceName) {
+async function clear(username, machineId) {
   await ensureStarted();
-  await pub.del(createDeviceKey(username, deviceName));
+  await pub.del(createDeviceKey(username, machineId));
 }
 
 module.exports = {

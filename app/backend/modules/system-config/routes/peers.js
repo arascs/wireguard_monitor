@@ -61,7 +61,7 @@ module.exports = function createPeerRoutes() {
       await hydrateRotationKeysFromDb(iface, config);
 
       try {
-        const admin = req.session && req.session.user ? req.session.user : 'unknown';
+        const admin = req.session && req.session.user ? req.session.user : 'system';
         if (!hasExistingKey) {
           logAction(admin, 'add_interface', {
             interface: iface,
@@ -470,8 +470,26 @@ module.exports = function createPeerRoutes() {
   router.post('/update-key', async (req, res) => {
     try {
       const { oldPublicKey, newPublicKey, rotationKey } = req.body || {};
-      if (!oldPublicKey || !newPublicKey) {
-        return res.status(400).json({ success: false, error: 'Missing oldPublicKey or newPublicKey' });
+      if (!oldPublicKey || !newPublicKey || !rotationKey) {
+        return res.status(400).json({ success: false, error: 'Invalid request' });
+      }
+
+      let expectedRotation = '';
+      try {
+        const conn = await mysql.createConnection(dbConfig);
+        const [rows] = await conn.execute(
+          'SELECT site_rotation_key FROM sites WHERE site_pubkey = ? AND `interface` = ? LIMIT 1',
+          [oldPublicKey, foundInterface]
+        );
+        await conn.end();
+        if (rows.length && rows[0].site_rotation_key != null) {
+          expectedRotation = String(rows[0].site_rotation_key);
+        }
+      } catch (dbErr) {
+        console.error('update-key rotation lookup:', dbErr.message);
+      }
+      if (!secretStringsMatch(expectedRotation, rotationKey)) {
+        return res.status(403).json({ success: false, error: 'Invalid rotation key' });
       }
 
       const interfaces = listInterfaces();
@@ -522,24 +540,6 @@ module.exports = function createPeerRoutes() {
         return res.status(404).json({ success: false, error: 'Peer not found in any interface' });
       }
 
-      let expectedRotation = '';
-      try {
-        const conn = await mysql.createConnection(dbConfig);
-        const [rows] = await conn.execute(
-          'SELECT site_rotation_key FROM sites WHERE site_pubkey = ? AND `interface` = ? LIMIT 1',
-          [oldPublicKey, foundInterface]
-        );
-        await conn.end();
-        if (rows.length && rows[0].site_rotation_key != null) {
-          expectedRotation = String(rows[0].site_rotation_key);
-        }
-      } catch (dbErr) {
-        console.error('update-key rotation lookup:', dbErr.message);
-      }
-      if (!secretStringsMatch(expectedRotation, rotationKey)) {
-        return res.status(403).json({ success: false, error: 'Invalid rotation key' });
-      }
-
       for (let i = peerStartIndex; i <= peerEndIndex; i++) {
         const clean = foundLines[i].replace(/^\s*#\s*/, '').trim();
         const m = clean.match(/^PublicKey\s*=\s*(.+)\s*$/i);
@@ -572,7 +572,7 @@ module.exports = function createPeerRoutes() {
       }
 
       try {
-        const admin = req.session && req.session.user ? req.session.user : 'unknown';
+        const admin = req.session && req.session.user ? req.session.user : 'system';
         logAction(admin, 'update_key_from_peer', {
           interface: foundInterface,
           old_public_key: oldPublicKey,

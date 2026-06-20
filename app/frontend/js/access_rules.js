@@ -54,6 +54,10 @@ async function loadApplicationsForRules() {
   const select = document.getElementById('rule-application-id');
   if (!select) return;
   select.innerHTML = '';
+  const allOpt = document.createElement('option');
+  allOpt.value = 'all';
+  allOpt.textContent = 'All applications';
+  select.appendChild(allOpt);
   try {
     const res = await fetch('/api/applications');
     const data = await res.json();
@@ -135,16 +139,23 @@ document.addEventListener('DOMContentLoaded', () => {
   const form = document.getElementById('create-rule-form');
 
   function updateSourceGroups(v) {
+    const hideAll = v === 'all';
     siteGroup.style.display = v === 'site' ? 'block' : 'none';
     deviceGroup.style.display = v === 'device' ? 'block' : 'none';
     interfaceGroup.style.display = v === 'interface' ? 'block' : 'none';
     ipGroup.style.display = v === 'ip' ? 'block' : 'none';
+    if (hideAll) {
+      siteGroup.style.display = 'none';
+      deviceGroup.style.display = 'none';
+      interfaceGroup.style.display = 'none';
+      ipGroup.style.display = 'none';
+    }
   }
 
   function openCreateRuleModal() {
     form?.reset();
-    if (sourceTypeSelect) sourceTypeSelect.value = 'site';
-    updateSourceGroups('site');
+    if (sourceTypeSelect) sourceTypeSelect.value = 'all';
+    updateSourceGroups('all');
     document.getElementById('create-rule-modal')?.classList.add('open');
   }
 
@@ -179,7 +190,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (!name || !sourceType || !applicationId || !action) return;
 
-      const body = { name, sourceType, applicationId: parseInt(applicationId, 10), action };
+      const body = {
+        name,
+        sourceType,
+        applicationId: applicationId === 'all' ? 'all' : parseInt(applicationId, 10),
+        action
+      };
 
       if (sourceType === 'site') {
         const siteId = document.getElementById('rule-site-id').value;

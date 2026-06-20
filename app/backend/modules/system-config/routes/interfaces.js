@@ -29,7 +29,7 @@ module.exports = function createInterfaceRoutes() {
       try {
         const content = fs.existsSync(LOG_FILE) ? fs.readFileSync(LOG_FILE, 'utf8') : '';
         const matched = content.split('\n').filter((l) => l.includes(interfaceName));
-        lines = matched.slice(-50).join('\n');
+        lines = matched.slice(-200).join('\n');
       } catch (e) {
         lines = '';
       }

@@ -185,12 +185,10 @@ async function startServer() {
 
   const hLan = process.env.TLS_INTERNAL_BIND || '192.168.178.128';
   const hPub = process.env.TLS_PUBLIC_BIND || '172.16.0.128';
-  const hLo = process.env.TLS_LOOPBACK_BIND || '127.0.0.1';
 
   const listeners = [
     [internalTls, hLan],
     [publicTls, hPub],
-    [internalTls, hLo]
   ];
 
   const onBoot = startCentralSync(PORT);

@@ -34,16 +34,18 @@ module.exports = function createConnectVpnRoutes({ authenticateToken }) {
         return res.status(400).json({ success: false, error: 'Missing deviceName' });
       }
 
+      if (!securityInfo) {
+        return res.status(400).json({ success: false, error: 'Missing securityInfo' });
+      }
+
       const settings = loadGlobalSettings();
-      if (securityInfo) {
-        const issues = collectSecurityPolicyIssues(securityInfo, settings);
-        if (issues.length > 0) {
-          return res.status(403).json({
-            success: false,
-            error: `Security policy violation: ${formatIssues(issues)}`,
-            issues
-          });
-        }
+      const issues = collectSecurityPolicyIssues(securityInfo, settings);
+      if (issues.length > 0) {
+        return res.status(403).json({
+          success: false,
+          error: `Security policy violation: ${formatIssues(issues)}`,
+          issues
+        });
       }
 
       connection = await mysql.createConnection(dbConfig);
@@ -67,7 +69,7 @@ module.exports = function createConnectVpnRoutes({ authenticateToken }) {
       }
 
       const [devices] = await connection.execute(
-        'SELECT allowed_ips, public_key, status, expire_date, `interface` FROM devices WHERE username = ? AND device_name = ?',
+        'SELECT allowed_ips, public_key, status, expire_date, `interface`, machine_id FROM devices WHERE username = ? AND device_name = ?',
         [username, deviceName]
       );
 
@@ -162,7 +164,10 @@ module.exports = function createConnectVpnRoutes({ authenticateToken }) {
       }
 
       try {
-        await redisHeartbeatTouch(username, deviceName);
+        const machineId = deviceRow.machine_id;
+        if (machineId) {
+          await redisHeartbeatTouch(username, machineId);
+        }
       } catch (e) {
         console.error('[heartbeat] connect-vpn touch:', e.message);
       }

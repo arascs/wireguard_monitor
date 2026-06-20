@@ -31,8 +31,25 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
       return { type: 'interface', iface: rule.source_value };
     } else if (rule.source_type === 'ip' && rule.source_value) {
       return { type: 'ip', sources: [rule.source_value.trim()] };
+    } else if (rule.source_type === 'all') {
+      return { type: 'all' };
     }
     return { type: 'ip', sources: [] };
+  }
+
+  async function resolveDestinations(connection, rule) {
+    if (rule.application_id == null) {
+      const [rows] = await connection.execute(
+        'SELECT IP, port FROM applications WHERE IP IS NOT NULL AND IP != "" AND port IS NOT NULL'
+      );
+      return rows
+        .filter((row) => row.IP && row.port)
+        .map((row) => ({ destIp: String(row.IP).trim(), destPort: row.port }));
+    }
+    if (rule.app_ip && rule.app_port) {
+      return [{ destIp: rule.app_ip, destPort: rule.app_port }];
+    }
+    return [];
   }
 
   function resolveChain(destIp) {
@@ -43,12 +60,40 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
 
   function applyIptables(action, chain, source, destIp, destPort, target) {
     const baseTail = ['-d', destIp, '-p', 'tcp', '--dport', String(destPort), '-j', target];
-    if (source.type === 'ip') {
+    if (source.type === 'all') {
+      run('iptables', [action, chain, ...baseTail]);
+    } else if (source.type === 'ip') {
       source.sources.forEach((src) => {
         run('iptables', [action, chain, '-s', src, ...baseTail]);
       });
     } else if (source.type === 'interface') {
       run('iptables', [action, chain, '-i', source.iface, ...baseTail]);
+    }
+  }
+
+  async function applyRuleIptables(action, connection, rule) {
+    const isBlock = rule.status >= 2;
+    const target = isBlock ? 'DROP' : 'ACCEPT';
+    const source = await resolveSourceIps(connection, rule);
+
+    if (source.type === 'ip' && !source.sources.length) {
+      throw new Error('No source IPs resolved for rule');
+    }
+    if (source.type === 'interface' && !source.iface) {
+      throw new Error('No interface specified for rule');
+    }
+
+    const destinations = await resolveDestinations(connection, rule);
+    if (!destinations.length) {
+      throw new Error('No destination applications resolved for rule');
+    }
+
+    for (const dest of destinations) {
+      const chain = resolveChain(dest.destIp);
+      if (!chain) {
+        throw new Error(`Failed to determine route for destination IP ${dest.destIp}`);
+      }
+      applyIptables(action, chain, source, dest.destIp, dest.destPort, target);
     }
   }
 
@@ -76,6 +121,8 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
           sourceLabel = `Device: ${row.device_name || `#${row.source_value}`}`;
         } else if (row.source_type === 'interface') {
           sourceLabel = `Interface: ${row.source_value || ''}`;
+        } else if (row.source_type === 'all') {
+          sourceLabel = 'All';
         } else {
           sourceLabel = row.source_value || '';
         }
@@ -84,7 +131,7 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
           name: row.name,
           source_type: row.source_type,
           source_label: sourceLabel,
-          application_name: row.application_name,
+          application_name: row.application_id == null ? 'All applications' : (row.application_name || ''),
           status: isOn ? 1 : 0,
           action
         };
@@ -117,8 +164,8 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
 
   router.post('/access-rules', requireAuth, async (req, res) => {
     const { name, sourceType, sourceSiteId, sourceDeviceId, sourceInterface, sourceIp, applicationId, action } = req.body || {};
-    const validTypes = ['site', 'device', 'interface', 'ip'];
-    if (!name || !sourceType || !applicationId || !action) {
+    const validTypes = ['site', 'device', 'interface', 'ip', 'all'];
+    if (!name || !sourceType || applicationId === undefined || applicationId === null || applicationId === '' || !action) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
     if (!validTypes.includes(sourceType)) {
@@ -141,8 +188,7 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
     try {
       const isBlock = action === 'block';
       const baseStatus = isBlock ? 2 : 0;
-      // source_value stores: site id for 'site', device id for 'device', interface name for 'interface', IP for 'ip'
-      let sourceValue;
+      let sourceValue = null;
       if (sourceType === 'site') {
         sourceValue = parseInt(sourceSiteId, 10);
       } else if (sourceType === 'device') {
@@ -153,10 +199,15 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
         sourceValue = sourceIp;
       }
 
+      const appId = applicationId === 'all' ? null : parseInt(applicationId, 10);
+      if (appId !== null && !appId) {
+        return res.status(400).json({ success: false, error: 'Invalid application' });
+      }
+
       connection = await mysql.createConnection(dbConfig);
       await connection.execute(
         'INSERT INTO access_rules (name, source_type, source_value, application_id, status) VALUES (?, ?, ?, ?, ?)',
-        [name, sourceType, sourceValue, parseInt(applicationId, 10), baseStatus]
+        [name, sourceType, sourceValue, appId, baseStatus]
       );
       res.json({ success: true });
     } catch (error) {
@@ -175,7 +226,7 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
     try {
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        `SELECT r.id, r.source_type, r.source_value, r.status,
+        `SELECT r.id, r.source_type, r.source_value, r.status, r.application_id,
                 a.IP AS app_ip, a.port AS app_port
          FROM access_rules r
          LEFT JOIN applications a ON r.application_id = a.id
@@ -185,28 +236,9 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
       if (!rows.length) return res.status(404).json({ success: false, error: 'Rule not found' });
 
       const rule = rows[0];
-      const isBlock = rule.status >= 2;
-      const target = isBlock ? 'DROP' : 'ACCEPT';
-      const destIp = rule.app_ip;
-      const destPort = rule.app_port;
-      if (!destIp || !destPort) {
-        return res.status(400).json({ success: false, error: 'Application IP or port not found' });
-      }
+      await applyRuleIptables('-I', connection, rule);
 
-      const source = await resolveSourceIps(connection, rule);
-      if (source.type === 'ip' && !source.sources.length) {
-        return res.status(400).json({ success: false, error: 'No source IPs resolved for rule' });
-      }
-      if (source.type === 'interface' && !source.iface) {
-        return res.status(400).json({ success: false, error: 'No interface specified for rule' });
-      }
-
-      const chain = resolveChain(destIp);
-      if (!chain) return res.status(500).json({ success: false, error: 'Failed to determine route for destination IP' });
-
-      applyIptables('-I', chain, source, destIp, destPort, target);
-
-      const newStatus = isBlock ? 3 : 1;
+      const newStatus = rule.status >= 2 ? 3 : 1;
       await connection.execute('UPDATE access_rules SET status = ?, enabled_at = NOW() WHERE id = ?', [newStatus, id]);
       res.json({ success: true });
     } catch (error) {
@@ -225,7 +257,7 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
     try {
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        `SELECT r.id, r.source_type, r.source_value, r.status,
+        `SELECT r.id, r.source_type, r.source_value, r.status, r.application_id,
                 a.IP AS app_ip, a.port AS app_port
          FROM access_rules r
          LEFT JOIN applications a ON r.application_id = a.id
@@ -235,22 +267,9 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
       if (!rows.length) return res.status(404).json({ success: false, error: 'Rule not found' });
 
       const rule = rows[0];
-      const isBlock = rule.status >= 2;
-      const target = isBlock ? 'DROP' : 'ACCEPT';
-      const destIp = rule.app_ip;
-      const destPort = rule.app_port;
-      if (!destIp || !destPort) {
-        return res.status(400).json({ success: false, error: 'Application IP or port not found' });
-      }
+      await applyRuleIptables('-D', connection, rule);
 
-      const source = await resolveSourceIps(connection, rule);
-
-      const chain = resolveChain(destIp);
-      if (!chain) return res.status(500).json({ success: false, error: 'Failed to determine route for destination IP' });
-
-      applyIptables('-D', chain, source, destIp, destPort, target);
-
-      const newStatus = isBlock ? 2 : 0;
+      const newStatus = rule.status >= 2 ? 2 : 0;
       await connection.execute('UPDATE access_rules SET status = ? WHERE id = ?', [newStatus, id]);
       res.json({ success: true });
     } catch (error) {
@@ -269,7 +288,7 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
     try {
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        `SELECT r.id, r.source_type, r.source_value, r.status,
+        `SELECT r.id, r.source_type, r.source_value, r.status, r.application_id,
                 a.IP AS app_ip, a.port AS app_port
          FROM access_rules r
          LEFT JOIN applications a ON r.application_id = a.id
@@ -279,18 +298,11 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
       if (!rows.length) return res.status(404).json({ success: false, error: 'Rule not found' });
 
       const rule = rows[0];
-      // If rule is enabled, disable it first
       if ((rule.status % 2) === 1) {
-        const isBlock = rule.status >= 2;
-        const target = isBlock ? 'DROP' : 'ACCEPT';
-        const destIp = rule.app_ip;
-        const destPort = rule.app_port;
-        if (destIp && destPort) {
-          const source = await resolveSourceIps(connection, rule);
-          const chain = resolveChain(destIp);
-          if (chain) {
-            applyIptables('-D', chain, source, destIp, destPort, target);
-          }
+        try {
+          await applyRuleIptables('-D', connection, rule);
+        } catch (e) {
+          console.error('Error removing iptables rules before delete:', e.message);
         }
       }
 

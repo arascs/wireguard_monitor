@@ -12,7 +12,6 @@ const ADMIN_BYPASS_PATHS = new Set([
   '/api/enroll-device',
   '/api/update-key',
   '/api/notifications/ingest',
-  '/api/sites/by-endpoint',
   '/api/hostname'
 ]);
 

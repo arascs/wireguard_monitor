@@ -2,7 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { logAction } = require('../../logging/auditLogger');
-const { deletePeerFromConf } = require('../../../common/wireguardConfig');
+const { deletePeerFromConf, getPeerLatestHandshakeEpochSeconds } = require('../../../common/wireguardConfig');
 const { registerExpireHandler, touch: heartbeatTouch, clear: heartbeatClear } = require('../services/deviceHeartbeat');
 const {
   collectSecurityPolicyIssues,
@@ -50,43 +50,15 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
     return v === 'linux' || v === 'windows' ? v : '';
   }
 
-  function getPeerLatestHandshakeEpochSeconds(interfaceName, publicKey) {
-    if (!interfaceName || !publicKey) {
-      return null;
-    }
-
-    let out = '';
-    try {
-      out = run('wg', ['show', interfaceName, 'latest-handshakes']).trim();
-    } catch (e) {
-      return null;
-    }
-
-    if (!out) {
-      return null;
-    }
-    for (const line of out.split('\n')) {
-      const parts = line.trim().split(/\s+/);
-      if (parts.length < 2) {
-        continue;
-      }
-      const key = parts[0];
-      const ts = parseInt(parts[1], 10);
-      if (key === publicKey && !Number.isNaN(ts)) {
-        return ts;
-      }
-    }
-    return null;
-  }
-
-  async function disconnectDeviceNow(username, deviceName) {
-    if (!username || !deviceName) return { disconnected: false, reason: 'Missing username/deviceName' };
+  async function disconnectDeviceByMachineId(username, machineId) {
+    const mid = String(machineId || '').trim();
+    if (!username || !mid) return { disconnected: false, reason: 'Missing username/machineId' };
     let connection;
     try {
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        'SELECT public_key, interface FROM devices WHERE device_name = ? AND username = ? ORDER BY id DESC LIMIT 1',
-        [deviceName, username]
+        'SELECT public_key, interface FROM devices WHERE username = ? AND machine_id = ? ORDER BY id DESC LIMIT 1',
+        [username, mid]
       );
       if (rows.length === 0 || !rows[0].public_key || !rows[0].interface) {
         return { disconnected: false, reason: 'Device not found' };
@@ -104,9 +76,9 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
     const idx = deviceKey.indexOf(':');
     if (idx < 1) return;
     const username = deviceKey.slice(0, idx);
-    const deviceName = deviceKey.slice(idx + 1);
-    if (!username || !deviceName) return;
-    await disconnectDeviceNow(username, deviceName);
+    const machineId = deviceKey.slice(idx + 1);
+    if (!username || !machineId) return;
+    await disconnectDeviceByMachineId(username, machineId);
   });
 
   router.get('/devices', requireAuth, async (req, res) => {
@@ -390,10 +362,11 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
 
   router.post('/device-heartbeat', authenticateToken, async (req, res) => {
     const username = req.user.username;
-    const { deviceName, securityInfo, machineId } = req.body || {};
+    const { securityInfo, machineId } = req.body || {};
+    const mid = String(machineId || '').trim();
 
-    if (!deviceName) {
-      return res.status(400).json({ success: false, error: 'Missing deviceName' });
+    if (!mid) {
+      return res.status(400).json({ success: false, error: 'Missing machineId' });
     }
 
     let connection;
@@ -403,22 +376,16 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
 
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        'SELECT machine_id FROM devices WHERE username = ? AND device_name = ? ORDER BY id DESC LIMIT 1',
-        [username, deviceName]
+        'SELECT machine_id FROM devices WHERE username = ? AND machine_id = ? ORDER BY id DESC LIMIT 1',
+        [username, mid]
       );
       if (rows.length === 0) {
         issues.push('Device not found');
-      } else {
-        const dbMachineId = String(rows[0].machine_id || '').trim();
-        const providedMachineId = String(machineId || '').trim();
-        if (!dbMachineId || !providedMachineId || dbMachineId !== providedMachineId) {
-          issues.push('Machine ID mismatch');
-        }
       }
 
       if (issues.length > 0) {
-        await disconnectDeviceNow(username, deviceName);
-        await heartbeatClear(username, deviceName);
+        await disconnectDeviceByMachineId(username, mid);
+        await heartbeatClear(username, mid);
         return res.status(403).json({
           success: false,
           error: `Validation failed: ${formatIssues(issues)}`,
@@ -426,7 +393,7 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
         });
       }
 
-      const touched = await heartbeatTouch(username, deviceName);
+      const touched = await heartbeatTouch(username, mid);
       res.json({ success: true, key: touched.key, ttl: touched.ttl });
     } catch (error) {
       console.error('Heartbeat error:', error);
@@ -569,7 +536,7 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
     try {
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        'SELECT public_key, interface FROM devices WHERE device_name = ? AND username = ? ORDER BY id DESC LIMIT 1',
+        'SELECT public_key, interface, machine_id FROM devices WHERE device_name = ? AND username = ? ORDER BY id DESC LIMIT 1',
         [deviceName, username]
       );
 
@@ -591,7 +558,7 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
         return res.status(404).json({ success: false, error: result.reason || 'Cannot disable peer' });
       }
 
-      await heartbeatClear(username, deviceName);
+      await heartbeatClear(username, rows[0].machine_id);
 
       res.json({ success: true, active: true, disabled: true });
     } catch (error) {
