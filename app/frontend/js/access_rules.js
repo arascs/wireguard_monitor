@@ -141,6 +141,17 @@ document.addEventListener('DOMContentLoaded', () => {
     ipGroup.style.display = v === 'ip' ? 'block' : 'none';
   }
 
+  function openCreateRuleModal() {
+    form?.reset();
+    if (sourceTypeSelect) sourceTypeSelect.value = 'site';
+    updateSourceGroups('site');
+    document.getElementById('create-rule-modal')?.classList.add('open');
+  }
+
+  function closeCreateRuleModal() {
+    document.getElementById('create-rule-modal')?.classList.remove('open');
+  }
+
   if (sourceTypeSelect) {
     sourceTypeSelect.addEventListener('change', () => updateSourceGroups(sourceTypeSelect.value));
     updateSourceGroups(sourceTypeSelect.value);
@@ -151,6 +162,12 @@ document.addEventListener('DOMContentLoaded', () => {
   loadInterfacesForRules();
   loadApplicationsForRules();
   loadAccessRules();
+
+  document.getElementById('btn-add-rule')?.addEventListener('click', openCreateRuleModal);
+  document.getElementById('create-rule-cancel')?.addEventListener('click', closeCreateRuleModal);
+  document.getElementById('create-rule-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'create-rule-modal') closeCreateRuleModal();
+  });
 
   if (form) {
     form.addEventListener('submit', async (e) => {
@@ -189,9 +206,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       const data = await res.json();
       if (data.success) {
-        form.reset();
-        updateSourceGroups('site');
-        if (sourceTypeSelect) sourceTypeSelect.value = 'site';
+        closeCreateRuleModal();
         loadAccessRules();
       } else {
         alert(data.error || 'Cannot create access rule');

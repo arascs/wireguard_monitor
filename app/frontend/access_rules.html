@@ -88,6 +88,49 @@
         .btn-danger:hover {
             background-color: #c82333;
         }
+
+        .modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.45);
+            z-index: 8000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.open {
+            display: flex;
+        }
+
+        .modal-box {
+            background: #fff;
+            border-radius: 8px;
+            padding: 24px;
+            width: min(420px, calc(100vw - 32px));
+            max-height: calc(100vh - 32px);
+            overflow-y: auto;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+        }
+
+        .modal-box h3 {
+            margin: 0 0 16px;
+            color: rgba(134, 22, 24, 1);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 16px;
+        }
+
+        .toolbar {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
     </style>
 </head>
 
@@ -96,50 +139,9 @@
     <div id="main-content">
         <h2 class="section-title">Access rules</h2>
 
-        <form id="create-rule-form">
-            <div class="form-group">
-                <label for="rule-name">Name</label>
-                <input type="text" id="rule-name" required>
-            </div>
-            <div class="form-group">
-                <label for="rule-source-type">Source type</label>
-                <select id="rule-source-type" required>
-                    <option value="site">Site</option>
-                    <option value="device">Device</option>
-                    <option value="interface">Interface</option>
-                    <option value="ip">IP</option>
-                </select>
-            </div>
-            <div class="form-group" id="rule-source-site-group">
-                <label for="rule-site-id">Site</label>
-                <select id="rule-site-id"></select>
-            </div>
-            <div class="form-group" id="rule-source-device-group" style="display:none;">
-                <label for="rule-device-id">Device</label>
-                <select id="rule-device-id"></select>
-            </div>
-            <div class="form-group" id="rule-source-interface-group" style="display:none;">
-                <label for="rule-interface-name">Interface</label>
-                <select id="rule-interface-name"></select>
-            </div>
-            <div class="form-group" id="rule-source-ip-group" style="display:none;">
-                <label for="rule-source-ip">Source IP</label>
-                <input type="text" id="rule-source-ip">
-            </div>
-            <div class="form-group">
-                <label for="rule-application-id">Destination application</label>
-                <select id="rule-application-id" required></select>
-            </div>
-            <div class="form-group">
-                <label for="rule-action">Action</label>
-                <select id="rule-action" required>
-                    <option value="allow">allow</option>
-                    <option value="block">block</option>
-                </select>
-            </div>
-            <button type="submit">Create new rule</button>
-        </form>
-
+        <div class="toolbar">
+            <button id="btn-add-rule" type="button">Add access rule</button>
+        </div>
         <table class="simple-table" id="rules-table">
             <thead>
                 <tr>
@@ -154,6 +156,58 @@
             </thead>
             <tbody id="rules-tbody"></tbody>
         </table>
+    </div>
+
+    <div id="create-rule-modal" class="modal">
+        <div class="modal-box">
+            <h3>Add access rule</h3>
+            <form id="create-rule-form">
+                <div class="form-group">
+                    <label for="rule-name">Name</label>
+                    <input type="text" id="rule-name" required>
+                </div>
+                <div class="form-group">
+                    <label for="rule-source-type">Source type</label>
+                    <select id="rule-source-type" required>
+                        <option value="site">Site</option>
+                        <option value="device">Device</option>
+                        <option value="interface">Interface</option>
+                        <option value="ip">IP</option>
+                    </select>
+                </div>
+                <div class="form-group" id="rule-source-site-group">
+                    <label for="rule-site-id">Site</label>
+                    <select id="rule-site-id"></select>
+                </div>
+                <div class="form-group" id="rule-source-device-group" style="display:none;">
+                    <label for="rule-device-id">Device</label>
+                    <select id="rule-device-id"></select>
+                </div>
+                <div class="form-group" id="rule-source-interface-group" style="display:none;">
+                    <label for="rule-interface-name">Interface</label>
+                    <select id="rule-interface-name"></select>
+                </div>
+                <div class="form-group" id="rule-source-ip-group" style="display:none;">
+                    <label for="rule-source-ip">Source IP</label>
+                    <input type="text" id="rule-source-ip">
+                </div>
+                <div class="form-group">
+                    <label for="rule-application-id">Destination application</label>
+                    <select id="rule-application-id" required></select>
+                </div>
+                <div class="form-group">
+                    <label for="rule-action">Action</label>
+                    <select id="rule-action" required>
+                        <option value="allow">allow</option>
+                        <option value="block">block</option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" id="create-rule-cancel">Cancel</button>
+                    <button type="submit">Create</button>
+                </div>
+            </form>
+        </div>
     </div>
 
     <script src="/js/navbar.js"></script>

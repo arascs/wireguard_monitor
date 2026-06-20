@@ -51,12 +51,16 @@ module.exports = function createConnectVpnRoutes({ authenticateToken }) {
       const now = Math.floor(Date.now() / 1000);
 
       const [userRows] = await connection.execute(
-        'SELECT expire_day FROM users WHERE username = ?',
+        'SELECT expire_day, status FROM users WHERE username = ?',
         [username]
       );
       if (userRows.length === 0) {
         await connection.end();
         return res.status(403).json({ success: false, error: 'User not found' });
+      }
+      if (parseInt(userRows[0].status, 10) === 0) {
+        await connection.end();
+        return res.status(403).json({ success: false, error: 'User account disabled' });
       }
       if (isUserExpired(userRows[0].expire_day)) {
         await connection.end();

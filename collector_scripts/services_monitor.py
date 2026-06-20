@@ -92,7 +92,7 @@ class VPNMonitor:
 
             self.peers_list = new_peers_list
 
-            cursor.execute("SELECT name, ip, port FROM applications")
+            cursor.execute("SELECT name, ip, port FROM applications WHERE status = 1")
             apps = cursor.fetchall()
             new_res = {}
             for app in apps:

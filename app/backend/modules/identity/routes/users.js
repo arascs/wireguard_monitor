@@ -22,16 +22,14 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, requireAuth }) {
     try {
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        'SELECT id, username, expire_day, create_day FROM users ORDER BY id DESC'
+        'SELECT id, username, expire_day, create_day, status FROM users ORDER BY id DESC'
       );
       res.json({ success: true, users: rows });
     } catch (error) {
       console.error('Error loading users:', error);
       res.status(500).json({ success: false, error: 'Internal server error' });
     } finally {
-      if (connection) {
-        await connection.end();
-      }
+      if (connection) await connection.end();
     }
   });
 
@@ -56,7 +54,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, requireAuth }) {
 
       connection = await mysql.createConnection(dbConfig);
       await connection.execute(
-        'INSERT INTO users (username, password, expire_day, create_day) VALUES (?, ?, ?, ?)',
+        'INSERT INTO users (username, password, expire_day, create_day, status) VALUES (?, ?, ?, ?, 1)',
         [username, passwordHash, expireEpoch, createEpoch]
       );
 
@@ -77,9 +75,135 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, requireAuth }) {
       console.error('Error creating user:', error);
       res.status(500).json({ success: false, error: 'Internal server error' });
     } finally {
-      if (connection) {
-        await connection.end();
+      if (connection) await connection.end();
+    }
+  });
+
+  router.put('/users/:username', requireAuth, async (req, res) => {
+    const { username } = req.params;
+    const { expireDate } = req.body || {};
+    if (!username) {
+      return res.status(400).json({ success: false, error: 'Missing username' });
+    }
+    if (expireDate === undefined) {
+      return res.status(400).json({ success: false, error: 'Missing expire date' });
+    }
+
+    let connection;
+    try {
+      connection = await mysql.createConnection(dbConfig);
+
+      const [rows] = await connection.execute('SELECT id FROM users WHERE username = ?', [username]);
+      if (!rows.length) {
+        return res.status(404).json({ success: false, error: 'User not found' });
       }
+
+      let expireEpoch = null;
+      if (expireDate) {
+        expireEpoch = Math.floor(new Date(`${expireDate}T23:59:59`).getTime() / 1000);
+        if (Number.isNaN(expireEpoch)) {
+          return res.status(400).json({ success: false, error: 'Invalid expire date' });
+        }
+      }
+
+      await connection.execute(
+        'UPDATE users SET expire_day = ? WHERE username = ?',
+        [expireEpoch, username]
+      );
+
+      try {
+        const admin = req.session && req.session.user ? req.session.user : 'unknown';
+        logAction(admin, 'update_user', { username, expire_day: expireEpoch });
+      } catch (e) { }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error updating user:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    } finally {
+      if (connection) await connection.end();
+    }
+  });
+
+  router.post('/users/:username/enable', requireAuth, async (req, res) => {
+    const { username } = req.params;
+    if (!username) {
+      return res.status(400).json({ success: false, error: 'Missing username' });
+    }
+
+    let connection;
+    try {
+      connection = await mysql.createConnection(dbConfig);
+      const [result] = await connection.execute(
+        'UPDATE users SET status = 1 WHERE username = ?',
+        [username]
+      );
+      if (!result.affectedRows) {
+        return res.status(404).json({ success: false, error: 'User not found' });
+      }
+
+      const nowEpoch = Math.floor(Date.now() / 1000);
+      const defaultExpire = nowEpoch + 90 * 24 * 60 * 60;
+      const [devices] = await connection.execute(
+        'SELECT id, expire_date FROM devices WHERE username = ?',
+        [username]
+      );
+      for (const device of devices) {
+        const cur = device.expire_date ? parseInt(device.expire_date, 10) : null;
+        const expireEpoch = (!cur || cur < nowEpoch) ? defaultExpire : cur;
+        await connection.execute(
+          'UPDATE devices SET status = 1, expire_date = ? WHERE id = ?',
+          [expireEpoch, device.id]
+        );
+      }
+
+      try {
+        const admin = req.session && req.session.user ? req.session.user : 'unknown';
+        logAction(admin, 'enable_user', { username });
+      } catch (e) { }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error enabling user:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    } finally {
+      if (connection) await connection.end();
+    }
+  });
+
+  router.post('/users/:username/disable', requireAuth, async (req, res) => {
+    const { username } = req.params;
+    if (!username) {
+      return res.status(400).json({ success: false, error: 'Missing username' });
+    }
+
+    let connection;
+    try {
+      connection = await mysql.createConnection(dbConfig);
+      const [result] = await connection.execute(
+        'UPDATE users SET status = 0 WHERE username = ?',
+        [username]
+      );
+      if (!result.affectedRows) {
+        return res.status(404).json({ success: false, error: 'User not found' });
+      }
+
+      await connection.execute(
+        'UPDATE devices SET status = 0 WHERE username = ?',
+        [username]
+      );
+
+      try {
+        const admin = req.session && req.session.user ? req.session.user : 'unknown';
+        logAction(admin, 'disable_user', { username });
+      } catch (e) { }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error disabling user:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    } finally {
+      if (connection) await connection.end();
     }
   });
 
@@ -119,9 +243,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, requireAuth }) {
       console.error('Error deleting user:', error);
       res.status(500).json({ success: false, error: 'Internal server error' });
     } finally {
-      if (connection) {
-        await connection.end();
-      }
+      if (connection) await connection.end();
     }
   });
 
@@ -161,9 +283,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, requireAuth }) {
       console.error('Error deleting site by endpoint:', error);
       res.status(500).json({ success: false, error: error.message });
     } finally {
-      if (connection) {
-        await connection.end();
-      }
+      if (connection) await connection.end();
     }
   });
 
