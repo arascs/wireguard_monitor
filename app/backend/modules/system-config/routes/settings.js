@@ -3,8 +3,6 @@ const fs = require('fs');
 const { logAction } = require('../../logging/auditLogger');
 const { loadGlobalSettings } = require('../../../common/settings');
 const { SETTINGS_FILE } = require('../../../common/paths');
-const { saveNodeApiKey } = require('../../../common/auth');
-
 module.exports = function createSettingsRoutes() {
   const router = express.Router();
 
@@ -68,19 +66,12 @@ module.exports = function createSettingsRoutes() {
 
       fs.writeFileSync(SETTINGS_FILE, JSON.stringify(newSettings, null, 2), 'utf8');
 
-      if (req.body && typeof req.body.apiKey === 'string' && req.body.apiKey.trim()) {
-        saveNodeApiKey(req.body.apiKey.trim());
-      }
-
       try {
         const admin = req.session && req.session.user ? req.session.user : 'unknown';
-        logAction(admin, 'update_settings', { ...newSettings, apiKey: '***' });
+        logAction(admin, 'update_settings', newSettings);
       } catch (e) { /* ignore */ }
 
-      res.json({
-        success: true,
-        settings: { ...newSettings, apiKey: process.env.NODE_API_KEY || '' }
-      });
+      res.json({ success: true, settings: newSettings });
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
     }

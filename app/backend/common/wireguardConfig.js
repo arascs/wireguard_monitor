@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { spawnSync, execFileSync } = require('child_process');
-const { run } = require('./runCmd');
+const { run } = require('./utils');
 
 const CONFIG_DIR = '/etc/wireguard/';
 const LOG_BASE = '/etc/wireguard/logs';

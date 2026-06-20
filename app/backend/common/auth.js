@@ -1,9 +1,5 @@
-const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
-const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { CREDENTIALS_FILE, NODE_KEY_FILE } = require('./paths');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const SESSION_SECRET = process.env.SESSION_SECRET;
@@ -55,42 +51,6 @@ function authenticateToken(req, res, next) {
   });
 }
 
-function requireAuth(req, res, next) {
-  if (req.session && req.session.user) {
-    return next();
-  }
-  if (req.path && req.path.startsWith('/api/')) {
-    return res.status(401).json({ success: false, error: 'Authentication required' });
-  }
-  res.redirect('/login');
-}
-
-function loadCredentials() {
-  if (!fs.existsSync(CREDENTIALS_FILE)) {
-    const hash = bcrypt.hashSync('admin', 10);
-    fs.writeFileSync(CREDENTIALS_FILE, `admin:${hash}`, { mode: 0o600 });
-  }
-  const content = fs.readFileSync(CREDENTIALS_FILE, 'utf8').trim();
-  const [user, pass] = content.split(':');
-  return { username: user, passwordHash: pass };
-}
-
-function loadNodeApiKeyFromDisk() {
-  try {
-    if (fs.existsSync(NODE_KEY_FILE)) {
-      const k = fs.readFileSync(NODE_KEY_FILE, 'utf8').trim();
-      if (k) process.env.NODE_API_KEY = k;
-    }
-  } catch (e) {
-    /* ignore */
-  }
-}
-
-function saveNodeApiKey(plain) {
-  fs.writeFileSync(NODE_KEY_FILE, String(plain || ''), { mode: 0o600 });
-  process.env.NODE_API_KEY = String(plain || '');
-}
-
 function secretStringsMatch(stored, presented) {
   const a = String(stored || '');
   const b = String(presented || '');
@@ -108,9 +68,5 @@ module.exports = {
   ensureSecrets,
   apiKeyAuth,
   authenticateToken,
-  requireAuth,
-  loadCredentials,
-  loadNodeApiKeyFromDisk,
-  saveNodeApiKey,
   secretStringsMatch
 };

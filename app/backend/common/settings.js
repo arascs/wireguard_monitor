@@ -1,6 +1,28 @@
 const fs = require('fs');
-const { normalizeSettings } = require('./securityChecks');
 const { SETTINGS_FILE } = require('./paths');
+
+function normalizeSettings(settings) {
+  const s = { ...settings };
+  if (s.minKernelVersion != null && s.minKernelVersionLinux == null) {
+    s.minKernelVersionLinux = s.minKernelVersion;
+  }
+  if (s.minKernelVersion != null && s.minKernelVersionWindows == null) {
+    s.minKernelVersionWindows = s.minKernelVersion;
+  }
+  if (s.enforceFirewall != null && s.enforceFirewallLinux == null) {
+    s.enforceFirewallLinux = s.enforceFirewall;
+  }
+  if (s.enforceFirewall != null && s.enforceFirewallWindows == null) {
+    s.enforceFirewallWindows = s.enforceFirewall;
+  }
+  if (s.enforceNoPasswordlessUser != null && s.enforcePasswordRequiredLinux == null) {
+    s.enforcePasswordRequiredLinux = s.enforceNoPasswordlessUser;
+  }
+  if (s.enforceNoPasswordlessUser != null && s.enforcePasswordRequiredWindows == null) {
+    s.enforcePasswordRequiredWindows = s.enforceNoPasswordlessUser;
+  }
+  return s;
+}
 
 const defaultSettings = {
   peerDisableHours: 12,
@@ -38,4 +60,4 @@ function loadGlobalSettings() {
   return { ...defaultSettings };
 }
 
-module.exports = { loadGlobalSettings, defaultSettings };
+module.exports = { loadGlobalSettings, defaultSettings, normalizeSettings };

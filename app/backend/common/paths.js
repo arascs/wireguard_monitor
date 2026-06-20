@@ -6,8 +6,6 @@ module.exports = {
   BACKEND_DIR,
   FRONTEND_DIR: path.join(BACKEND_DIR, '../frontend'),
   SETTINGS_FILE: path.join(BACKEND_DIR, 'settings.json'),
-  NODE_KEY_FILE: path.join(BACKEND_DIR, 'node_api_key.txt'),
-  CREDENTIALS_FILE: '/etc/wireguard/credentials.txt',
   BACKUP_DIR: '/var/backups/wg_monitor',
   HISTORY_DIR: '/etc/wireguard/logs/vpn_history',
   EXPORTER_SCRIPT: '/usr/local/bin/exporter.sh',

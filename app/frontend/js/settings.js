@@ -1,20 +1,6 @@
-function wireSecretToggles() {
-  document.querySelectorAll('.btn-toggle-secret').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const id = btn.getAttribute('data-target');
-      const input = id ? document.getElementById(id) : null;
-      if (!input) return;
-      const plain = input.type === 'password';
-      input.type = plain ? 'text' : 'password';
-      btn.setAttribute('aria-pressed', plain ? 'true' : 'false');
-    });
-  });
-}
-
 document.addEventListener('DOMContentLoaded', () => {
   const form = document.getElementById('settings-form');
   const btn = document.getElementById('save-settings-btn');
-  wireSecretToggles();
 
   fetch('/api/settings', { credentials: 'same-origin' })
     .then((res) => res.json())
@@ -25,7 +11,6 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('keyRotationTimeoutSeconds').value =
           s.keyRotationTimeoutSeconds !== undefined ? s.keyRotationTimeoutSeconds : 60;
         document.getElementById('physicalInterface').value = s.physicalInterface || '';
-        document.getElementById('nodeApiKey').value = s.apiKey || '';
         document.getElementById('enforceKernelCheck').checked = s.enforceKernelCheck !== false;
         document.getElementById('minKernelVersionLinux').value =
           s.minKernelVersionLinux !== undefined ? s.minKernelVersionLinux : 4;
@@ -63,7 +48,6 @@ document.addEventListener('DOMContentLoaded', () => {
       peerDisableHours: document.getElementById('peerDisableHours').value,
       keyRotationTimeoutSeconds: document.getElementById('keyRotationTimeoutSeconds').value,
       physicalInterface: document.getElementById('physicalInterface').value.trim(),
-      apiKey: document.getElementById('nodeApiKey').value,
       enforceKernelCheck: document.getElementById('enforceKernelCheck').checked,
       minKernelVersionLinux: document.getElementById('minKernelVersionLinux').value,
       minKernelVersionWindows: document.getElementById('minKernelVersionWindows').value,

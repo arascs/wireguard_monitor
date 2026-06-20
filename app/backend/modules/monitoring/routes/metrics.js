@@ -1,12 +1,8 @@
-const { isAdminIp } = require('../../../common/security');
-const { run, tryRun } = require('../../../common/runCmd');
+const { run, tryRun } = require('../../../common/utils');
 const { EXPORTER_SCRIPT } = require('../../../common/paths');
 
 function registerMetricsRoutes(app) {
   app.get('/metrics', (req, res) => {
-    if (!isAdminIp(req)) {
-      return res.status(403).type('text/plain').send('forbidden');
-    }
     try {
       const out = run('bash', [EXPORTER_SCRIPT], { timeout: 120000 });
       res.type('text/plain; version=0.0.4').send(out);

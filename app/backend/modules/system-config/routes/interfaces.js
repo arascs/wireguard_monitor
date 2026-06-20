@@ -1,7 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { run } = require('../../../common/runCmd');
+const { run } = require('../../../common/utils');
 const { logAction } = require('../../logging/auditLogger');
 const { DEFAULT_KEY_EXPIRY_DAYS } = require('../../../common/paths');
 const {

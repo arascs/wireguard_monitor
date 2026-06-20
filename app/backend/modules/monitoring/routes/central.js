@@ -1,9 +1,6 @@
 const express = require('express');
 const fetch = require('node-fetch');
-const { isAdminIp } = require('../../../common/security');
-const { run } = require('../../../common/runCmd');
-const { EXPORTER_SCRIPT } = require('../../../common/paths');
-const { HOSTNAME } = require('../../../common/config');
+const { run, HOSTNAME } = require('../../../common/utils');
 const {
   getApiKey,
   authHeaders,

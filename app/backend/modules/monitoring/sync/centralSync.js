@@ -2,9 +2,8 @@ const fetch = require('node-fetch');
 const https = require('https');
 const crypto = require('crypto');
 const mysql = require('mysql2/promise');
-const { HOSTNAME } = require('../../../common/config');
+const { HOSTNAME, getNodeProductUuid } = require('../../../common/utils');
 const { dbConfig } = require('../../../common/db');
-const { getNodeProductUuid } = require('../../../common/nodeUuid');
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 

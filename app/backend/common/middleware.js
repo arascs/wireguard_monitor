@@ -1,5 +1,4 @@
 const session = require('express-session');
-const { isAdminIp } = require('./security');
 const { SESSION_SECRET } = require('./auth');
 
 const ADMIN_BYPASS_PATHS = new Set([
@@ -19,7 +18,6 @@ const ADMIN_BYPASS_PATHS = new Set([
 
 function pathAllowsBypass(p) {
   if (ADMIN_BYPASS_PATHS.has(p)) return true;
-  if (p.startsWith('/api/devices/by-machine/')) return true;
   return false;
 }
 
@@ -37,18 +35,8 @@ function setupSession(app) {
   }));
 }
 
-function adminApiGuard(req, res, next) {
-  if (!req.path.startsWith('/api/')) return next();
-  if (pathAllowsBypass(req.path)) return next();
-  if (!isAdminIp(req)) {
-    return res.status(403).json({ success: false, error: 'forbidden network' });
-  }
-  if (req.session && req.session.user) return next();
-  return res.status(401).json({ success: false, error: 'Authentication required' });
-}
-
 module.exports = {
   ADMIN_BYPASS_PATHS,
-  setupSession,
-  adminApiGuard
+  pathAllowsBypass,
+  setupSession
 };

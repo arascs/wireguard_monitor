@@ -59,6 +59,7 @@
     <button class="sidebar-item" data-section="audit"         data-path="/audit-log">Logging</button>
     <button class="sidebar-item" data-section="backup"        data-path="/backup">Backup &amp; Restore</button>
     <button class="sidebar-item" data-section="settings"      data-path="/settings">Settings</button>
+    <button class="sidebar-item sidebar-admins-only" data-section="admins" data-path="/admins" style="display:none;">Admins</button>
   </div>
 </div>`;
 
@@ -129,6 +130,17 @@
           hostnameTextEl.textContent = 'Error';
         });
     }
+
+    fetch('/api/me', { credentials: 'same-origin' })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success && data.admin && data.admin.role === 'superadmin') {
+          document.querySelectorAll('.sidebar-admins-only').forEach((el) => {
+            el.style.display = '';
+          });
+        }
+      })
+      .catch(() => {});
 
     // ── 5. Change-password modal ────────────────────────────────
     const notificationBtn = document.getElementById('notification-btn');

@@ -5,12 +5,11 @@ const mysql = require('mysql2/promise');
 const { loadGlobalSettings } = require('../../../common/settings');
 const { DEFAULT_KEY_EXPIRY_DAYS } = require('../../../common/paths');
 const { dbConfig } = require('../../../common/db');
-const { run, tryRun } = require('../../../common/runCmd');
+const { run, tryRun, isUserExpired } = require('../../../common/utils');
 const {
   collectSecurityPolicyIssues,
-  formatIssues,
-  isUserExpired
-} = require('../../../common/securityChecks');
+  formatIssues
+} = require('../services/securityChecks');
 const {
   CONFIG_DIR,
   loadInterfaceConfig,

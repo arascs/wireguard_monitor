@@ -1,4 +1,3 @@
-const ipRangeCheck = require('ip-range-check');
 const rateLimit = require('express-rate-limit');
 const cors = require('cors');
 const { logSecurityEvent } = require('../modules/logging/auditLogger');
@@ -13,19 +12,6 @@ function parseList(env) {
 function clientIp(req) {
   const raw = req.ip || (req.connection && req.connection.remoteAddress) || '';
   return raw.replace(/^::ffff:/, '');
-}
-
-function isAdminIp(req) {
-  const cidrs = parseList(process.env.ADMIN_IP_CIDR);
-  const ip = clientIp(req);
-  if (ip === '127.0.0.1' || ip === '::1') return true;
-  if (cidrs.length === 0) return false;
-  return ipRangeCheck(ip, cidrs);
-}
-
-function adminIpGuard(req, res, next) {
-  if (isAdminIp(req)) return next();
-  return res.status(403).json({ success: false, error: 'forbidden network' });
 }
 
 function corsMiddleware() {
@@ -62,9 +48,7 @@ function loginLimiter(component) {
 }
 
 module.exports = {
-  adminIpGuard,
   corsMiddleware,
   loginLimiter,
-  isAdminIp,
   clientIp
 };

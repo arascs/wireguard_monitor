@@ -1,4 +1,4 @@
-const { run } = require('../../../common/runCmd');
+const { run } = require('../../../common/utils');
 const {
   loadInterfaceConfig,
   isKeyExpired: isInterfaceKeyExpired

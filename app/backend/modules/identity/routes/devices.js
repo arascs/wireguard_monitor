@@ -6,9 +6,9 @@ const { deletePeerFromConf } = require('../../../common/wireguardConfig');
 const { registerExpireHandler, touch: heartbeatTouch, clear: heartbeatClear } = require('../services/deviceHeartbeat');
 const {
   collectSecurityPolicyIssues,
-  formatIssues,
-  normalizeSettings
-} = require('../../../common/securityChecks');
+  formatIssues
+} = require('../services/securityChecks');
+const { normalizeSettings } = require('../../../common/settings');
 
 function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateToken }) {
   const router = express.Router();
@@ -256,43 +256,6 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
     } catch (error) {
       console.error('Error deleting device:', error);
       res.status(500).json({ success: false, error: 'Internal server error' });
-    } finally {
-      if (connection) {
-        await connection.end();
-      }
-    }
-  });
-
-  router.delete('/devices/by-machine/:machineId', async (req, res) => {
-    const key = (req.header('x-register-key') || '').trim();
-    if (!process.env.CENTRAL_REGISTER_SECRET || key !== process.env.CENTRAL_REGISTER_SECRET) {
-      return res.status(401).json({ success: false, error: 'Unauthorized' });
-    }
-    const machineId = decodeURIComponent(req.params.machineId || '');
-    if (!machineId) {
-      return res.status(400).json({ success: false, error: 'machineId required' });
-    }
-
-    let connection;
-    try {
-      connection = await mysql.createConnection(dbConfig);
-      const [rows] = await connection.execute(
-        'SELECT id, public_key, interface FROM devices WHERE machine_id = ?',
-        [machineId]
-      );
-      if (rows.length === 0) {
-        return res.status(404).json({ success: false, error: 'Device not found' });
-      }
-      for (const dev of rows) {
-        if (dev.public_key && dev.interface) {
-          deletePeerFromConf(dev.interface, dev.public_key);
-        }
-        await connection.execute('DELETE FROM devices WHERE id = ?', [dev.id]);
-      }
-      res.json({ success: true, message: 'Device removed' });
-    } catch (error) {
-      console.error('Error deleting device by machine:', error);
-      res.status(500).json({ success: false, error: error.message });
     } finally {
       if (connection) {
         await connection.end();

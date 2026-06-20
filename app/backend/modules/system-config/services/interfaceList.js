@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { run } = require('../../../common/runCmd');
+const { run } = require('../../../common/utils');
 const { CONFIG_DIR, wgPubkey } = require('../../../common/wireguardConfig');
 
 function getActiveInterfaces() {

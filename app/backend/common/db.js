@@ -1,8 +1,8 @@
 const dbConfig = {
-  host: process.env.WG_DB_HOST || 'localhost',
-  user: process.env.WG_DB_USER || 'root',
-  password: process.env.WG_DB_PASSWORD || 'root',
-  database: process.env.WG_DB_NAME || 'wg_monitor'
+  host: process.env.WG_DB_HOST,
+  user: process.env.WG_DB_USER,
+  password: process.env.WG_DB_PASSWORD,
+  database: process.env.WG_DB_NAME
 };
 
 module.exports = { dbConfig };

@@ -1,3 +1,5 @@
+const { normalizeSettings } = require('../../../common/settings');
+
 function parseKernelSemver(raw) {
   const s = String(raw || '').split('-')[0];
   const parts = s.split('.').map((p) => parseInt(p, 10) || 0);
@@ -15,29 +17,6 @@ function normalizeOs(os) {
   const v = String(os || '').trim().toLowerCase();
   if (v === 'linux' || v === 'windows') return v;
   return '';
-}
-
-function normalizeSettings(settings) {
-  const s = { ...settings };
-  if (s.minKernelVersion != null && s.minKernelVersionLinux == null) {
-    s.minKernelVersionLinux = s.minKernelVersion;
-  }
-  if (s.minKernelVersion != null && s.minKernelVersionWindows == null) {
-    s.minKernelVersionWindows = s.minKernelVersion;
-  }
-  if (s.enforceFirewall != null && s.enforceFirewallLinux == null) {
-    s.enforceFirewallLinux = s.enforceFirewall;
-  }
-  if (s.enforceFirewall != null && s.enforceFirewallWindows == null) {
-    s.enforceFirewallWindows = s.enforceFirewall;
-  }
-  if (s.enforceNoPasswordlessUser != null && s.enforcePasswordRequiredLinux == null) {
-    s.enforcePasswordRequiredLinux = s.enforceNoPasswordlessUser;
-  }
-  if (s.enforceNoPasswordlessUser != null && s.enforcePasswordRequiredWindows == null) {
-    s.enforcePasswordRequiredWindows = s.enforceNoPasswordlessUser;
-  }
-  return s;
 }
 
 function hasPasswordlessShellUsers(info) {
@@ -140,18 +119,9 @@ function formatIssues(issues) {
   return Array.isArray(issues) && issues.length > 0 ? issues.join('; ') : '';
 }
 
-function isUserExpired(expireDay) {
-  if (expireDay == null || expireDay === '') return false;
-  const exp = parseInt(expireDay, 10);
-  if (Number.isNaN(exp)) return false;
-  return exp < Math.floor(Date.now() / 1000);
-}
-
 module.exports = {
   parseKernelSemver,
   cmpKernelSemver,
-  normalizeSettings,
   collectSecurityPolicyIssues,
-  formatIssues,
-  isUserExpired
+  formatIssues
 };
