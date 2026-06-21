@@ -158,31 +158,14 @@ function requestNodeUuid(req) {
 function apiKeyAuth(req, res, next) {
   const auth = req.header('authorization') || '';
   const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
-  const provided = bearer || '';
-  if (!provided) return res.status(401).json({ ok: false, error: 'missing api key' });
-  const row = findNodeByApiKey(provided);
+  if (!bearer) return res.status(401).json({ ok: false, error: 'missing api key' });
+  const row = findNodeByApiKey(bearer);
   if (!row) return res.status(401).json({ ok: false, error: 'invalid api key' });
 
-  const path = req.path || '';
   const uuid = requestNodeUuid(req);
-
-  if (path === '/api/register') {
-    if (!uuid) return res.status(400).json({ ok: false, error: 'machineId required' });
-    if (row.machineId && row.machineId.toLowerCase() !== uuid) {
-      return res.status(409).json({ ok: false, error: 'api key already bound to another machine' });
-    }
-    req.nodeKey = row;
-    return next();
-  }
-
-  if (path !== '/api/logs/push') {
-    if (!row.machineId) {
-      return res.status(409).json({ ok: false, error: 'node not registered yet' });
-    }
-    if (!uuid) return res.status(401).json({ ok: false, error: 'missing node uuid' });
-    if (row.machineId.toLowerCase() !== uuid) {
-      return res.status(401).json({ ok: false, error: 'node uuid mismatch' });
-    }
+  if (!uuid) return res.status(401).json({ ok: false, error: 'missing node uuid' });
+  if (!row.machineId || row.machineId.toLowerCase() !== uuid) {
+    return res.status(401).json({ ok: false, error: 'node uuid mismatch' });
   }
 
   req.nodeKey = row;
@@ -478,14 +461,7 @@ app.post('/api/logout', (req, res) => {
 // ── node-facing endpoints (single API key) ───────────────────────────
 
 app.post('/api/register', apiKeyAuth, async (req, res) => {
-  const machineId = String(req.body.machineId || req.body.nodeMachineId || '').trim();
-  if (!machineId) return res.status(400).json({ ok: false, error: 'machineId required' });
-
   const node = req.nodeKey;
-  if (node.machineId && node.machineId !== machineId) {
-    return res.status(409).json({ ok: false, error: 'api key already bound to another machine' });
-  }
-
   const name = String(req.body.name || node.name || '').trim() || 'node';
   const baseUrl = normalizeBaseUrl(String(req.body.baseUrl || '').trim());
   if (!baseUrl) return res.status(400).json({ ok: false, error: 'baseUrl required' });
@@ -498,7 +474,6 @@ app.post('/api/register', apiKeyAuth, async (req, res) => {
 
   node.id = id;
   node.name = name;
-  node.machineId = machineId.toLowerCase();
   node.baseUrl = baseUrl;
   node.publicIp = publicIp;
   node.region = geo ? geo.country : node.region || '';
@@ -512,8 +487,7 @@ app.post('/api/register', apiKeyAuth, async (req, res) => {
 
 app.post('/api/metrics/push', apiKeyAuth, (req, res) => {
   const node = req.nodeKey;
-  if (!node.machineId) return res.status(409).json({ ok: false, error: 'node not registered yet' });
-  if (!node.id) return res.status(404).json({ ok: false, error: 'node not found' });
+  if (!node.id) return res.status(409).json({ ok: false, error: 'node not registered yet' });
 
   let m;
   if (typeof req.body === 'string') {
@@ -539,7 +513,7 @@ app.post('/api/notifications/ingest', apiKeyAuth, (req, res) => {
 
 app.post('/api/logs/push', apiKeyAuth, async (req, res) => {
   const node = req.nodeKey;
-  if (!node.machineId) return res.status(409).json({ ok: false, error: 'node not registered yet' });
+  if (!node.id) return res.status(409).json({ ok: false, error: 'node not registered yet' });
   const incoming = Array.isArray(req.body) ? req.body : [req.body];
   const cleaned = incoming
     .map((raw) => {
@@ -636,11 +610,16 @@ app.get('/api/node-keys', admin, (req, res) => {
 
 app.post('/api/node-keys', admin, (req, res) => {
   const name = String((req.body && req.body.name) || '').trim() || 'node';
+  const machineId = String((req.body && req.body.machineId) || '').trim().toLowerCase();
+  if (!machineId) return res.status(400).json({ ok: false, error: 'machineId required' });
+  if (nodes.some((n) => n.machineId && n.machineId.toLowerCase() === machineId)) {
+    return res.status(409).json({ ok: false, error: 'machineId already used' });
+  }
   const apiKey = generateApiKey();
   const row = {
     name,
     apiKey,
-    machineId: '',
+    machineId,
     baseUrl: '',
     createdAt: new Date().toISOString(),
     lastSeenAt: null

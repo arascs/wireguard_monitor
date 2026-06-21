@@ -70,6 +70,7 @@ sinks:
       headers:
         Content-Type: application/json
         Authorization: "Bearer eb4a69a2958cc7287b6c67f91fd00ea770ba11c8cc795405df5117619536df94"
+        X-Node-UUID: "${NODE_PRODUCT_UUID}"
       timeout_secs: 5
       retry_attempts: 5
 

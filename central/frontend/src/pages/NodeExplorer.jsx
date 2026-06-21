@@ -113,16 +113,22 @@ function NodeServicesModal({ node, onClose }) {
 
 function AddNodeModal({ onClose, onCreated }) {
   const [name, setName] = useState('');
+  const [machineId, setMachineId] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function generate() {
+    const mid = machineId.trim();
+    if (!mid) {
+      window.alert('machine_id (UUID) is required');
+      return;
+    }
     setLoading(true);
     try {
       const r = await apiFetch('/api/node-keys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim() || 'node' })
+        body: JSON.stringify({ name: name.trim() || 'node', machineId: mid })
       });
       const j = await r.json();
       if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
@@ -151,8 +157,15 @@ function AddNodeModal({ onClose, onCreated }) {
           <button type="button" className="text-zinc-500 hover:text-zinc-800 text-sm" onClick={onClose}>Close</button>
         </div>
         <p className="text-xs text-zinc-600 mb-3">
-          Generate a single API key for the new node. Copy it now — it will not be displayed again.
+          Enter the node machine UUID and generate an API key. Copy the key now — it will not be displayed again.
         </p>
+        <input
+          className="w-full mb-3 rounded border border-zinc-300 px-3 py-2 text-sm font-mono"
+          placeholder="machine_id (UUID) — required"
+          value={machineId}
+          onChange={(e) => setMachineId(e.target.value)}
+          disabled={!!apiKey}
+        />
         <input
           className="w-full mb-3 rounded border border-zinc-300 px-3 py-2 text-sm"
           placeholder="Node display name (optional)"
