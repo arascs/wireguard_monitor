@@ -23,6 +23,7 @@ export default function AppShell() {
   const [unread, setUnread] = useState(0);
   const [openBell, setOpenBell] = useState(false);
   const [notifItems, setNotifItems] = useState([]);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   async function loadUnread() {
     try {
@@ -40,6 +41,10 @@ export default function AppShell() {
   useEffect(() => {
     loadUnread();
     const t = setInterval(loadUnread, 5000);
+    apiFetch('/api/me')
+      .then((r) => r.json())
+      .then((j) => setIsSuperAdmin(!!(j.ok && j.admin?.role === 'superadmin')))
+      .catch(() => setIsSuperAdmin(false));
     return () => clearInterval(t);
   }, []);
 
@@ -185,6 +190,11 @@ export default function AppShell() {
           <NavLink to="/logging" className={navCls}>
             Logging
           </NavLink>
+          {isSuperAdmin && (
+            <NavLink to="/admins" className={navCls}>
+              Admins
+            </NavLink>
+          )}
         </nav>
       </aside>
 

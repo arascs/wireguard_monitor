@@ -23,19 +23,16 @@ const {
   fetchDevicesAggregated,
   insertWireguardLogs,
   countAlertsLast24h
-} = require('./clickhouseLogs');
+} = require('./mysqlLogs');
 const {
-  ensureCredentials,
   SESSION_SECRET,
   COOKIE_MAX_AGE_MS,
-  COOKIE_NAME,
-  verifyLogin,
-  authMiddleware
+  COOKIE_NAME
 } = require('./centralAuth');
+const { setup: setupAdminAccounts, authWrapper, mountAdminsRoutes, authenticateAdmin } = require('./modules/admin-accounts');
+const bcrypt = require('bcrypt');
 const { parseMetrics } = require('./parseMetrics');
 const { adminIpGuard, corsMiddleware, loginLimiter } = require('./security');
-
-ensureCredentials();
 
 const PORT = parseInt(process.env.PORT || '4001', 10);
 const POLL_MS = parseInt(process.env.POLL_INTERVAL_MS || '30000', 10);
@@ -440,15 +437,32 @@ app.use(session({
 
 app.post('/api/login', loginLimiter('central'), async (req, res) => {
   try {
-    const ok = await verifyLogin(req.body && req.body.username, req.body && req.body.password);
-    if (!ok) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+    const username = req.body && req.body.username;
+    const password = req.body && req.body.password;
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password required' });
     }
-    req.session.user = req.body.username;
+    const result = await authenticateAdmin(username, password, bcrypt);
+    if (result.error) {
+      return res.status(result.status || 401).json({ error: result.error });
+    }
+    req.session.adminId = result.admin.id;
+    req.session.user = result.admin.username;
+    req.session.role = result.admin.role;
     res.json({ ok: true });
   } catch (e) {
-    res.status(500).json({ error: 'Login failed' });
+    res.status(500).json({ error: e.message || 'Login failed' });
   }
+});
+
+app.get('/api/me', authWrapper, (req, res) => {
+  res.json({
+    ok: true,
+    admin: {
+      username: req.session.user,
+      role: req.session.role
+    }
+  });
 });
 
 app.post('/api/logout', (req, res) => {
@@ -532,11 +546,11 @@ app.post('/api/logs/push', apiKeyAuth, async (req, res) => {
     pushNotification('ingest', { detail: '' });
     res.json({ ok: true, inserted: cleaned.length, unread: getUnreadCount() });
   } catch (e) {
-    res.status(503).json({ ok: false, error: e.message || 'ClickHouse unavailable' });
+    res.status(503).json({ ok: false, error: e.message || 'Database unavailable' });
   }
 });
 
-const admin = [adminIpGuard, authMiddleware];
+const admin = [adminIpGuard, authWrapper];
 
 app.get('/api/notifications/unread', admin, (req, res) => {
   const unread = getUnreadCount();
@@ -704,8 +718,8 @@ app.get('/api/alerts', admin, async (req, res) => {
     const out = await fetchLogs(req.query);
     res.json({ ok: true, ...out });
   } catch (e) {
-    if (e.code === 'CH_DISABLED') return res.status(503).json({ ok: false, error: e.message });
-    res.status(503).json({ ok: false, error: e.message || 'ClickHouse unavailable.' });
+    if (e.code === 'DB_DISABLED') return res.status(503).json({ ok: false, error: e.message });
+    res.status(503).json({ ok: false, error: e.message || 'Database unavailable.' });
   }
 });
 
@@ -714,8 +728,8 @@ app.get('/api/operation-logs', admin, async (req, res) => {
     const out = await fetchOperationLogs(req.query);
     res.json({ ok: true, ...out });
   } catch (e) {
-    if (e.code === 'CH_DISABLED') return res.status(503).json({ ok: false, error: e.message });
-    res.status(503).json({ ok: false, error: e.message || 'ClickHouse unavailable.' });
+    if (e.code === 'DB_DISABLED') return res.status(503).json({ ok: false, error: e.message });
+    res.status(503).json({ ok: false, error: e.message || 'Database unavailable.' });
   }
 });
 
@@ -755,10 +769,12 @@ app.get('/api/registry/devices', admin, async (req, res) => {
     const rows = await fetchDevicesAggregated();
     res.json({ ok: true, devices: rows });
   } catch (e) {
-    if (e.code === 'CH_DISABLED') return res.status(503).json({ ok: false, error: e.message });
-    res.status(503).json({ ok: false, error: e.message || 'ClickHouse unavailable.' });
+    if (e.code === 'DB_DISABLED') return res.status(503).json({ ok: false, error: e.message });
+    res.status(503).json({ ok: false, error: e.message || 'Database unavailable.' });
   }
 });
+
+mountAdminsRoutes(app);
 
 // ── static UI ────────────────────────────────────────────────────────
 
@@ -792,6 +808,13 @@ const httpsOptions = {
   cert: fs.readFileSync(TLS_CERT_PATH)
 };
 
-https.createServer(httpsOptions, app).listen(PORT, () => {
-  console.log(`Central HTTPS server listening on :${PORT}`);
-});
+setupAdminAccounts()
+  .then(() => {
+    https.createServer(httpsOptions, app).listen(PORT, () => {
+      console.log(`Central HTTPS server listening on :${PORT}`);
+    });
+  })
+  .catch((e) => {
+    console.error('[startup]', e);
+    process.exit(1);
+  });

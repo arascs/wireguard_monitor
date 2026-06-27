@@ -5,7 +5,29 @@ import Login from './pages/Login';
 import Overview from './pages/Overview';
 import NodeExplorer from './pages/NodeExplorer';
 import Logging from './pages/Logging';
+import Admins from './pages/Admins';
 import { markAuthenticated } from './auth';
+
+function RequireSuperAdmin({ children }) {
+  const [state, setState] = useState('checking');
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/me', { credentials: 'include' })
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled) return;
+        if (j.ok && j.admin?.role === 'superadmin') setState('ok');
+        else setState('denied');
+      })
+      .catch(() => !cancelled && setState('denied'));
+    return () => { cancelled = true; };
+  }, []);
+
+  if (state === 'checking') return null;
+  if (state === 'denied') return <Navigate to="/" replace />;
+  return children;
+}
 
 function RequireAuth({ children }) {
   const loc = useLocation();
@@ -48,6 +70,14 @@ export default function App() {
           <Route index element={<Overview />} />
           <Route path="nodes" element={<NodeExplorer />} />
           <Route path="logging" element={<Logging />} />
+          <Route
+            path="admins"
+            element={
+              <RequireSuperAdmin>
+                <Admins />
+              </RequireSuperAdmin>
+            }
+          />
           <Route path="alerts" element={<Navigate to="/logging" replace />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

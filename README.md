@@ -81,7 +81,7 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
 - Search by machine ID, hostname, or node name
 
 ### Logging
-- **Alerts**: browse security event logs pushed by the Vector pipeline into ClickHouse; filter by host, event type, time range, and keyword; view full JSON payload per event
+- **Alerts**: browse security event logs pushed by the Vector pipeline into MySQL; filter by host, event type, time range, and keyword; view full JSON payload per event
 - **Operation Logs**: browse internal logs written by central (node offline, high resource usage, service down, site-to-site connection error); filter by alert type, node, and time range
 
 ### Notifications
