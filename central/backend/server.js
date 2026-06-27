@@ -36,14 +36,12 @@ const { adminIpGuard, corsMiddleware, loginLimiter } = require('./security');
 
 const PORT = parseInt(process.env.PORT || '4001', 10);
 const POLL_MS = parseInt(process.env.POLL_INTERVAL_MS || '30000', 10);
-const GEO_DISABLED = process.env.GEO_LOOKUP === '0';
 const TLS_KEY_PATH = process.env.TLS_KEY_PATH || '/usr/local/share/ca-certificates/key.pem';
 const TLS_CERT_PATH = process.env.TLS_CERT_PATH || '/usr/local/share/ca-certificates/cert.pem';
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 let nodes = loadNodes();
-const geoCache = new Map();
 const latestByNode = new Map();
 const lastHealthOkByNode = new Map();
 const notifyCooldownKeys = new Map();
@@ -220,26 +218,6 @@ function countIncomingAlerts(payload) {
   if (payload && payload.event) return 1;
   if (payload && typeof payload === 'object' && Object.keys(payload).length > 0) return 1;
   return 0;
-}
-
-async function geoForIp(ip) {
-  if (!ip || GEO_DISABLED) return null;
-  if (geoCache.has(ip)) return geoCache.get(ip);
-  try {
-    const r = await fetch(
-      `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,country,countryCode,lat,lon`,
-      { timeout: 5000 }
-    );
-    const j = await r.json();
-    if (j.status === 'success') {
-      const g = { country: j.country, countryCode: j.countryCode, lat: j.lat, lon: j.lon };
-      geoCache.set(ip, g);
-      return g;
-    }
-  } catch {
-    /* ignore */
-  }
-  return null;
 }
 
 /** Compute traffic delta + threshold notifications from a fresh metrics push. */
@@ -474,7 +452,7 @@ app.post('/api/logout', (req, res) => {
 
 // ── node-facing endpoints (single API key) ───────────────────────────
 
-app.post('/api/register', apiKeyAuth, async (req, res) => {
+app.post('/api/register', apiKeyAuth, (req, res) => {
   const node = req.nodeKey;
   const baseUrl = normalizeBaseUrl(String(req.body.baseUrl || '').trim());
   if (!baseUrl) return res.status(400).json({ ok: false, error: 'baseUrl required' });
@@ -482,15 +460,10 @@ app.post('/api/register', apiKeyAuth, async (req, res) => {
   const id = nodeIdFor(baseUrl);
   const bodyIp = req.body.publicIp != null ? String(req.body.publicIp).trim() : '';
   const publicIp = bodyIp || node.publicIp || null;
-  let geo = null;
-  if (publicIp) geo = await geoForIp(publicIp);
 
   node.id = id;
   node.baseUrl = baseUrl;
   node.publicIp = publicIp;
-  node.region = geo ? geo.country : node.region || '';
-  node.lat = geo ? geo.lat : node.lat || null;
-  node.lon = geo ? geo.lon : node.lon || null;
   node.lastSeenAt = new Date().toISOString();
 
   saveNodes(nodes);
@@ -568,15 +541,10 @@ app.post('/api/notifications/mark-read', admin, (req, res) => {
   res.json({ ok: true, unread: 0 });
 });
 
-app.get('/api/nodes', admin, async (req, res) => {
+app.get('/api/nodes', admin, (req, res) => {
   const enriched = [];
   for (const n of nodes) {
     if (!n.id) continue;
-    let geo = null;
-    if (n.publicIp) geo = await geoForIp(n.publicIp);
-    const lat = n.lat != null ? n.lat : geo && geo.lat;
-    const lon = n.lon != null ? n.lon : geo && geo.lon;
-    const region = n.region || (geo && geo.country) || '';
     const snap = latestByNode.get(n.id);
     const m = snap && snap.metrics;
     const dt = (snap && snap.pollDt) || POLL_MS / 1000;
@@ -589,9 +557,6 @@ app.get('/api/nodes', admin, async (req, res) => {
       machineId: n.machineId || '',
       baseUrl: n.baseUrl,
       publicIp: n.publicIp,
-      region,
-      lat,
-      lon,
       online: snap ? !!snap.online : false,
       cpuPct: snap && snap.cpuPct != null ? snap.cpuPct : null,
       memUsedPct,
@@ -663,11 +628,6 @@ app.get('/api/dashboard', admin, async (req, res) => {
   const list = [];
   let online = 0;
   for (const n of nodes) {
-    let geo = null;
-    if (n.publicIp) geo = await geoForIp(n.publicIp);
-    const lat = n.lat != null ? n.lat : geo && geo.lat;
-    const lon = n.lon != null ? n.lon : geo && geo.lon;
-    const region = n.region || (geo && geo.country) || '';
     const snap = latestByNode.get(n.id);
     const m = snap && snap.metrics;
     const dt = (snap && snap.pollDt) || POLL_MS / 1000;
@@ -680,9 +640,6 @@ app.get('/api/dashboard', admin, async (req, res) => {
       name: n.name,
       baseUrl: n.baseUrl,
       publicIp: n.publicIp,
-      region,
-      lat,
-      lon,
       online: snap ? !!snap.online : false,
       cpuPct: snap && snap.cpuPct != null ? snap.cpuPct : null,
       memUsedPct,

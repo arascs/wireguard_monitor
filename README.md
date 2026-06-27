@@ -73,7 +73,7 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
 
 ### Node Explorer
 - List all nodes with CPU, RAM, Disk, throughput, site-to-site peer count, last health check time, and online/offline status
-- Filter by name, public IP, and geographic region
+- Filter by name or public IP
 - View per-node service status and WireGuard peer details
 
 ### Device Registry

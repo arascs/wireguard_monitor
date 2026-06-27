@@ -206,7 +206,6 @@ export default function NodeExplorer() {
   const [section, setSection] = useState('nodes');
   const [rows, setRows] = useState([]);
   const [q, setQ] = useState('');
-  const [region, setRegion] = useState('');
   const [err, setErr] = useState(null);
   const [detailNode, setDetailNode] = useState(null);
   const [rotatingNodeId, setRotatingNodeId] = useState(null);
@@ -232,24 +231,15 @@ export default function NodeExplorer() {
     };
   }, []);
 
-  const regions = useMemo(() => {
-    const s = new Set();
-    for (const n of rows) {
-      if (n.region) s.add(n.region);
-    }
-    return Array.from(s).sort();
-  }, [rows]);
-
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
     return rows.filter((n) => {
-      if (region && n.region !== region) return false;
       if (!ql) return true;
       const name = (n.name || '').toLowerCase();
       const pip = (n.publicIp || '').toLowerCase();
       return name.includes(ql) || pip.includes(ql);
     });
-  }, [rows, q, region]);
+  }, [rows, q]);
 
   async function handleRotateKey(node) {
     if (!node || !node.id) return;
@@ -324,7 +314,7 @@ export default function NodeExplorer() {
           Failed to load nodes: {err}
         </p>
       )}
-      <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+      <div className="flex flex-col sm:flex-row gap-3 sm:items-end max-w-xl">
         <div className="flex-1">
           <label className="block text-xs font-medium text-zinc-600 mb-1">Search</label>
           <input
@@ -334,21 +324,6 @@ export default function NodeExplorer() {
             onChange={(e) => setQ(e.target.value)}
           />
         </div>
-        <div className="sm:w-56">
-          <label className="block text-xs font-medium text-zinc-600 mb-1">Region</label>
-          <select
-            className="w-full rounded border border-zinc-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/40"
-            value={region}
-            onChange={(e) => setRegion(e.target.value)}
-          >
-            <option value="">All</option>
-            {regions.map((reg) => (
-              <option key={reg} value={reg}>
-                {reg}
-              </option>
-            ))}
-          </select>
-        </div>
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
@@ -357,7 +332,6 @@ export default function NodeExplorer() {
             <tr className="bg-primary text-white text-left">
               <th className="px-3 py-2 font-medium">Node</th>
               <th className="px-3 py-2 font-medium">Public IP</th>
-              <th className="px-3 py-2 font-medium">Region</th>
               <th className="px-3 py-2 font-medium">CPU</th>
               <th className="px-3 py-2 font-medium">RAM used</th>
               <th className="px-3 py-2 font-medium">Disk used</th>
@@ -375,7 +349,6 @@ export default function NodeExplorer() {
                   <div>{n.name}</div>
                 </td>
                 <td className="px-3 py-2 text-zinc-700 font-mono text-xs">{n.publicIp || '—'}</td>
-                <td className="px-3 py-2 text-zinc-700">{n.region || '—'}</td>
                 <td className="px-3 py-2 text-zinc-700">
                   {n.cpuPct != null ? `${n.cpuPct.toFixed(1)}%` : '—'}
                 </td>
@@ -420,7 +393,7 @@ export default function NodeExplorer() {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={11} className="px-3 py-6 text-center text-zinc-500">
+                <td colSpan={10} className="px-3 py-6 text-center text-zinc-500">
                   No nodes registered.
                 </td>
               </tr>
