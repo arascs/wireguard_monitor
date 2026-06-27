@@ -462,7 +462,6 @@ app.post('/api/logout', (req, res) => {
 
 app.post('/api/register', apiKeyAuth, async (req, res) => {
   const node = req.nodeKey;
-  const name = String(req.body.name || node.name || '').trim() || 'node';
   const baseUrl = normalizeBaseUrl(String(req.body.baseUrl || '').trim());
   if (!baseUrl) return res.status(400).json({ ok: false, error: 'baseUrl required' });
 
@@ -473,7 +472,6 @@ app.post('/api/register', apiKeyAuth, async (req, res) => {
   if (publicIp) geo = await geoForIp(publicIp);
 
   node.id = id;
-  node.name = name;
   node.baseUrl = baseUrl;
   node.publicIp = publicIp;
   node.region = geo ? geo.country : node.region || '';
@@ -609,8 +607,9 @@ app.get('/api/node-keys', admin, (req, res) => {
 });
 
 app.post('/api/node-keys', admin, (req, res) => {
-  const name = String((req.body && req.body.name) || '').trim() || 'node';
+  const name = String((req.body && req.body.name) || '').trim();
   const machineId = String((req.body && req.body.machineId) || '').trim().toLowerCase();
+  if (!name) return res.status(400).json({ ok: false, error: 'name required' });
   if (!machineId) return res.status(400).json({ ok: false, error: 'machineId required' });
   if (nodes.some((n) => n.machineId && n.machineId.toLowerCase() === machineId)) {
     return res.status(409).json({ ok: false, error: 'machineId already used' });

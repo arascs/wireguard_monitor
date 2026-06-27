@@ -5,6 +5,68 @@ const ICON_ENABLE = '<svg width="16" height="16" viewBox="0 0 16 16" fill="curre
 const ICON_EDIT = '<svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>';
 const ICON_DELETE = '<svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/></svg>';
 
+const METHOD_OPTS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'];
+
+function parsePolicyField(app) {
+  const raw = app.policy_json != null ? app.policy_json : app.policy;
+  if (raw == null || raw === '') return null;
+  return typeof raw === 'string' ? JSON.parse(raw) : raw;
+}
+
+function policyLabel(app) {
+  const p = parsePolicyField(app);
+  if (!p) return '—';
+  const parts = [];
+  if (p.print === false) parts.push('no print');
+  if (p.clipboard === false) parts.push('no clipboard');
+  if (p.download === false) parts.push('no download');
+  if (p.allowed_methods && p.allowed_methods.length) parts.push(p.allowed_methods.join(','));
+  return parts.length ? parts.join('; ') : 'on';
+}
+
+function readPolicyForm(prefix) {
+  const enabled = document.getElementById(`${prefix}-policy-enabled`)?.checked;
+  if (!enabled) return null;
+  const methods = [];
+  METHOD_OPTS.forEach((m) => {
+    const el = document.getElementById(`${prefix}-method-${m}`);
+    if (el && el.checked) methods.push(m);
+  });
+  if (!methods.length) {
+    alert('Select at least one allowed HTTP method');
+    return undefined;
+  }
+  return {
+    print: !document.getElementById(`${prefix}-disable-print`)?.checked,
+    clipboard: !document.getElementById(`${prefix}-disable-clipboard`)?.checked,
+    download: !document.getElementById(`${prefix}-disable-download`)?.checked,
+    allowed_methods: methods
+  };
+}
+
+function fillPolicyForm(prefix, app) {
+  const p = parsePolicyField(app);
+  const on = !!p;
+  document.getElementById(`${prefix}-policy-enabled`).checked = on;
+  document.getElementById(`${prefix}-disable-print`).checked = on && p.print === false;
+  document.getElementById(`${prefix}-disable-clipboard`).checked = on && p.clipboard === false;
+  document.getElementById(`${prefix}-disable-download`).checked = on && p.download === false;
+  const methods = on && Array.isArray(p.allowed_methods) ? p.allowed_methods : ['GET', 'HEAD', 'POST'];
+  METHOD_OPTS.forEach((m) => {
+    const el = document.getElementById(`${prefix}-method-${m}`);
+    if (el) el.checked = methods.includes(m);
+  });
+  document.getElementById(`${prefix}-backend-host`).value = app.backend_host || '127.0.0.1';
+  document.getElementById(`${prefix}-backend-port`).value = app.backend_port != null ? app.backend_port : '';
+}
+
+function readBackendFields(prefix) {
+  return {
+    backend_host: document.getElementById(`${prefix}-backend-host`)?.value.trim() || '127.0.0.1',
+    backend_port: document.getElementById(`${prefix}-backend-port`)?.value.trim() || ''
+  };
+}
+
 function renderApplicationsTable() {
   const tbody = document.getElementById('applications-tbody');
   tbody.innerHTML = '';
@@ -24,6 +86,7 @@ function renderApplicationsTable() {
       <td>${app.type}</td>
       <td>${app.IP}</td>
       <td>${app.port}</td>
+      <td>${policyLabel(app)}</td>
       <td>${enabled ? 'Enabled' : 'Disabled'}</td>
       <td class="actions-cell">${actions}</td>
     `;
@@ -56,6 +119,23 @@ async function loadApplications() {
   }
 }
 
+function resetPolicyForm(prefix) {
+  document.getElementById(`${prefix}-policy-enabled`).checked = false;
+  document.getElementById(`${prefix}-disable-print`).checked = true;
+  document.getElementById(`${prefix}-disable-clipboard`).checked = true;
+  document.getElementById(`${prefix}-disable-download`).checked = true;
+  ['GET', 'HEAD', 'POST'].forEach((m) => {
+    const el = document.getElementById(`${prefix}-method-${m}`);
+    if (el) el.checked = true;
+  });
+  ['PUT', 'PATCH', 'DELETE'].forEach((m) => {
+    const el = document.getElementById(`${prefix}-method-${m}`);
+    if (el) el.checked = false;
+  });
+  document.getElementById(`${prefix}-backend-host`).value = '127.0.0.1';
+  document.getElementById(`${prefix}-backend-port`).value = '';
+}
+
 function openEditApplicationModal(id) {
   const app = allApplications.find((a) => String(a.id) === String(id));
   if (!app) return;
@@ -64,6 +144,7 @@ function openEditApplicationModal(id) {
   document.getElementById('edit-app-type').value = app.type || '';
   document.getElementById('edit-app-ip').value = app.IP || '';
   document.getElementById('edit-app-port').value = app.port || '';
+  fillPolicyForm('edit', app);
   document.getElementById('edit-app-modal').classList.add('open');
 }
 
@@ -73,6 +154,7 @@ function closeEditApplicationModal() {
 
 function openCreateApplicationModal() {
   document.getElementById('create-application-form')?.reset();
+  resetPolicyForm('create');
   document.getElementById('create-app-modal')?.classList.add('open');
 }
 
@@ -116,10 +198,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const port = parseInt(document.getElementById('app-port').value, 10);
     if (!name || !type || !IP || !port) return;
 
+    const policy = readPolicyForm('create');
+    if (policy === undefined) return;
+    const backend = readBackendFields('create');
+
     const res = await fetch('/api/applications', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, type, IP, port })
+      body: JSON.stringify({ name, type, IP, port, policy, ...backend })
     });
     const data = await res.json();
     if (data.success) {
@@ -144,10 +230,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const port = parseInt(document.getElementById('edit-app-port').value, 10);
     if (!id || !name || !type || !IP || !port) return;
 
+    const policy = readPolicyForm('edit');
+    if (policy === undefined) return;
+    const backend = readBackendFields('edit');
+
     const res = await fetch(`/api/applications/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, type, IP, port })
+      body: JSON.stringify({ name, type, IP, port, policy, ...backend })
     });
     const data = await res.json();
     if (data.success) {

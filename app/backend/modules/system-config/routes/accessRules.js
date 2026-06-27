@@ -1,8 +1,40 @@
 const express = require('express');
 const { spawnSync } = require('child_process');
+const { logAction } = require('../../logging/auditLogger');
 
 function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
   const router = express.Router();
+
+  const RULE_SELECT = `SELECT r.id, r.name, r.source_type, r.source_value, r.status, r.application_id,
+                s.site_name, d.device_name, a.name AS application_name,
+                a.IP AS app_ip, a.port AS app_port
+         FROM access_rules r
+         LEFT JOIN sites s ON r.source_type = 'site' AND r.source_value = s.id
+         LEFT JOIN devices d ON r.source_type = 'device' AND r.source_value = d.id
+         LEFT JOIN applications a ON r.application_id = a.id`;
+
+  function ruleAuditDetails(row) {
+    const isBlock = row.status >= 2;
+    let source = row.source_value;
+    if (row.source_type === 'site') source = row.site_name || source;
+    else if (row.source_type === 'device') source = row.device_name || source;
+    return {
+      id: row.id,
+      name: row.name,
+      action: isBlock ? 'block' : 'allow',
+      source_type: row.source_type,
+      source,
+      application_id: row.application_id,
+      application: row.application_id == null ? 'All applications' : (row.application_name || ''),
+      status: row.status
+    };
+  }
+
+  function audit(admin, action, details) {
+    try {
+      logAction(admin || 'unknown', action, details);
+    } catch (_) { /* ignore */ }
+  }
 
   // Helper: resolve source IPs from rule
   async function resolveSourceIps(connection, rule) {
@@ -205,10 +237,14 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
       }
 
       connection = await mysql.createConnection(dbConfig);
-      await connection.execute(
+      const [result] = await connection.execute(
         'INSERT INTO access_rules (name, source_type, source_value, application_id, status) VALUES (?, ?, ?, ?, ?)',
         [name, sourceType, sourceValue, appId, baseStatus]
       );
+      const [created] = await connection.execute(`${RULE_SELECT} WHERE r.id = ?`, [result.insertId]);
+      if (created.length) {
+        audit(req.session && req.session.user, 'create_access_rule', ruleAuditDetails(created[0]));
+      }
       res.json({ success: true });
     } catch (error) {
       console.error('Error creating access rule:', error);
@@ -225,14 +261,7 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
     let connection;
     try {
       connection = await mysql.createConnection(dbConfig);
-      const [rows] = await connection.execute(
-        `SELECT r.id, r.source_type, r.source_value, r.status, r.application_id,
-                a.IP AS app_ip, a.port AS app_port
-         FROM access_rules r
-         LEFT JOIN applications a ON r.application_id = a.id
-         WHERE r.id = ?`,
-        [id]
-      );
+      const [rows] = await connection.execute(`${RULE_SELECT} WHERE r.id = ?`, [id]);
       if (!rows.length) return res.status(404).json({ success: false, error: 'Rule not found' });
 
       const rule = rows[0];
@@ -240,6 +269,7 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
 
       const newStatus = rule.status >= 2 ? 3 : 1;
       await connection.execute('UPDATE access_rules SET status = ?, enabled_at = NOW() WHERE id = ?', [newStatus, id]);
+      audit(req.session && req.session.user, 'enable_access_rule', ruleAuditDetails({ ...rule, status: newStatus }));
       res.json({ success: true });
     } catch (error) {
       console.error('Error enabling access rule:', error);
@@ -256,14 +286,7 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
     let connection;
     try {
       connection = await mysql.createConnection(dbConfig);
-      const [rows] = await connection.execute(
-        `SELECT r.id, r.source_type, r.source_value, r.status, r.application_id,
-                a.IP AS app_ip, a.port AS app_port
-         FROM access_rules r
-         LEFT JOIN applications a ON r.application_id = a.id
-         WHERE r.id = ?`,
-        [id]
-      );
+      const [rows] = await connection.execute(`${RULE_SELECT} WHERE r.id = ?`, [id]);
       if (!rows.length) return res.status(404).json({ success: false, error: 'Rule not found' });
 
       const rule = rows[0];
@@ -271,6 +294,7 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
 
       const newStatus = rule.status >= 2 ? 2 : 0;
       await connection.execute('UPDATE access_rules SET status = ? WHERE id = ?', [newStatus, id]);
+      audit(req.session && req.session.user, 'disable_access_rule', ruleAuditDetails({ ...rule, status: newStatus }));
       res.json({ success: true });
     } catch (error) {
       console.error('Error disabling access rule:', error);
@@ -287,14 +311,7 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
     let connection;
     try {
       connection = await mysql.createConnection(dbConfig);
-      const [rows] = await connection.execute(
-        `SELECT r.id, r.source_type, r.source_value, r.status, r.application_id,
-                a.IP AS app_ip, a.port AS app_port
-         FROM access_rules r
-         LEFT JOIN applications a ON r.application_id = a.id
-         WHERE r.id = ?`,
-        [id]
-      );
+      const [rows] = await connection.execute(`${RULE_SELECT} WHERE r.id = ?`, [id]);
       if (!rows.length) return res.status(404).json({ success: false, error: 'Rule not found' });
 
       const rule = rows[0];
@@ -306,8 +323,8 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
         }
       }
 
-      // Delete the rule
       await connection.execute('DELETE FROM access_rules WHERE id = ?', [id]);
+      audit(req.session && req.session.user, 'delete_access_rule', ruleAuditDetails(rule));
       res.json({ success: true });
     } catch (error) {
       console.error('Error deleting access rule:', error);

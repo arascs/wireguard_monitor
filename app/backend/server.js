@@ -45,6 +45,7 @@ const {
   mountAdminAccounts
 } = require('./modules/admin-accounts');
 const { checkAndDisconnectIfExpired } = require('./modules/system-config/services/keyExpiry');
+const { ensureAppProxySchema, syncAppProxies } = require('./modules/app-proxy');
 
 ensureSecrets();
 
@@ -54,6 +55,7 @@ if (!fs.existsSync(BACKUP_DIR)) {
 
 async function startServer() {
   await initAdminAccounts({ mysql, dbConfig, bcrypt });
+  await ensureAppProxySchema(mysql, dbConfig);
 
   const validateAdminSession = createValidateAdminSession({ mysql, dbConfig });
   const requireAuth = createRequireAuth(validateAdminSession);
@@ -199,6 +201,10 @@ async function startServer() {
       onBoot();
     });
   }
+
+  syncAppProxies(mysql, dbConfig).catch((e) => {
+    console.error('[app-proxy] startup sync failed:', e.message);
+  });
 }
 
 startServer().catch((error) => {

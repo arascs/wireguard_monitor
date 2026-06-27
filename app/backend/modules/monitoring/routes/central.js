@@ -25,7 +25,6 @@ function registerWithCentral(port) {
     process.env.PUBLIC_BASE_URL ||
     `https://127.0.0.1:${port}`;
   const body = {
-    name: process.env.CENTRAL_NODE_NAME || HOSTNAME,
     machineId,
     baseUrl: pollBase.replace(/\/+$/, ''),
     publicIp: process.env.CENTRAL_PUBLIC_IP || ''
