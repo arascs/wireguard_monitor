@@ -204,26 +204,35 @@ async function syncDevicesForNode(nodeMeta, devices) {
   return machineIds.length;
 }
 
+function splitField(val) {
+  if (!val) return [];
+  return String(val).split('\x1e').filter(Boolean);
+}
+
 async function fetchDevicesAggregated() {
   const db = getPool();
   if (!db) throw disabledError();
 
   const [rows] = await db.execute(`
     SELECT
-      machine_id,
-      SUBSTRING_INDEX(GROUP_CONCAT(device_name ORDER BY updated_at DESC SEPARATOR CHAR(0)), CHAR(0), 1) AS device_name,
-      JSON_ARRAYAGG(DISTINCT node_name) AS node_names,
-      JSON_ARRAYAGG(DISTINCT base_url) AS base_urls
-    FROM ${DEVICES_TABLE}
-    GROUP BY machine_id
-    ORDER BY MAX(updated_at) DESC
+      d.machine_id,
+      (SELECT d2.device_name
+       FROM ${DEVICES_TABLE} d2
+       WHERE d2.machine_id = d.machine_id
+       ORDER BY d2.updated_at DESC
+       LIMIT 1) AS device_name,
+      GROUP_CONCAT(DISTINCT d.node_name ORDER BY d.node_name SEPARATOR '\x1e') AS node_names,
+      GROUP_CONCAT(DISTINCT d.base_url ORDER BY d.base_url SEPARATOR '\x1e') AS base_urls
+    FROM ${DEVICES_TABLE} d
+    GROUP BY d.machine_id
+    ORDER BY MAX(d.updated_at) DESC
   `);
 
   return rows.map((row) => ({
     machine_id: row.machine_id,
     device_name: row.device_name,
-    node_names: parseJsonArray(row.node_names),
-    base_urls: parseJsonArray(row.base_urls)
+    node_names: splitField(row.node_names),
+    base_urls: splitField(row.base_urls)
   }));
 }
 

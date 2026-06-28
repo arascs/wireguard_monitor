@@ -5,16 +5,18 @@ const session = require('express-session');
 const path = require('path');
 const fs = require('fs');
 const cookieParser = require('cookie-parser');
-const fetch = require('node-fetch');
 const https = require('https');
 
+const { generateApiKey } = require('./state');
 const {
-  loadNodes,
-  saveNodes,
-  nodeIdFor,
-  generateApiKey
-} = require('./state');
-const { createPoller } = require('./poller');
+  fetchAllNodes,
+  insertNode,
+  updateNodeRegister,
+  deleteNodeByMachineId,
+  hashApiKey,
+  verifyApiKey,
+  migrateFromJsonIfNeeded
+} = require('./mysqlNodes');
 const {
   fetchLogs,
   insertOperationLog,
@@ -33,17 +35,17 @@ const { setup: setupAdminAccounts, authWrapper, mountAdminsRoutes, authenticateA
 const bcrypt = require('bcrypt');
 const { parseMetrics } = require('./parseMetrics');
 const { adminIpGuard, corsMiddleware, loginLimiter } = require('./security');
+const { logAction, getLogs } = require('./auditLogger');
 
 const PORT = parseInt(process.env.PORT || '4001', 10);
-const POLL_MS = parseInt(process.env.POLL_INTERVAL_MS || '30000', 10);
+const OFFLINE_CHECK_MS = parseInt(process.env.POLL_INTERVAL_MS || '30000', 10);
+const OFFLINE_AFTER_SEC = 300;
 const TLS_KEY_PATH = process.env.TLS_KEY_PATH || '/usr/local/share/ca-certificates/key.pem';
 const TLS_CERT_PATH = process.env.TLS_CERT_PATH || '/usr/local/share/ca-certificates/cert.pem';
 
-const httpsAgent = new https.Agent({ rejectUnauthorized: false });
-
-let nodes = loadNodes();
+let nodes = [];
 const latestByNode = new Map();
-const lastHealthOkByNode = new Map();
+const lastPushAtByNode = new Map();
 const notifyCooldownKeys = new Map();
 let trafficSeries = [];
 let lastPollSec = Math.floor(Date.now() / 1000);
@@ -75,6 +77,40 @@ const NOTIFY_LABELS = {
 };
 
 const notificationState = { items: [], lastReadTs: 0, maxItems: 500 };
+
+function sessionAdmin(req) {
+  return (req.session && req.session.user) ? req.session.user : 'unknown';
+}
+
+function touchNodePush(machineId) {
+  const now = Math.floor(Date.now() / 1000);
+  lastPushAtByNode.set(machineId, now);
+  clearNotifyKey(`offline:${machineId}`);
+}
+
+function isNodeOnline(machineId) {
+  const last = lastPushAtByNode.get(machineId);
+  if (!last) return false;
+  return Math.floor(Date.now() / 1000) - last <= OFFLINE_AFTER_SEC;
+}
+
+function checkOfflineNodes() {
+  const now = Math.floor(Date.now() / 1000);
+  const cooldownMs = 5 * 60 * 1000;
+  for (const n of nodes) {
+    if (!n.registeredAt) continue;
+    const last = lastPushAtByNode.get(n.machineId);
+    if (last == null || now - last > OFFLINE_AFTER_SEC) {
+      if (last != null && canNotify(`offline:${n.machineId}`, cooldownMs)) {
+        pushNotification('node_offline', {
+          nodeId: n.machineId,
+          nodeName: n.name || n.machineId,
+          detail: `No push received for over 5 minutes (last: ${new Date(last * 1000).toISOString()})`
+        });
+      }
+    }
+  }
+}
 
 // ── helpers ──────────────────────────────────────────────────────────
 
@@ -134,13 +170,8 @@ function publicNode(row) {
     machineId: row.machineId || '',
     baseUrl: row.baseUrl || '',
     createdAt: row.createdAt || null,
-    lastSeenAt: row.lastSeenAt || null
+    registered: !!row.registeredAt
   };
-}
-
-function findNodeByApiKey(plain) {
-  if (!plain) return null;
-  return nodes.find((n) => n.apiKey === plain) || null;
 }
 
 function requestNodeUuid(req) {
@@ -150,17 +181,22 @@ function requestNodeUuid(req) {
   return raw ? raw.toLowerCase() : '';
 }
 
-function apiKeyAuth(req, res, next) {
+async function apiKeyAuth(req, res, next) {
   const auth = req.header('authorization') || '';
   const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
   if (!bearer) return res.status(401).json({ ok: false, error: 'missing api key' });
-  const row = findNodeByApiKey(bearer);
-  if (!row) return res.status(401).json({ ok: false, error: 'invalid api key' });
 
   const uuid = requestNodeUuid(req);
   if (!uuid) return res.status(401).json({ ok: false, error: 'missing node uuid' });
-  if (!row.machineId || row.machineId.toLowerCase() !== uuid) {
-    return res.status(401).json({ ok: false, error: 'node uuid mismatch' });
+
+  const row = nodes.find((n) => n.machineId === uuid);
+  if (!row) return res.status(401).json({ ok: false, error: 'invalid api key' });
+
+  try {
+    const ok = await verifyApiKey(bearer, row.apiKeyHash);
+    if (!ok) return res.status(401).json({ ok: false, error: 'invalid api key' });
+  } catch {
+    return res.status(401).json({ ok: false, error: 'invalid api key' });
   }
 
   req.nodeKey = row;
@@ -187,21 +223,22 @@ function buildSiteTopology() {
   }
   const pairs = new Map();
   for (const n of nodes) {
-    const snap = latestByNode.get(n.id);
-    if (!snap || !snap.online) continue;
+    if (!isNodeOnline(n.machineId)) continue;
+    const snap = latestByNode.get(n.machineId);
+    if (!snap) continue;
     const onlineSites = Array.isArray(snap.onlineSites) ? snap.onlineSites : [];
     for (const endpoint of onlineSites) {
       const remoteHost = endpointHost(endpoint);
       if (!remoteHost) continue;
       const remoteNode = ipToNode.get(remoteHost);
-      if (!remoteNode || remoteNode.id === n.id) continue;
-      const key = [n.id, remoteNode.id].sort().join('__');
+      if (!remoteNode || remoteNode.machineId === n.machineId) continue;
+      const key = [n.machineId, remoteNode.machineId].sort().join('__');
       let pair = pairs.get(key);
       if (!pair) {
-        pair = { source: n.id, target: remoteNode.id, hasAtoB: false, hasBtoA: false };
+        pair = { source: n.machineId, target: remoteNode.machineId, hasAtoB: false, hasBtoA: false };
         pairs.set(key, pair);
       }
-      if (pair.source === n.id) pair.hasAtoB = true;
+      if (pair.source === n.machineId) pair.hasAtoB = true;
       else pair.hasBtoA = true;
     }
   }
@@ -277,7 +314,6 @@ function applyMetricsSnapshot(nodeId, m) {
 
   const snap = {
     nodeId,
-    online: lastHealthOkByNode.has(nodeId),
     metrics: m,
     cpuPct,
     peers: peersTotal,
@@ -308,9 +344,9 @@ function applyMetricsSnapshot(nodeId, m) {
 
   // resource / service threshold checks
   const cooldownMs = 5 * 60 * 1000;
-  const node = nodes.find((n) => n.id === nodeId);
+  const node = nodes.find((n) => n.machineId === nodeId);
   if (!node) return;
-  const name = node.name || node.id;
+  const name = node.name || node.machineId;
   const { memUsedPct, diskUsedPct } = usageFromMetrics(m);
   const hi =
     (cpuPct != null && cpuPct >= 90) ||
@@ -321,71 +357,41 @@ function applyMetricsSnapshot(nodeId, m) {
     if (cpuPct != null && cpuPct >= 90) parts.push(`CPU ${cpuPct.toFixed(0)}%`);
     if (memUsedPct != null && memUsedPct >= 90) parts.push(`RAM ${memUsedPct.toFixed(0)}%`);
     if (diskUsedPct != null && diskUsedPct >= 90) parts.push(`Disk ${diskUsedPct.toFixed(0)}%`);
-    if (canNotify(`hi:${node.id}`, cooldownMs)) {
-      pushNotification('high_resource', { nodeId: node.id, nodeName: name, detail: parts.join(', ') });
+    if (canNotify(`hi:${node.machineId}`, cooldownMs)) {
+      pushNotification('high_resource', { nodeId: node.machineId, nodeName: name, detail: parts.join(', ') });
     }
   } else {
-    clearNotifyKey(`hi:${node.id}`);
+    clearNotifyKey(`hi:${node.machineId}`);
   }
 
-  if (snap.online) {
+  if (isNodeOnline(nodeId)) {
     const ps = m.peersSite;
     const os = m.peersOnlineSite;
     if (ps != null && ps > 0 && os != null && os < ps) {
-      if (canNotify(`siteconn:${node.id}`, cooldownMs)) {
+      if (canNotify(`siteconn:${node.machineId}`, cooldownMs)) {
         pushNotification('node_connection_error', {
-          nodeId: node.id,
+          nodeId: node.machineId,
           nodeName: name,
           detail: 'Site-to-site connection offline'
         });
       }
     } else {
-      clearNotifyKey(`siteconn:${node.id}`);
+      clearNotifyKey(`siteconn:${node.machineId}`);
     }
   } else {
-    clearNotifyKey(`siteconn:${node.id}`);
+    clearNotifyKey(`siteconn:${node.machineId}`);
   }
 
   const svcs = m.services || {};
   const bad = Object.keys(svcs).filter((k) => svcs[k] === 0);
   if (bad.length) {
-    if (canNotify(`svc:${node.id}`, cooldownMs)) {
-      pushNotification('service_offline', { nodeId: node.id, nodeName: name, detail: `Inactive: ${bad.join(', ')}` });
+    if (canNotify(`svc:${node.machineId}`, cooldownMs)) {
+      pushNotification('service_offline', { nodeId: node.machineId, nodeName: name, detail: `Inactive: ${bad.join(', ')}` });
     }
   } else {
-    clearNotifyKey(`svc:${node.id}`);
+    clearNotifyKey(`svc:${node.machineId}`);
   }
 }
-
-/** Health-only callback from the poller. */
-function onHealthResults(results) {
-  const now = Math.floor(Date.now() / 1000);
-  for (const r of results) {
-    const snap = latestByNode.get(r.nodeId) || { nodeId: r.nodeId };
-    snap.online = r.online;
-    latestByNode.set(r.nodeId, snap);
-    if (r.online) {
-      lastHealthOkByNode.set(r.nodeId, now);
-      clearNotifyKey(`offline:${r.nodeId}`);
-    }
-  }
-
-  const cooldownMs = 5 * 60 * 1000;
-  for (const n of nodes) {
-    const lastOk = lastHealthOkByNode.get(n.id);
-    if (lastOk != null && now - lastOk > 300) {
-      if (canNotify(`offline:${n.id}`, cooldownMs)) {
-        pushNotification('node_offline', {
-          nodeId: n.id,
-          nodeName: n.name || n.id,
-          detail: `No successful /health for over 5 minutes (last ok: ${new Date(lastOk * 1000).toISOString()})`
-        });
-      }
-    }
-  }
-}
-
-const poller = createPoller({ getNodes: () => nodes, onHealth: onHealthResults });
 
 // ── express app ──────────────────────────────────────────────────────
 
@@ -452,27 +458,29 @@ app.post('/api/logout', (req, res) => {
 
 // ── node-facing endpoints (single API key) ───────────────────────────
 
-app.post('/api/register', apiKeyAuth, (req, res) => {
-  const node = req.nodeKey;
-  const baseUrl = normalizeBaseUrl(String(req.body.baseUrl || '').trim());
-  if (!baseUrl) return res.status(400).json({ ok: false, error: 'baseUrl required' });
+app.post('/api/register', apiKeyAuth, async (req, res) => {
+  try {
+    const node = req.nodeKey;
+    const baseUrl = normalizeBaseUrl(String(req.body.baseUrl || '').trim());
+    if (!baseUrl) return res.status(400).json({ ok: false, error: 'baseUrl required' });
 
-  const id = nodeIdFor(baseUrl);
-  const bodyIp = req.body.publicIp != null ? String(req.body.publicIp).trim() : '';
-  const publicIp = bodyIp || node.publicIp || null;
+    const bodyIp = req.body.publicIp != null ? String(req.body.publicIp).trim() : '';
+    const publicIp = bodyIp || node.publicIp || null;
 
-  node.id = id;
-  node.baseUrl = baseUrl;
-  node.publicIp = publicIp;
-  node.lastSeenAt = new Date().toISOString();
+    const updated = await updateNodeRegister(node.machineId, { baseUrl, publicIp });
+    node.baseUrl = updated.baseUrl;
+    node.publicIp = updated.publicIp;
+    node.registeredAt = updated.registeredAt;
 
-  saveNodes(nodes);
-  res.json({ ok: true, id });
+    res.json({ ok: true, machineId: node.machineId });
+  } catch (e) {
+    res.status(503).json({ ok: false, error: e.message || 'Database unavailable' });
+  }
 });
 
 app.post('/api/metrics/push', apiKeyAuth, (req, res) => {
   const node = req.nodeKey;
-  if (!node.id) return res.status(409).json({ ok: false, error: 'node not registered yet' });
+  if (!node.registeredAt) return res.status(409).json({ ok: false, error: 'node not registered yet' });
 
   let m;
   if (typeof req.body === 'string') {
@@ -483,9 +491,8 @@ app.post('/api/metrics/push', apiKeyAuth, (req, res) => {
     return res.status(400).json({ ok: false, error: 'empty payload' });
   }
   if (!m || typeof m !== 'object') return res.status(400).json({ ok: false, error: 'invalid metrics' });
-  applyMetricsSnapshot(node.id, m);
-  node.lastSeenAt = new Date().toISOString();
-  saveNodes(nodes);
+  touchNodePush(node.machineId);
+  applyMetricsSnapshot(node.machineId, m);
   res.json({ ok: true });
 });
 
@@ -498,7 +505,7 @@ app.post('/api/notifications/ingest', apiKeyAuth, (req, res) => {
 
 app.post('/api/logs/push', apiKeyAuth, async (req, res) => {
   const node = req.nodeKey;
-  if (!node.id) return res.status(409).json({ ok: false, error: 'node not registered yet' });
+  if (!node.registeredAt) return res.status(409).json({ ok: false, error: 'node not registered yet' });
   const incoming = Array.isArray(req.body) ? req.body : [req.body];
   const cleaned = incoming
     .map((raw) => {
@@ -516,6 +523,7 @@ app.post('/api/logs/push', apiKeyAuth, async (req, res) => {
   if (cleaned.length === 0) return res.status(400).json({ ok: false, error: 'empty payload' });
   try {
     await insertWireguardLogs(cleaned);
+    touchNodePush(node.machineId);
     pushNotification('ingest', { detail: '' });
     res.json({ ok: true, inserted: cleaned.length, unread: getUnreadCount() });
   } catch (e) {
@@ -541,132 +549,97 @@ app.post('/api/notifications/mark-read', admin, (req, res) => {
   res.json({ ok: true, unread: 0 });
 });
 
-app.get('/api/nodes', admin, (req, res) => {
-  const enriched = [];
-  for (const n of nodes) {
-    if (!n.id) continue;
-    const snap = latestByNode.get(n.id);
-    const m = snap && snap.metrics;
-    const dt = (snap && snap.pollDt) || POLL_MS / 1000;
-    const bps = snap && snap.bandwidthDelta != null ? snap.bandwidthDelta / dt : 0;
-    const { memUsedPct, diskUsedPct } = usageFromMetrics(m);
-    const lastOk = lastHealthOkByNode.get(n.id);
-    enriched.push({
-      id: n.id,
-      name: n.name,
-      machineId: n.machineId || '',
-      baseUrl: n.baseUrl,
-      publicIp: n.publicIp,
-      online: snap ? !!snap.online : false,
-      cpuPct: snap && snap.cpuPct != null ? snap.cpuPct : null,
-      memUsedPct,
-      diskUsedPct,
-      bandwidthBps: bps,
-      peers: snap ? snap.peers : null,
-      peersOnline: snap && snap.peersOnline != null ? snap.peersOnline : null,
-      peersTotal: snap && snap.peersTotal != null ? snap.peersTotal : snap ? snap.peers : null,
-      clientsOnline: snap && snap.clientsOnline != null ? snap.clientsOnline : null,
-      clientsTotal: snap && snap.clientsTotal != null ? snap.clientsTotal : null,
-      sitesOnline: snap && snap.sitesOnline != null ? snap.sitesOnline : null,
-      sitesTotal: snap && snap.sitesTotal != null ? snap.sitesTotal : null,
-      sites: snap && Array.isArray(snap.sites) ? snap.sites : [],
-      onlineSites: snap && Array.isArray(snap.onlineSites) ? snap.onlineSites : [],
-      services: snap && snap.services ? snap.services : {},
-      lastHealthOkAt: lastOk != null ? lastOk : null,
-      memTotal: m && m.memTotal,
-      memAvail: m && m.memAvail,
-      hasApiKey: !!n.apiKey
-    });
-  }
-  res.json({ nodes: enriched });
-});
-
-app.get('/api/node-keys', admin, (req, res) => {
-  res.json({ ok: true, rows: nodes.filter((n) => !n.id).map(publicNode) });
-});
-
-app.post('/api/node-keys', admin, (req, res) => {
-  const name = String((req.body && req.body.name) || '').trim();
-  const machineId = String((req.body && req.body.machineId) || '').trim().toLowerCase();
-  if (!name) return res.status(400).json({ ok: false, error: 'name required' });
-  if (!machineId) return res.status(400).json({ ok: false, error: 'machineId required' });
-  if (nodes.some((n) => n.machineId && n.machineId.toLowerCase() === machineId)) {
-    return res.status(409).json({ ok: false, error: 'machineId already used' });
-  }
-  const apiKey = generateApiKey();
-  const row = {
-    name,
-    apiKey,
-    machineId,
-    baseUrl: '',
-    createdAt: new Date().toISOString(),
-    lastSeenAt: null
+function enrichNodeRow(n) {
+  const snap = latestByNode.get(n.machineId);
+  const m = snap && snap.metrics;
+  const dt = (snap && snap.pollDt) || OFFLINE_CHECK_MS / 1000;
+  const bps = snap && snap.bandwidthDelta != null ? snap.bandwidthDelta / dt : 0;
+  const { memUsedPct, diskUsedPct } = usageFromMetrics(m);
+  const lastSeen = lastPushAtByNode.get(n.machineId);
+  const online = n.registeredAt && isNodeOnline(n.machineId);
+  return {
+    machineId: n.machineId,
+    name: n.name,
+    baseUrl: n.baseUrl,
+    publicIp: n.publicIp,
+    registered: !!n.registeredAt,
+    online,
+    cpuPct: snap && snap.cpuPct != null ? snap.cpuPct : null,
+    memUsedPct,
+    diskUsedPct,
+    bandwidthBps: bps,
+    peers: snap ? snap.peers : null,
+    peersOnline: snap && snap.peersOnline != null ? snap.peersOnline : null,
+    peersTotal: snap && snap.peersTotal != null ? snap.peersTotal : snap ? snap.peers : null,
+    clientsOnline: snap && snap.clientsOnline != null ? snap.clientsOnline : null,
+    clientsTotal: snap && snap.clientsTotal != null ? snap.clientsTotal : null,
+    sitesOnline: snap && snap.sitesOnline != null ? snap.sitesOnline : null,
+    sitesTotal: snap && snap.sitesTotal != null ? snap.sitesTotal : null,
+    sites: snap && Array.isArray(snap.sites) ? snap.sites : [],
+    onlineSites: snap && Array.isArray(snap.onlineSites) ? snap.onlineSites : [],
+    services: snap && snap.services ? snap.services : {},
+    lastSeenAt: lastSeen != null ? lastSeen : null,
+    memTotal: m && m.memTotal,
+    memAvail: m && m.memAvail
   };
-  nodes.unshift(row);
-  saveNodes(nodes);
-  res.json({ ok: true, row: publicNode(row), apiKey });
+}
+
+app.get('/api/nodes', admin, (req, res) => {
+  res.json({ nodes: nodes.map(enrichNodeRow) });
 });
 
-app.post('/api/nodes/:id/rotate', admin, (req, res) => {
-  const node = nodes.find((n) => n.id === req.params.id);
-  if (!node) return res.status(404).json({ ok: false, error: 'not found' });
-  const apiKey = generateApiKey();
-  node.apiKey = apiKey;
-  saveNodes(nodes);
-  res.json({ ok: true, apiKey });
+app.post('/api/node-keys', admin, async (req, res) => {
+  try {
+    const name = String((req.body && req.body.name) || '').trim();
+    const machineId = String((req.body && req.body.machineId) || '').trim().toLowerCase();
+    if (!name) return res.status(400).json({ ok: false, error: 'name required' });
+    if (!machineId) return res.status(400).json({ ok: false, error: 'machineId required' });
+    if (nodes.some((n) => n.machineId === machineId)) {
+      return res.status(409).json({ ok: false, error: 'machineId already used' });
+    }
+    const apiKey = generateApiKey();
+    const apiKeyHash = await hashApiKey(apiKey);
+    const row = await insertNode({ name, machineId, apiKeyHash });
+    nodes.unshift(row);
+    logAction(sessionAdmin(req), 'add_node', { name, machineId });
+    res.json({ ok: true, row: publicNode(row), apiKey });
+  } catch (e) {
+    res.status(503).json({ ok: false, error: e.message || 'Database unavailable' });
+  }
 });
 
-app.delete('/api/node-keys/:name', admin, (req, res) => {
-  const idx = nodes.findIndex((n) => !n.id && n.name === req.params.name);
-  if (idx < 0) return res.status(404).json({ ok: false, error: 'not found' });
-  nodes.splice(idx, 1);
-  saveNodes(nodes);
-  res.json({ ok: true });
+app.delete('/api/nodes/:machineId', admin, async (req, res) => {
+  try {
+    const machineId = String(req.params.machineId || '').trim().toLowerCase();
+    const idx = nodes.findIndex((n) => n.machineId === machineId);
+    if (idx < 0) return res.status(404).json({ ok: false, error: 'not found' });
+    const removed = nodes[idx];
+    await deleteNodeByMachineId(machineId);
+    nodes.splice(idx, 1);
+    latestByNode.delete(machineId);
+    lastPushAtByNode.delete(machineId);
+    logAction(sessionAdmin(req), 'delete_node', {
+      name: removed.name,
+      machineId: removed.machineId
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(503).json({ ok: false, error: e.message || 'Database unavailable' });
+  }
 });
 
 app.get('/api/dashboard', admin, async (req, res) => {
-  const list = [];
+  const list = nodes.filter((n) => n.registeredAt).map(enrichNodeRow);
   let online = 0;
-  for (const n of nodes) {
-    const snap = latestByNode.get(n.id);
-    const m = snap && snap.metrics;
-    const dt = (snap && snap.pollDt) || POLL_MS / 1000;
-    const bps = snap && snap.bandwidthDelta != null ? snap.bandwidthDelta / dt : 0;
-    if (snap && snap.online) online += 1;
-    const { memUsedPct, diskUsedPct } = usageFromMetrics(m);
-    const lastOk = lastHealthOkByNode.get(n.id);
-    list.push({
-      id: n.id,
-      name: n.name,
-      baseUrl: n.baseUrl,
-      publicIp: n.publicIp,
-      online: snap ? !!snap.online : false,
-      cpuPct: snap && snap.cpuPct != null ? snap.cpuPct : null,
-      memUsedPct,
-      diskUsedPct,
-      bandwidthBps: bps,
-      peers: snap ? snap.peers : null,
-      peersOnline: snap && snap.peersOnline != null ? snap.peersOnline : null,
-      peersTotal: snap && snap.peersTotal != null ? snap.peersTotal : snap ? snap.peers : null,
-      clientsOnline: snap && snap.clientsOnline != null ? snap.clientsOnline : null,
-      clientsTotal: snap && snap.clientsTotal != null ? snap.clientsTotal : null,
-      sitesOnline: snap && snap.sitesOnline != null ? snap.sitesOnline : null,
-      sitesTotal: snap && snap.sitesTotal != null ? snap.sitesTotal : null,
-      sites: snap && Array.isArray(snap.sites) ? snap.sites : [],
-      onlineSites: snap && Array.isArray(snap.onlineSites) ? snap.onlineSites : [],
-      services: snap && snap.services ? snap.services : {},
-      lastHealthOkAt: lastOk != null ? lastOk : null,
-      memTotal: m && m.memTotal,
-      memAvail: m && m.memAvail
-    });
+  for (const n of list) {
+    if (n.online) online += 1;
   }
   const alerts24h = await getAlerts24h();
   res.json({
     totals: { nodes: nodes.length, online, alerts24h },
     trafficSeries,
     nodes: list,
-    siteLinks: buildSiteTopology(),
-    pollIntervalSec: POLL_MS / 1000
+    siteLinks: buildSiteTopology()
   });
 });
 
@@ -690,16 +663,25 @@ app.get('/api/operation-logs', admin, async (req, res) => {
   }
 });
 
+app.get('/api/audit-logs', admin, (req, res) => {
+  try {
+    const logs = getLogs().sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    res.json({ ok: true, logs });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message || 'cannot read audit logs' });
+  }
+});
+
 app.post('/api/devices/sync-batch', apiKeyAuth, async (req, res) => {
   const node = req.nodeKey;
-  if (!node.id) {
+  if (!node.registeredAt) {
     return res.status(409).json({ ok: false, error: 'node not registered' });
   }
 
   const b = req.body || {};
-  const node_id = String(b.node_id || '').trim();
+  const node_id = String(b.node_id || b.machine_id || '').trim().toLowerCase();
   if (!node_id) return res.status(400).json({ ok: false, error: 'missing node_id' });
-  if (node_id !== node.id) {
+  if (node_id !== node.machineId) {
     return res.status(400).json({ ok: false, error: 'node_id mismatch' });
   }
 
@@ -713,8 +695,6 @@ app.post('/api/devices/sync-batch', apiKeyAuth, async (req, res) => {
       { node_id, node_name, base_url },
       devices
     );
-    node.lastSeenAt = new Date().toISOString();
-    saveNodes(nodes);
     res.json({ ok: true, synced });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -755,10 +735,7 @@ if (fs.existsSync(INDEX_HTML)) {
   });
 }
 
-setInterval(() => {
-  poller.tick().catch(() => {});
-}, POLL_MS);
-poller.tick().catch(() => {});
+setInterval(checkOfflineNodes, OFFLINE_CHECK_MS);
 
 const httpsOptions = {
   key: fs.readFileSync(TLS_KEY_PATH),
@@ -766,7 +743,10 @@ const httpsOptions = {
 };
 
 setupAdminAccounts()
-  .then(() => {
+  .then(() => migrateFromJsonIfNeeded())
+  .then(() => fetchAllNodes())
+  .then((rows) => {
+    nodes = rows;
     https.createServer(httpsOptions, app).listen(PORT, () => {
       console.log(`Central HTTPS server listening on :${PORT}`);
     });

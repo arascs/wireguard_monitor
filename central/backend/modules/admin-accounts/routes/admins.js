@@ -1,6 +1,11 @@
 const express = require('express');
 const { getPool } = require('../../../mysqlLogs');
+const { logAction } = require('../../../auditLogger');
 const { requireSuperAdmin } = require('../middleware');
+
+function sessionAdmin(req) {
+  return (req.session && req.session.user) ? req.session.user : 'unknown';
+}
 
 module.exports = function createAdminsRoutes({ getAuthMiddleware, bcrypt }) {
   const router = express.Router();
@@ -55,6 +60,7 @@ module.exports = function createAdminsRoutes({ getAuthMiddleware, bcrypt }) {
           create_day: createEpoch
         }
       });
+      logAction(sessionAdmin(req), 'create_admin', { username, expire_day: expireEpoch });
     } catch (e) {
       if (e && e.code === 'ER_DUP_ENTRY') {
         return res.status(409).json({ ok: false, error: 'Username already exists' });
@@ -72,12 +78,13 @@ module.exports = function createAdminsRoutes({ getAuthMiddleware, bcrypt }) {
     if (!pool) return res.status(503).json({ ok: false, error: 'Database unavailable' });
 
     try {
-      const [rows] = await pool.execute('SELECT role FROM admins WHERE id = ?', [id]);
+      const [rows] = await pool.execute('SELECT username, role FROM admins WHERE id = ?', [id]);
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Admin not found' });
       if (rows[0].role !== 'admin') {
         return res.status(403).json({ ok: false, error: 'Cannot modify superadmin' });
       }
       await pool.execute('UPDATE admins SET status = 1 WHERE id = ?', [id]);
+      logAction(sessionAdmin(req), 'enable_admin', { username: rows[0].username });
       res.json({ ok: true });
     } catch (e) {
       console.error('[admins enable]', e.message);
@@ -96,12 +103,13 @@ module.exports = function createAdminsRoutes({ getAuthMiddleware, bcrypt }) {
     if (!pool) return res.status(503).json({ ok: false, error: 'Database unavailable' });
 
     try {
-      const [rows] = await pool.execute('SELECT role FROM admins WHERE id = ?', [id]);
+      const [rows] = await pool.execute('SELECT username, role FROM admins WHERE id = ?', [id]);
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Admin not found' });
       if (rows[0].role !== 'admin') {
         return res.status(403).json({ ok: false, error: 'Cannot modify superadmin' });
       }
       await pool.execute('UPDATE admins SET status = 0 WHERE id = ?', [id]);
+      logAction(sessionAdmin(req), 'disable_admin', { username: rows[0].username });
       res.json({ ok: true });
     } catch (e) {
       console.error('[admins disable]', e.message);
@@ -120,12 +128,13 @@ module.exports = function createAdminsRoutes({ getAuthMiddleware, bcrypt }) {
     if (!pool) return res.status(503).json({ ok: false, error: 'Database unavailable' });
 
     try {
-      const [rows] = await pool.execute('SELECT role FROM admins WHERE id = ?', [id]);
+      const [rows] = await pool.execute('SELECT username, role FROM admins WHERE id = ?', [id]);
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Admin not found' });
       if (rows[0].role !== 'admin') {
         return res.status(403).json({ ok: false, error: 'Cannot delete superadmin' });
       }
       await pool.execute('DELETE FROM admins WHERE id = ?', [id]);
+      logAction(sessionAdmin(req), 'delete_admin', { username: rows[0].username });
       res.json({ ok: true });
     } catch (e) {
       console.error('[admins delete]', e.message);

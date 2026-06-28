@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import Alerts from './Alerts';
 import OperationLogs from './OperationLogs';
+import AuditLogs from './AuditLogs';
 
 export default function Logging() {
   const [tab, setTab] = useState('alerts');
@@ -32,10 +33,22 @@ export default function Logging() {
         >
           Operation logs
         </button>
+        <button
+          type="button"
+          className={`px-4 py-2 text-sm rounded-t-md border-b-2 -mb-px transition-colors ${
+            tab === 'audit'
+              ? 'border-primary text-primary font-medium bg-white'
+              : 'border-transparent text-zinc-600 hover:text-zinc-900'
+          }`}
+          onClick={() => setTab('audit')}
+        >
+          Audit logs
+        </button>
       </div>
 
       {tab === 'alerts' && <Alerts />}
       {tab === 'op' && <OperationLogs />}
+      {tab === 'audit' && <AuditLogs />}
     </div>
   );
 }

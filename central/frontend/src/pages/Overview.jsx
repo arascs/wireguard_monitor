@@ -64,7 +64,7 @@ export default function Overview() {
   const nodePositions = new Map();
   nodeOrder.forEach((n, i) => {
     const angle = (2 * Math.PI * i) / Math.max(1, nodeOrder.length);
-    nodePositions.set(n.id, {
+    nodePositions.set(n.machineId, {
       x: center + radius * Math.cos(angle),
       y: center + radius * Math.sin(angle)
     });
@@ -110,25 +110,25 @@ export default function Overview() {
                 );
               })}
               {nodeOrder.map((n) => {
-                const p = nodePositions.get(n.id);
+                const p = nodePositions.get(n.machineId);
                 if (!p) return null;
                 return (
-                  <g key={n.id}>
+                  <g key={n.machineId}>
                     <circle cx={p.x} cy={p.y} r="22" fill="#861618" stroke="#ffffff" strokeWidth="2" />
                   </g>
                 );
               })}
             </svg>
             {nodeOrder.map((n) => {
-              const p = nodePositions.get(n.id);
+              const p = nodePositions.get(n.machineId);
               if (!p) return null;
-              const hostLabel = n.name || n.id;
+              const hostLabel = n.name || n.machineId;
               const endpointLabel = n.publicIp || 'no-endpoint';
               const left = `${(p.x / size) * 100}%`;
               const top = `${(p.y / size) * 100}%`;
               return (
                 <div
-                  key={`label-${n.id}`}
+                  key={`label-${n.machineId}`}
                   className="absolute pointer-events-none text-center"
                   style={{ left, top, transform: 'translate(-50%, 20px)' }}
                 >

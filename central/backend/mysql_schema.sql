@@ -39,6 +39,17 @@ CREATE TABLE IF NOT EXISTS devices
     INDEX idx_node_id (node_id)
 );
 
+CREATE TABLE IF NOT EXISTS nodes
+(
+    machine_id VARCHAR(64) NOT NULL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    api_key_hash VARCHAR(255) NOT NULL,
+    base_url VARCHAR(512) NOT NULL DEFAULT '',
+    public_ip VARCHAR(64) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    registered_at DATETIME(3) NULL
+);
+
 CREATE TABLE IF NOT EXISTS admins
 (
     id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,

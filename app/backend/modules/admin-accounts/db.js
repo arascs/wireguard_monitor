@@ -1,4 +1,4 @@
-const { isUserExpired } = require('../../../common/utils');
+const { isUserExpired } = require('../../common/utils');
 
 async function seedSuperAdmin(mysql, dbConfig, bcrypt) {
   const conn = await mysql.createConnection(dbConfig);

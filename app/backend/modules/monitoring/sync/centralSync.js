@@ -1,6 +1,5 @@
 const fetch = require('node-fetch');
 const https = require('https');
-const crypto = require('crypto');
 const mysql = require('mysql2/promise');
 const { HOSTNAME, getNodeProductUuid } = require('../../../common/utils');
 const { dbConfig } = require('../../../common/db');
@@ -16,12 +15,6 @@ function normalizeBaseUrl(u) {
   return `https://${trimmed}`;
 }
 
-function nodeIdFor(baseUrl) {
-  const u = normalizeBaseUrl(baseUrl);
-  if (!u) return '';
-  return crypto.createHash('sha256').update(u).digest('hex').slice(0, 16);
-}
-
 function getNodeContext() {
   const port = process.env.PORT || 3000;
   const baseUrl = normalizeBaseUrl(
@@ -31,7 +24,7 @@ function getNodeContext() {
   );
   return {
     baseUrl,
-    nodeId: nodeIdFor(baseUrl),
+    machineId: getNodeProductUuid(),
     nodeName: process.env.CENTRAL_NODE_NAME || HOSTNAME
   };
 }
@@ -87,7 +80,7 @@ async function pushDevicesToCentral() {
       .filter((d) => d.machine_id);
 
     const r = await postJson(`${base}/api/devices/sync-batch`, {
-      node_id: ctx.nodeId,
+      node_id: ctx.machineId,
       node_name: ctx.nodeName,
       base_url: ctx.baseUrl,
       devices
@@ -114,7 +107,6 @@ module.exports = {
   getApiKey,
   authHeaders,
   getNodeProductUuid,
-  nodeIdFor,
   normalizeBaseUrl,
   httpsAgent
 };

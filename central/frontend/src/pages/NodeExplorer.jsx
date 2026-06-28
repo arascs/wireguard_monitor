@@ -208,8 +208,9 @@ export default function NodeExplorer() {
   const [q, setQ] = useState('');
   const [err, setErr] = useState(null);
   const [detailNode, setDetailNode] = useState(null);
-  const [rotatingNodeId, setRotatingNodeId] = useState(null);
+  const [deletingMachineId, setDeletingMachineId] = useState(null);
   const [showAddNode, setShowAddNode] = useState(false);
+  const [reloadAt, setReloadAt] = useState(0);
 
   useEffect(() => {
     let cancel = false;
@@ -229,7 +230,7 @@ export default function NodeExplorer() {
       cancel = true;
       clearInterval(id);
     };
-  }, []);
+  }, [reloadAt]);
 
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
@@ -241,19 +242,19 @@ export default function NodeExplorer() {
     });
   }, [rows, q]);
 
-  async function handleRotateKey(node) {
-    if (!node || !node.id) return;
-    if (!window.confirm(`Rotate API key for node "${node.name}"? The node will need to be updated with the new key.`)) return;
-    setRotatingNodeId(node.id);
+  async function handleDeleteNode(node) {
+    if (!node || !node.machineId) return;
+    if (!window.confirm(`Delete node "${node.name}"? This cannot be undone.`)) return;
+    setDeletingMachineId(node.machineId);
     try {
-      const r = await apiFetch(`/api/nodes/${encodeURIComponent(node.id)}/rotate`, { method: 'POST' });
+      const r = await apiFetch(`/api/nodes/${encodeURIComponent(node.machineId)}`, { method: 'DELETE' });
       const payload = await r.json().catch(() => ({}));
       if (!r.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${r.status}`);
-      window.alert(`New API key for "${node.name}":\n${payload.apiKey}\n\nCopy it now — it will not be shown again.`);
+      setReloadAt(Date.now());
     } catch (e) {
-      window.alert(`Rotate failed: ${e.message}`);
+      window.alert(`Delete failed: ${e.message}`);
     } finally {
-      setRotatingNodeId(null);
+      setDeletingMachineId(null);
     }
   }
 
@@ -331,6 +332,7 @@ export default function NodeExplorer() {
           <thead>
             <tr className="bg-primary text-white text-left">
               <th className="px-3 py-2 font-medium">Node</th>
+              <th className="px-3 py-2 font-medium">Register</th>
               <th className="px-3 py-2 font-medium">Public IP</th>
               <th className="px-3 py-2 font-medium">CPU</th>
               <th className="px-3 py-2 font-medium">RAM used</th>
@@ -344,9 +346,19 @@ export default function NodeExplorer() {
           </thead>
           <tbody>
             {filtered.map((n) => (
-              <tr key={n.id} className="border-t border-zinc-100 hover:bg-zinc-50">
+              <tr key={n.machineId} className="border-t border-zinc-100 hover:bg-zinc-50">
                 <td className="px-3 py-2 font-medium text-zinc-900">
                   <div>{n.name}</div>
+                  <div className="text-xs font-mono text-zinc-500 mt-0.5">{n.machineId}</div>
+                </td>
+                <td className="px-3 py-2">
+                  <span className="inline-flex items-center gap-1.5 text-xs">
+                    <span
+                      className={`inline-block w-2.5 h-2.5 rounded-full ${n.registered ? 'bg-emerald-500' : 'bg-red-500'}`}
+                      aria-hidden
+                    />
+                    {n.registered ? 'OK' : 'No'}
+                  </span>
                 </td>
                 <td className="px-3 py-2 text-zinc-700 font-mono text-xs">{n.publicIp || '—'}</td>
                 <td className="px-3 py-2 text-zinc-700">
@@ -356,8 +368,8 @@ export default function NodeExplorer() {
                 <td className="px-3 py-2 text-zinc-700">{pct(n.diskUsedPct)}</td>
                 <td className="px-3 py-2 text-zinc-700">{formatBps(n.bandwidthBps)}</td>
                 <td className="px-3 py-2 text-zinc-700 whitespace-nowrap">{sitesLabel(n)}</td>
-                <td className="px-3 py-2 text-zinc-600 text-xs whitespace-nowrap" title="/health last OK">
-                  {formatLastSeen(n.lastHealthOkAt)}
+                <td className="px-3 py-2 text-zinc-600 text-xs whitespace-nowrap">
+                  {formatLastSeen(n.lastSeenAt)}
                 </td>
                 <td className="px-3 py-2">
                   <span
@@ -381,11 +393,11 @@ export default function NodeExplorer() {
                     </button>
                     <button
                       type="button"
-                      className="text-amber-700 text-xs font-medium hover:underline disabled:text-zinc-400"
-                      disabled={rotatingNodeId === n.id}
-                      onClick={() => handleRotateKey(n)}
+                      className="text-red-700 text-xs font-medium hover:underline disabled:text-zinc-400"
+                      disabled={deletingMachineId === n.machineId}
+                      onClick={() => handleDeleteNode(n)}
                     >
-                      {rotatingNodeId === n.id ? 'Rotating…' : 'Rotate key'}
+                      {deletingMachineId === n.machineId ? 'Deleting…' : 'Delete'}
                     </button>
                   </div>
                 </td>
@@ -393,8 +405,8 @@ export default function NodeExplorer() {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-3 py-6 text-center text-zinc-500">
-                  No nodes registered.
+                <td colSpan={11} className="px-3 py-6 text-center text-zinc-500">
+                  No nodes.
                 </td>
               </tr>
             )}
@@ -403,7 +415,12 @@ export default function NodeExplorer() {
       </div>
 
       {detailNode && <NodeServicesModal node={detailNode} onClose={() => setDetailNode(null)} />}
-      {showAddNode && <AddNodeModal onClose={() => setShowAddNode(false)} onCreated={() => {}} />}
+      {showAddNode && (
+        <AddNodeModal
+          onClose={() => setShowAddNode(false)}
+          onCreated={() => setReloadAt(Date.now())}
+        />
+      )}
         </>
       )}
     </div>
