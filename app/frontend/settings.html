@@ -113,6 +113,27 @@
                 </div>
 
                 <hr style="border:0; border-top:1px solid #eee; margin:30px 0;">
+                <h2>Central &amp; VPN routes</h2>
+
+                <div class="form-group">
+                    <label for="centralUrl">Central URL</label>
+                    <input type="url" id="centralUrl" placeholder="https://central.example.com:4001">
+                    <span class="form-text">Base URL of the central monitoring server.</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="metricsPushIntervalMs">Metrics push interval (ms)</label>
+                    <input type="number" id="metricsPushIntervalMs" min="5000" max="3600000" required>
+                    <span class="form-text">How often this node pushes metrics to central.</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="allowedLanRanges">Allowed LAN ranges</label>
+                    <input type="text" id="allowedLanRanges" required placeholder="192.168.220.0/24, 10.0.0.0/24">
+                    <span class="form-text">Internal CIDRs routed to VPN clients (comma-separated).</span>
+                </div>
+
+                <hr style="border:0; border-top:1px solid #eee; margin:30px 0;">
                 <h2>Security Policies</h2>
                 <p class="form-text">Clients send check results; server applies policy by device OS (linux / windows).</p>
 

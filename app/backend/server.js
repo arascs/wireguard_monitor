@@ -12,7 +12,7 @@ const jwt = require('jsonwebtoken');
 const mysql = require('mysql2/promise');
 
 const { accessLogStream } = require('./common/logging');
-const { corsMiddleware } = require('./common/security');
+const { adminIpGuard, corsMiddleware } = require('./common/security');
 const { dbConfig } = require('./common/db');
 const { HOSTNAME, run } = require('./common/utils');
 const {
@@ -81,6 +81,7 @@ async function startServer() {
   app.use(morgan('combined', { stream: accessLogStream() }));
   app.use(express.json());
   setupSession(app);
+  app.use(adminIpGuard);
   app.use(adminApiGuard);
 
   registerMonitoring(app, moduleDeps);

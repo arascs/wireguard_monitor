@@ -1,10 +1,8 @@
 const session = require('express-session');
 const { SESSION_SECRET } = require('./auth');
 
-const ADMIN_BYPASS_PATHS = new Set([
-  '/api/admin-login',
+const PUBLIC_API_PATHS = new Set([
   '/api/login',
-  '/api/logout',
   '/api/connect-vpn',
   '/api/disconnect-vpn',
   '/api/device-heartbeat',
@@ -15,9 +13,18 @@ const ADMIN_BYPASS_PATHS = new Set([
   '/api/hostname'
 ]);
 
+const ADMIN_BYPASS_PATHS = new Set([
+  '/api/admin-login',
+  '/api/logout',
+  ...PUBLIC_API_PATHS
+]);
+
 function pathAllowsBypass(p) {
-  if (ADMIN_BYPASS_PATHS.has(p)) return true;
-  return false;
+  return ADMIN_BYPASS_PATHS.has(p);
+}
+
+function pathIsPublicApi(p) {
+  return PUBLIC_API_PATHS.has(p);
 }
 
 function setupSession(app) {
@@ -36,6 +43,8 @@ function setupSession(app) {
 
 module.exports = {
   ADMIN_BYPASS_PATHS,
+  PUBLIC_API_PATHS,
   pathAllowsBypass,
+  pathIsPublicApi,
   setupSession
 };

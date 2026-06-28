@@ -14,7 +14,7 @@ function registerWithCentral(port) {
   const base = getCentralBase();
   const apiKey = getApiKey();
   if (!base || !apiKey) {
-    return Promise.reject(new Error('CENTRAL_URL or NODE_API_KEY not set'));
+    return Promise.reject(new Error('Central URL or NODE_API_KEY not set'));
   }
   const machineId = getNodeProductUuid();
   if (!machineId) {

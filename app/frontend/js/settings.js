@@ -11,6 +11,10 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('keyRotationTimeoutSeconds').value =
           s.keyRotationTimeoutSeconds !== undefined ? s.keyRotationTimeoutSeconds : 60;
         document.getElementById('physicalInterface').value = s.physicalInterface || '';
+        document.getElementById('centralUrl').value = s.centralUrl || '';
+        document.getElementById('metricsPushIntervalMs').value =
+          s.metricsPushIntervalMs !== undefined ? s.metricsPushIntervalMs : 30000;
+        document.getElementById('allowedLanRanges').value = s.allowedLanRanges || '192.168.220.0/24';
         document.getElementById('enforceKernelCheck').checked = s.enforceKernelCheck !== false;
         document.getElementById('minKernelVersionLinux').value =
           s.minKernelVersionLinux !== undefined ? s.minKernelVersionLinux : 4;
@@ -48,6 +52,9 @@ document.addEventListener('DOMContentLoaded', () => {
       peerDisableHours: document.getElementById('peerDisableHours').value,
       keyRotationTimeoutSeconds: document.getElementById('keyRotationTimeoutSeconds').value,
       physicalInterface: document.getElementById('physicalInterface').value.trim(),
+      centralUrl: document.getElementById('centralUrl').value.trim(),
+      metricsPushIntervalMs: document.getElementById('metricsPushIntervalMs').value,
+      allowedLanRanges: document.getElementById('allowedLanRanges').value.trim(),
       enforceKernelCheck: document.getElementById('enforceKernelCheck').checked,
       minKernelVersionLinux: document.getElementById('minKernelVersionLinux').value,
       minKernelVersionWindows: document.getElementById('minKernelVersionWindows').value,

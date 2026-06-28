@@ -2,7 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
-const { loadGlobalSettings } = require('../../../common/settings');
+const { loadGlobalSettings, getAllowedLanCidrs } = require('../../../common/settings');
 const { DEFAULT_KEY_EXPIRY_DAYS } = require('../../../common/paths');
 const { dbConfig } = require('../../../common/db');
 const { run, tryRun, isUserExpired } = require('../../../common/utils');
@@ -173,7 +173,10 @@ module.exports = function createConnectVpnRoutes({ authenticateToken }) {
       }
 
       const listenPort = String(config.interface.listenPort || '').trim();
-      const serverAllowedIPs = buildClientVpnRouteAllowedIPs(config.interface.address);
+      const serverAllowedIPs = buildClientVpnRouteAllowedIPs(
+        config.interface.address,
+        getAllowedLanCidrs(loadGlobalSettings()).join(', ')
+      );
       if (!listenPort) {
         return res.status(500).json({ success: false, error: `Interface ${targetIface} missing ListenPort` });
       }

@@ -1,8 +1,15 @@
 const express = require('express');
 const fs = require('fs');
 const { logAction } = require('../../logging/auditLogger');
-const { loadGlobalSettings } = require('../../../common/settings');
+const {
+  loadGlobalSettings,
+  parseCidrList,
+  isValidCidr
+} = require('../../../common/settings');
 const { SETTINGS_FILE } = require('../../../common/paths');
+const { scheduleCentralSync } = require('../../monitoring');
+const { normalizeBaseUrl } = require('../../monitoring/sync/centralSync');
+
 module.exports = function createSettingsRoutes() {
   const router = express.Router();
 
@@ -22,11 +29,35 @@ module.exports = function createSettingsRoutes() {
       const physicalInterface = req.body.physicalInterface !== undefined
         ? String(req.body.physicalInterface || '').trim().replace(/[^a-zA-Z0-9._-]/g, '')
         : currentSettings.physicalInterface;
+
+      const centralUrlRaw = req.body.centralUrl !== undefined
+        ? String(req.body.centralUrl || '').trim()
+        : currentSettings.centralUrl;
+      const centralUrl = centralUrlRaw ? normalizeBaseUrl(centralUrlRaw) : '';
+
+      const metricsPushIntervalMs = req.body.metricsPushIntervalMs !== undefined
+        ? parseInt(req.body.metricsPushIntervalMs, 10)
+        : currentSettings.metricsPushIntervalMs;
+      if (!Number.isFinite(metricsPushIntervalMs) || metricsPushIntervalMs < 5000) {
+        return res.status(400).json({ success: false, error: 'metricsPushIntervalMs must be >= 5000' });
+      }
+
+      const allowedLanRanges = req.body.allowedLanRanges !== undefined
+        ? String(req.body.allowedLanRanges || '').trim()
+        : currentSettings.allowedLanRanges;
+      const cidrs = parseCidrList(allowedLanRanges);
+      if (!cidrs.length || cidrs.some((c) => !isValidCidr(c))) {
+        return res.status(400).json({ success: false, error: 'Invalid Allowed LAN range' });
+      }
+
       const newSettings = {
         peerDisableHours: req.body.peerDisableHours ? parseInt(req.body.peerDisableHours, 10) : currentSettings.peerDisableHours,
         keyRotationTimeoutSeconds: req.body.keyRotationTimeoutSeconds !== undefined
           ? parseInt(req.body.keyRotationTimeoutSeconds, 10) : currentSettings.keyRotationTimeoutSeconds,
         physicalInterface,
+        centralUrl,
+        metricsPushIntervalMs,
+        allowedLanRanges: cidrs.join(', '),
         enforceKernelCheck: req.body.enforceKernelCheck !== undefined ? req.body.enforceKernelCheck : currentSettings.enforceKernelCheck,
         minKernelVersionLinux: req.body.minKernelVersionLinux !== undefined
           ? parseInt(req.body.minKernelVersionLinux, 10) : currentSettings.minKernelVersionLinux,
@@ -65,6 +96,7 @@ module.exports = function createSettingsRoutes() {
       };
 
       fs.writeFileSync(SETTINGS_FILE, JSON.stringify(newSettings, null, 2), 'utf8');
+      scheduleCentralSync();
 
       try {
         const admin = req.session && req.session.user ? req.session.user : 'unknown';

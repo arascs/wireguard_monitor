@@ -430,9 +430,14 @@ function interfaceAddressAsHost32(addressField) {
   return host ? `${host}/32` : null;
 }
 
-function buildClientVpnRouteAllowedIPs(addressField, extraCidr = '192.168.220.0/24') {
+function buildClientVpnRouteAllowedIPs(addressField, extraCidrs) {
   const host32 = interfaceAddressAsHost32(addressField);
-  return host32 ? `${host32}, ${extraCidr}` : null;
+  if (!host32) return null;
+  const extras = String(extraCidrs || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return [host32, ...extras].join(', ');
 }
 
 module.exports = {

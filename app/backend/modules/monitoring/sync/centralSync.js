@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const mysql = require('mysql2/promise');
 const { HOSTNAME, getNodeProductUuid } = require('../../../common/utils');
 const { dbConfig } = require('../../../common/db');
+const { loadGlobalSettings } = require('../../../common/settings');
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
@@ -36,7 +37,7 @@ function getNodeContext() {
 }
 
 function getCentralBase() {
-  const central = process.env.CENTRAL_URL;
+  const central = loadGlobalSettings().centralUrl;
   if (!central) return '';
   return normalizeBaseUrl(central);
 }
