@@ -198,7 +198,7 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
       connection = await mysql.createConnection(dbConfig);
 
       const [devices] = await connection.execute(
-        'SELECT public_key, interface, machine_id FROM devices WHERE id = ?',
+        'SELECT device_name, username, public_key, interface, machine_id FROM devices WHERE id = ?',
         [id]
       );
 
@@ -223,6 +223,16 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
         'DELETE FROM devices WHERE id = ?',
         [id]
       );
+
+      try {
+        const admin = req.session && req.session.user ? req.session.user : 'unknown';
+        logAction(admin, 'delete_device', {
+          device_name: device.device_name,
+          user: device.username,
+          public_key: device.public_key,
+          machine_id: device.machine_id
+        });
+      } catch (e) { }
 
       res.json({ success: true, message: 'Device deleted successfully' });
     } catch (error) {
@@ -330,10 +340,10 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
   });
 
   router.post('/check-device-enroll', authenticateToken, async (req, res) => {
-    const { deviceName } = req.body || {};
+    const machineId = String(req.body.machineId || req.body.machine_id || '').trim();
     const username = req.user.username;
-    if (!deviceName) {
-      return res.status(400).json({ success: false, error: 'Missing deviceName' });
+    if (!machineId) {
+      return res.status(400).json({ success: false, error: 'Missing machineId' });
     }
 
     let connection;
@@ -341,8 +351,8 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
       connection = await mysql.createConnection(dbConfig);
 
       const [devices] = await connection.execute(
-        'SELECT id FROM devices WHERE username = ? AND device_name = ?',
-        [username, deviceName]
+        'SELECT id FROM devices WHERE username = ? AND machine_id = ?',
+        [username, machineId]
       );
 
       if (devices.length > 0) {
@@ -415,19 +425,28 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
     try {
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        'SELECT device_name, username FROM devices WHERE id = ?',
+        'SELECT device_name, username, public_key, interface FROM devices WHERE id = ?',
         [id]
       );
+      if (rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'Device not found' });
+      }
+
+      const device = rows[0];
+      if (device.public_key && device.interface) {
+        deletePeerFromConf(device.interface, device.public_key);
+      }
+
       await connection.execute(
         'UPDATE devices SET status = 0 WHERE id = ?',
         [id]
       );
-      if (rows && rows.length > 0) {
-        try {
-          const admin = req.session && req.session.user ? req.session.user : 'unknown';
-          logAction(admin, 'disable_device', { device_name: rows[0].device_name, user: rows[0].username });
-        } catch (e) { }
-      }
+
+      try {
+        const admin = req.session && req.session.user ? req.session.user : 'unknown';
+        logAction(admin, 'disable_device', { device_name: device.device_name, user: device.username });
+      } catch (e) { }
+
       res.json({ success: true, message: 'Device disabled successfully' });
     } catch (error) {
       console.error('Error disabling device:', error);
@@ -526,18 +545,18 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
   });
 
   router.post('/disconnect-vpn', authenticateToken, async (req, res) => {
-    const deviceName = (req.body && (req.body.device_name || req.body.deviceName)) || '';
+    const machineId = String(req.body.machineId || req.body.machine_id || '').trim();
     const username = req.user.username;
-    if (!deviceName) {
-      return res.status(400).json({ success: false, error: 'Missing device_name' });
+    if (!machineId) {
+      return res.status(400).json({ success: false, error: 'Missing machineId' });
     }
 
     let connection;
     try {
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        'SELECT public_key, interface, machine_id FROM devices WHERE device_name = ? AND username = ? ORDER BY id DESC LIMIT 1',
-        [deviceName, username]
+        'SELECT public_key, interface, machine_id FROM devices WHERE username = ? AND machine_id = ? ORDER BY id DESC LIMIT 1',
+        [username, machineId]
       );
 
       if (rows.length === 0 || !rows[0].public_key || !rows[0].interface) {

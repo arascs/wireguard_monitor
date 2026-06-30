@@ -457,6 +457,7 @@ module.exports = {
   findPeerIndex,
   disablePeerInConf,
   deletePeerFromConf,
+  getPeerLatestHandshakeEpochSeconds,
   wgSyncconf,
   wgSyncconfIfRunning,
   interfaceAddressAsHost32,

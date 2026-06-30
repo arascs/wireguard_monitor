@@ -94,9 +94,9 @@ func apiEnroll(ip string, port int, token, username, deviceName, machineID, publ
 	return nil
 }
 
-func apiCheckEnroll(ip string, port int, token, username, deviceName string) (bool, error) {
+func apiCheckEnroll(ip string, port int, token, machineID string) (bool, error) {
 	resp, err := doPost(ip, port, "/api/check-device-enroll", token, map[string]string{
-		"username": username, "deviceName": deviceName,
+		"machineId": machineID,
 	})
 	if err != nil {
 		return false, err
@@ -120,10 +120,10 @@ type connectResp struct {
 	ServerAllowedIPs string   `json:"serverAllowedIPs"`
 }
 
-func apiConnect(ip string, port int, token, username, deviceName string) (*connectResp, error) {
+func apiConnect(ip string, port int, token, machineID string) (*connectResp, error) {
 	secInfo := getSecurityInfo()
 	data, _ := json.Marshal(map[string]interface{}{
-		"username": username, "deviceName": deviceName, "securityInfo": secInfo,
+		"machineId": machineID, "securityInfo": secInfo,
 	})
 	req, _ := http.NewRequest("POST", serverURL(ip, port, "/api/connect-vpn"), bytes.NewReader(data))
 	req.Header.Set("Content-Type", "application/json")
@@ -145,9 +145,9 @@ func apiConnect(ip string, port int, token, username, deviceName string) (*conne
 	return &result, nil
 }
 
-func apiDisconnect(ip string, port int, token, deviceName string) error {
+func apiDisconnect(ip string, port int, token, machineID string) error {
 	resp, err := doPost(ip, port, "/api/disconnect-vpn", token, map[string]string{
-		"deviceName": deviceName,
+		"machineId": machineID,
 	})
 	if err != nil {
 		return err

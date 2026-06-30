@@ -302,7 +302,7 @@ func showLoginDialog(s Server) {
 			delete(st.enrolled, k)
 			st.mu.Unlock()
 
-			enrolled, _ := apiCheckEnroll(s.IP, s.Port, token, userEntry.Text, st.deviceName)
+			enrolled, _ := apiCheckEnroll(s.IP, s.Port, token, st.machineID)
 			st.mu.Lock()
 			st.enrolled[k] = enrolled
 			st.mu.Unlock()
@@ -394,14 +394,14 @@ func doConnect(s Server) {
 	prog := dialog.NewCustomWithoutButtons("Connecting VPN…", widget.NewProgressBarInfinite(), myWin)
 	prog.Show()
 	go func() {
-		enrolled, err := apiCheckEnroll(s.IP, s.Port, token, username, st.deviceName)
+		enrolled, err := apiCheckEnroll(s.IP, s.Port, token, st.machineID)
 		if err != nil || !enrolled {
 			prog.Hide()
 			showError(fmt.Errorf("device not enrolled or check failed"))
 			return
 		}
 
-		cfg, err := apiConnect(s.IP, s.Port, token, username, st.deviceName)
+		cfg, err := apiConnect(s.IP, s.Port, token, st.machineID)
 		if err != nil {
 			prog.Hide()
 			showError(fmt.Errorf("connect: %w", err))
@@ -465,7 +465,7 @@ func doDisconnect(s Server) {
 	prog.Show()
 	go func() {
 		if token != "" {
-			_ = apiDisconnect(s.IP, s.Port, token, st.deviceName)
+			_ = apiDisconnect(s.IP, s.Port, token, st.machineID)
 		}
 		bringDownVPN()
 

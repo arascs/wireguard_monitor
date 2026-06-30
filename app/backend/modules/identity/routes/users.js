@@ -176,6 +176,16 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, requireAuth }) {
         return res.status(404).json({ success: false, error: 'User not found' });
       }
 
+      const [devices] = await connection.execute(
+        'SELECT public_key, interface FROM devices WHERE username = ?',
+        [username]
+      );
+      for (const device of devices) {
+        if (device.public_key && device.interface) {
+          deletePeerFromConf(device.interface, device.public_key);
+        }
+      }
+
       await connection.execute(
         'UPDATE devices SET status = 0 WHERE username = ?',
         [username]

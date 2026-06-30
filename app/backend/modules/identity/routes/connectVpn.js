@@ -15,10 +15,14 @@ const {
   loadInterfaceConfig,
   saveInterfaceConfig,
   wgSyncconfIfRunning,
-  buildClientVpnRouteAllowedIPs
+  buildClientVpnRouteAllowedIPs,
+  getPeerLatestHandshakeEpochSeconds,
+  deletePeerFromConf
 } = require('../../../common/wireguardConfig');
 const { touch: redisHeartbeatTouch } = require('../services/deviceHeartbeat');
 const { hydrateRotationKeysFromDb } = require('../../system-config/services/rotationKeys');
+
+const HANDSHAKE_ACTIVE_SEC = 180;
 
 module.exports = function createConnectVpnRoutes({ authenticateToken }) {
   const router = express.Router();
@@ -27,11 +31,12 @@ module.exports = function createConnectVpnRoutes({ authenticateToken }) {
     let connection;
 
     try {
-      const { deviceName, securityInfo } = req.body;
+      const machineId = String(req.body.machineId || req.body.machine_id || '').trim();
+      const { securityInfo } = req.body;
       const username = req.user.username;
 
-      if (!deviceName) {
-        return res.status(400).json({ success: false, error: 'Missing deviceName' });
+      if (!machineId) {
+        return res.status(400).json({ success: false, error: 'Missing machineId' });
       }
 
       if (!securityInfo) {
@@ -69,13 +74,13 @@ module.exports = function createConnectVpnRoutes({ authenticateToken }) {
       }
 
       const [devices] = await connection.execute(
-        'SELECT allowed_ips, public_key, status, expire_date, `interface`, machine_id FROM devices WHERE username = ? AND device_name = ?',
-        [username, deviceName]
+        'SELECT device_name, allowed_ips, public_key, status, expire_date, `interface`, machine_id FROM devices WHERE username = ? AND machine_id = ?',
+        [username, machineId]
       );
 
       await connection.execute(
-        'UPDATE devices SET last_seen = ? WHERE username = ? AND device_name = ?',
-        [now, username, deviceName]
+        'UPDATE devices SET last_seen = ? WHERE username = ? AND machine_id = ?',
+        [now, username, machineId]
       );
       await connection.end();
 
@@ -83,24 +88,24 @@ module.exports = function createConnectVpnRoutes({ authenticateToken }) {
         return res.status(403).json({ success: false, error: 'Device not enrolled' });
       }
 
-      const deviceRow = devices[0];
-      const deviceStatus = parseInt(deviceRow.status, 10);
+      const device = devices[0];
+      const deviceStatus = parseInt(device.status, 10);
       if (deviceStatus === 0) {
         return res.status(403).json({ success: false, error: 'Device disabled' });
       }
 
-      const expireDate = deviceRow.expire_date ? parseInt(deviceRow.expire_date, 10) : null;
+      const expireDate = device.expire_date ? parseInt(device.expire_date, 10) : null;
       if (expireDate !== null && expireDate < now) {
         const c2 = await mysql.createConnection(dbConfig);
         await c2.execute(
-          'UPDATE devices SET status = 0 WHERE username = ? AND device_name = ?',
-          [username, deviceName]
+          'UPDATE devices SET status = 0 WHERE username = ? AND machine_id = ?',
+          [username, machineId]
         );
         await c2.end();
         return res.status(403).json({ success: false, error: 'Device expired' });
       }
 
-      const device = devices[0];
+      const deviceName = device.device_name;
       const allowedIPs = device.allowed_ips;
       const publicKey = device.public_key;
       const targetIface = device.interface || 'wg2';
@@ -110,64 +115,51 @@ module.exports = function createConnectVpnRoutes({ authenticateToken }) {
         throw new Error(`Interface ${targetIface} config not found on server`);
       }
 
+      const latestHandshake = getPeerLatestHandshakeEpochSeconds(targetIface, publicKey);
+      if (latestHandshake && latestHandshake > 0 && (now - latestHandshake) < HANDSHAKE_ACTIVE_SEC) {
+        return res.status(409).json({ success: false, error: 'Device already connected.' });
+      }
+
+      deletePeerFromConf(targetIface, publicKey);
+
       const config = loadInterfaceConfig(targetIface, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
       await hydrateRotationKeysFromDb(targetIface, config);
 
-      let peer = config.peers.find((p) => p.publicKey === publicKey);
-      let needSave = false;
+      config.peers.push({
+        name: `${username}_${deviceName}`,
+        publicKey,
+        presharedKey: '',
+        endpoint: '',
+        allowedIPs,
+        persistentKeepalive: '25',
+        rotationKey: '',
+        enabled: true
+      });
 
-      if (peer) {
-        if (peer.enabled === false) {
-          peer.enabled = true;
-          peer.name = `${username}_${deviceName}`;
-          needSave = true;
-          console.log(`[INFO] Enabled device ${deviceName} for user ${username} on ${targetIface}`);
-        }
-      } else {
-        config.peers.push({
-          name: `${username}_${deviceName}`,
-          publicKey,
-          presharedKey: '',
-          endpoint: '',
-          allowedIPs,
-          persistentKeepalive: '25',
-          rotationKey: '',
-          enabled: true
-        });
-        needSave = true;
-        console.log(`[INFO] Created and enabled device ${deviceName} for user ${username} on ${targetIface}`);
-      }
+      saveInterfaceConfig(targetIface, config);
+      wgSyncconfIfRunning(targetIface);
 
-      if (needSave) {
-        saveInterfaceConfig(targetIface, config);
-        wgSyncconfIfRunning(targetIface);
+      try {
+        const currentSettings = loadGlobalSettings();
+        const disableHours = currentSettings.peerDisableHours || 12;
+        const unitName = `wg-peer-expire-${username}-${deviceName}`;
 
-        try {
-          const currentSettings = loadGlobalSettings();
-          const disableHours = currentSettings.peerDisableHours || 12;
-          const unitName = `wg-peer-expire-${username}-${deviceName}`;
-
-          tryRun('systemctl', ['stop', `${unitName}.timer`]);
-          tryRun('systemctl', ['stop', `${unitName}.service`]);
-          tryRun('systemctl', ['reset-failed', `${unitName}.service`]);
-          run('systemd-run', [
-            `--on-active=${disableHours}h`,
-            `--unit=${unitName}`,
-            '/usr/local/bin/wg_disable_peer.sh',
-            targetIface,
-            publicKey
-          ]);
-          console.log(`[INFO] Scheduled peer disable in ${disableHours}h for ${username}/${deviceName} on ${targetIface}`);
-        } catch (e) {
-          console.error('systemd-run schedule error:', e.message);
-        }
+        tryRun('systemctl', ['stop', `${unitName}.timer`]);
+        tryRun('systemctl', ['stop', `${unitName}.service`]);
+        tryRun('systemctl', ['reset-failed', `${unitName}.service`]);
+        run('systemd-run', [
+          `--on-active=${disableHours}h`,
+          `--unit=${unitName}`,
+          '/usr/local/bin/wg_disable_peer.sh',
+          targetIface,
+          publicKey
+        ]);
+      } catch (e) {
+        console.error('systemd-run schedule error:', e.message);
       }
 
       try {
-        const machineId = deviceRow.machine_id;
-        if (machineId) {
-          await redisHeartbeatTouch(username, machineId);
-        }
+        await redisHeartbeatTouch(username, machineId);
       } catch (e) {
         console.error('[heartbeat] connect-vpn touch:', e.message);
       }

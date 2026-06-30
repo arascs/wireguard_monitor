@@ -15,7 +15,6 @@ const {
   isKeyExpired: isInterfaceKeyExpired,
   findPeerIndex,
   wgPubkey,
-  wgSyncconf,
   wgSyncconfIfRunning,
   sanitizeInterfaceName
 } = require('../../../common/wireguardConfig');
@@ -474,99 +473,46 @@ module.exports = function createPeerRoutes() {
         return res.status(400).json({ success: false, error: 'Invalid request' });
       }
 
+      const conn = await mysql.createConnection(dbConfig);
+      let foundInterface = '';
       let expectedRotation = '';
       try {
-        const conn = await mysql.createConnection(dbConfig);
         const [rows] = await conn.execute(
-          'SELECT site_rotation_key FROM sites WHERE site_pubkey = ? AND `interface` = ? LIMIT 1',
-          [oldPublicKey, foundInterface]
+          'SELECT `interface`, site_rotation_key FROM sites WHERE site_pubkey = ? LIMIT 1',
+          [oldPublicKey]
         );
-        await conn.end();
-        if (rows.length && rows[0].site_rotation_key != null) {
+        if (!rows.length) {
+          return res.status(404).json({ success: false, error: 'Site not found' });
+        }
+        foundInterface = rows[0].interface;
+        if (rows[0].site_rotation_key != null) {
           expectedRotation = String(rows[0].site_rotation_key);
         }
-      } catch (dbErr) {
-        console.error('update-key rotation lookup:', dbErr.message);
+      } finally {
+        await conn.end();
       }
+
       if (!secretStringsMatch(expectedRotation, rotationKey)) {
         return res.status(403).json({ success: false, error: 'Invalid rotation key' });
       }
 
-      const interfaces = listInterfaces();
-      let foundInterface = null;
-      let foundConfigFile = null;
-      let foundLines = null;
-      let peerStartIndex = -1;
-      let peerEndIndex = -1;
-
-      for (const iface of interfaces) {
-        const configFile = path.join(CONFIG_DIR, `${iface.name}.conf`);
-        if (!fs.existsSync(configFile)) continue;
-
-        const content = fs.readFileSync(configFile, 'utf8');
-        const lines = content.split('\n');
-        const peerStarts = [];
-
-        for (let i = 0; i < lines.length; i++) {
-          const raw = lines[i].trim();
-          const clean = raw.replace(/^#\s*/, '').trim();
-          if (clean === '[Peer]') {
-            peerStarts.push(i);
-          }
-        }
-
-        for (let s = 0; s < peerStarts.length; s++) {
-          const start = peerStarts[s];
-          const end = (s + 1 < peerStarts.length) ? (peerStarts[s + 1] - 1) : (lines.length - 1);
-
-          for (let i = start; i <= end; i++) {
-            const clean = lines[i].replace(/^\s*#\s*/, '').trim();
-            const m = clean.match(/^PublicKey\s*=\s*(.+)\s*$/i);
-            if (m && m[1].trim() === oldPublicKey) {
-              foundInterface = iface.name;
-              foundConfigFile = configFile;
-              foundLines = lines;
-              peerStartIndex = start;
-              peerEndIndex = end;
-              break;
-            }
-          }
-          if (foundInterface) break;
-        }
-        if (foundInterface) break;
+      const config = loadInterfaceConfig(foundInterface, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
+      const idx = findPeerIndex(config, oldPublicKey);
+      if (idx < 0) {
+        return res.status(404).json({ success: false, error: 'Peer not found in config' });
       }
 
-      if (!foundInterface) {
-        return res.status(404).json({ success: false, error: 'Peer not found in any interface' });
-      }
-
-      for (let i = peerStartIndex; i <= peerEndIndex; i++) {
-        const clean = foundLines[i].replace(/^\s*#\s*/, '').trim();
-        const m = clean.match(/^PublicKey\s*=\s*(.+)\s*$/i);
-        if (m && m[1].trim() === oldPublicKey) {
-          foundLines[i] = foundLines[i].replace(oldPublicKey, newPublicKey);
-          break;
-        }
-      }
-
-      fs.writeFileSync(foundConfigFile, foundLines.join('\n'), { mode: 0o600 });
+      config.peers[idx].publicKey = newPublicKey;
+      saveInterfaceConfig(foundInterface, config);
+      wgSyncconfIfRunning(foundInterface);
 
       try {
-        const status = run('wg', ['show', 'interfaces']);
-        if (status.includes(foundInterface)) {
-          wgSyncconf(foundInterface);
-        }
-      } catch (e) {
-        // Interface not running
-      }
-
-      try {
-        const conn = await mysql.createConnection(dbConfig);
-        await conn.execute(
+        const conn2 = await mysql.createConnection(dbConfig);
+        await conn2.execute(
           'UPDATE sites SET site_pubkey = ? WHERE site_pubkey = ? AND `interface` = ?',
           [newPublicKey, oldPublicKey, foundInterface]
         );
-        await conn.end();
+        await conn2.end();
       } catch (dbErr) {
         console.error('Error updating site pubkey in DB:', dbErr.message);
       }

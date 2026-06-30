@@ -75,7 +75,7 @@ func main() {
 	st.deviceName = getDeviceName()
 	st.machineID = getMachineID()
 
-	myWin = myApp.NewWindow("🔒 WireGuard VPN Client")
+	myWin = myApp.NewWindow("WireGuard VPN Client")
 	myWin.Resize(fyne.NewSize(860, 560))
 
 	myWin.SetContent(buildUI())
@@ -324,7 +324,7 @@ func showLoginDialog(s Server) {
 			st.mu.Unlock()
 
 			// Check enrollment in background
-			enrolled, _ := apiCheckEnroll(s.IP, s.Port, token, userEntry.Text, st.deviceName)
+			enrolled, _ := apiCheckEnroll(s.IP, s.Port, token, st.machineID)
 			st.mu.Lock()
 			st.enrolled[k] = enrolled
 			st.mu.Unlock()
@@ -420,7 +420,7 @@ func doConnect(s Server) {
 	prog.Show()
 	go func() {
 		// 1. Check enrollment
-		enrolled, err := apiCheckEnroll(s.IP, s.Port, token, username, st.deviceName)
+		enrolled, err := apiCheckEnroll(s.IP, s.Port, token, st.machineID)
 		if err != nil || !enrolled {
 			prog.Hide()
 			showError(fmt.Errorf("device not enrolled or check failed"))
@@ -428,7 +428,7 @@ func doConnect(s Server) {
 		}
 
 		// 2. Connect – get server config
-		cfg, err := apiConnect(s.IP, s.Port, token, username, st.deviceName)
+		cfg, err := apiConnect(s.IP, s.Port, token, st.machineID)
 		if err != nil {
 			prog.Hide()
 			showError(fmt.Errorf("connect: %w", err))
@@ -498,7 +498,7 @@ func doDisconnect(s Server) {
 	go func() {
 		// Notify server
 		if token != "" {
-			_ = apiDisconnect(s.IP, s.Port, token, st.deviceName)
+			_ = apiDisconnect(s.IP, s.Port, token, st.machineID)
 		}
 		// Bring down local interface
 		bringDownVPN()
