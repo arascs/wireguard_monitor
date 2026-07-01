@@ -337,6 +337,82 @@
             color: #222;
             word-break: break-all;
         }
+
+        .checks-group {
+            border: 1px solid #eee;
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 8px;
+        }
+
+        .check-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+        }
+
+        .check-row label {
+            margin: 0;
+            font-weight: normal;
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .kernel-input {
+            width: 80px;
+            padding: 6px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .checks-summary {
+            font-size: 0.85rem;
+            color: #555;
+        }
+
+        .profile-modal-box {
+            width: min(520px, 94vw);
+            padding: 28px 32px;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+            max-height: calc(100vh - 32px);
+            overflow-y: auto;
+        }
+
+        .profile-modal-box h3 {
+            margin: 0 0 16px;
+            color: rgba(134, 22, 24, 1);
+        }
+
+        .profile-form-group {
+            margin-bottom: 12px;
+        }
+
+        .profile-form-group label {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .profile-form-group input,
+        .profile-form-group select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        .profile-modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 16px;
+        }
     </style>
 </head>
 
@@ -346,6 +422,7 @@
         <div
             style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px;">
             <button id="tab-approved" class="tab-btn active">Approved Devices</button>
+            <button id="tab-profiles" class="tab-btn">Security Profiles</button>
             <button id="tab-requests" class="tab-btn">Enrollment Requests</button>
         </div>
 
@@ -400,6 +477,7 @@
                         <th>Username</th>
                         <th>Device</th>
                         <th>OS</th>
+                        <th>Security profile</th>
                         <th>Expire Date</th>
                         <th>Last seen</th>
                         <th>Status</th>
@@ -411,9 +489,55 @@
             </table>
         </div>
 
+        <div id="profiles-view" style="display: none;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <h2 class="section-title" style="margin:0;">Security Profiles</h2>
+                <button id="btn-add-profile" type="button">Add profile</button>
+            </div>
+            <table class="simple-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>OS</th>
+                        <th>Checks</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="profiles-tbody"></tbody>
+            </table>
+        </div>
+
         <div id="requests-view" style="display: none;">
             <h2 class="section-title">Device Enrollment Requests</h2>
             <div id="devices-container"></div>
+        </div>
+    </div>
+
+    <div id="profile-modal" class="modal">
+        <div class="profile-modal-box">
+            <h3 id="profile-modal-title">Add profile</h3>
+            <form id="profile-form">
+                <input type="hidden" id="profile-id">
+                <div class="profile-form-group">
+                    <label for="profile-name">Name</label>
+                    <input type="text" id="profile-name" required>
+                </div>
+                <div class="profile-form-group">
+                    <label for="profile-os">OS type</label>
+                    <select id="profile-os" required>
+                        <option value="linux">Linux</option>
+                        <option value="windows">Windows</option>
+                    </select>
+                </div>
+                <div class="profile-form-group">
+                    <label>Checks</label>
+                    <div class="checks-group" id="profile-checks"></div>
+                </div>
+                <div class="profile-modal-actions">
+                    <button type="button" id="profile-cancel">Cancel</button>
+                    <button type="submit" id="profile-save">Save</button>
+                </div>
+            </form>
         </div>
     </div>
 

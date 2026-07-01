@@ -10,6 +10,7 @@ const {
   collectSecurityPolicyIssues,
   formatIssues
 } = require('../services/securityChecks');
+const { resolveDeviceProfile } = require('../services/securityProfiles');
 const {
   CONFIG_DIR,
   loadInterfaceConfig,
@@ -43,16 +44,6 @@ module.exports = function createConnectVpnRoutes({ authenticateToken }) {
         return res.status(400).json({ success: false, error: 'Missing securityInfo' });
       }
 
-      const settings = loadGlobalSettings();
-      const issues = collectSecurityPolicyIssues(securityInfo, settings);
-      if (issues.length > 0) {
-        return res.status(403).json({
-          success: false,
-          error: `Security policy violation: ${formatIssues(issues)}`,
-          issues
-        });
-      }
-
       connection = await mysql.createConnection(dbConfig);
       const now = Math.floor(Date.now() / 1000);
 
@@ -74,21 +65,32 @@ module.exports = function createConnectVpnRoutes({ authenticateToken }) {
       }
 
       const [devices] = await connection.execute(
-        'SELECT device_name, allowed_ips, public_key, status, expire_date, `interface`, machine_id FROM devices WHERE username = ? AND machine_id = ?',
+        'SELECT device_name, allowed_ips, public_key, status, expire_date, `interface`, machine_id, os, security_profile_id FROM devices WHERE username = ? AND machine_id = ?',
         [username, machineId]
       );
+
+      if (devices.length === 0) {
+        await connection.end();
+        return res.status(403).json({ success: false, error: 'Device not enrolled' });
+      }
+
+      const device = devices[0];
+      const profile = await resolveDeviceProfile(connection, device, securityInfo.os);
+      const issues = collectSecurityPolicyIssues(securityInfo, profile);
+      if (issues.length > 0) {
+        await connection.end();
+        return res.status(403).json({
+          success: false,
+          error: `Security policy violation: ${formatIssues(issues)}`,
+          issues
+        });
+      }
 
       await connection.execute(
         'UPDATE devices SET last_seen = ? WHERE username = ? AND machine_id = ?',
         [now, username, machineId]
       );
       await connection.end();
-
-      if (devices.length === 0) {
-        return res.status(403).json({ success: false, error: 'Device not enrolled' });
-      }
-
-      const device = devices[0];
       const deviceStatus = parseInt(device.status, 10);
       if (deviceStatus === 0) {
         return res.status(403).json({ success: false, error: 'Device disabled' });

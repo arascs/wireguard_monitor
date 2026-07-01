@@ -8,42 +8,11 @@ const {
   collectSecurityPolicyIssues,
   formatIssues
 } = require('../services/securityChecks');
-const { normalizeSettings } = require('../../../common/settings');
+const { getProfileById, resolveDeviceProfile } = require('../services/securityProfiles');
 
 function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateToken }) {
   const router = express.Router();
   const CONFIG_DIR = '/etc/wireguard/';
-  const SETTINGS_FILE = require('../../../common/paths').SETTINGS_FILE;
-
-  function loadSecuritySettings() {
-    const defaults = {
-      enforceKernelCheck: true,
-      minKernelVersionLinux: 4,
-      minKernelVersionWindows: 10,
-      enforceFirewallLinux: true,
-      enforceFirewallWindows: true,
-      enforcePasswordRequiredLinux: true,
-      enforcePasswordRequiredWindows: true,
-      enforceWifiSecureLinux: false,
-      enforceWifiSecureWindows: false,
-      enforceNoUnallowedSharesLinux: false,
-      enforceNoUnallowedSharesWindows: false,
-      enforceNoMobileHotspotLinux: false,
-      enforceNoMobileHotspotWindows: false,
-      enforceNoUsbStorageLinux: false,
-      enforceNoUsbStorageWindows: false,
-      enforceAntivirusWindows: false,
-      enforceUacWindows: false,
-      enforceBitlockerWindows: false
-    };
-    try {
-      if (!fs.existsSync(SETTINGS_FILE)) return defaults;
-      const raw = fs.readFileSync(SETTINGS_FILE, 'utf8');
-      return normalizeSettings({ ...defaults, ...JSON.parse(raw) });
-    } catch (_) {
-      return defaults;
-    }
-  }
 
   function normalizeDeviceOs(os) {
     const v = String(os || '').trim().toLowerCase();
@@ -86,7 +55,12 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
     try {
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        'SELECT id, device_name, username, interface, allowed_ips, public_key, machine_id, os, expire_date, status, last_seen FROM devices ORDER BY id DESC'
+        `SELECT d.id, d.device_name, d.username, d.interface, d.allowed_ips, d.public_key,
+                d.machine_id, d.os, d.expire_date, d.status, d.last_seen, d.security_profile_id,
+                sp.name AS security_profile_name
+         FROM devices d
+         LEFT JOIN security_profiles sp ON sp.id = d.security_profile_id
+         ORDER BY d.id DESC`
       );
       res.json({ success: true, devices: rows });
     } catch (error) {
@@ -100,7 +74,7 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
   });
 
   router.post('/devices/approve', requireAuth, async (req, res) => {
-    const { id, interface: selectedInterface, allowedIPs, expireDate } = req.body || {};
+    const { id, interface: selectedInterface, allowedIPs, expireDate, securityProfileId } = req.body || {};
     if (!id || !allowedIPs) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
@@ -124,6 +98,22 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
       const machineId = reqItem.machine_id;
       const deviceOs = normalizeDeviceOs(reqItem.os);
 
+      let profileId = null;
+      if (securityProfileId != null && securityProfileId !== '') {
+        const pid = parseInt(securityProfileId, 10);
+        if (!pid) {
+          return res.status(400).json({ success: false, error: 'Invalid security profile' });
+        }
+        const profile = await getProfileById(connection, pid);
+        if (!profile) {
+          return res.status(400).json({ success: false, error: 'Security profile not found' });
+        }
+        if (deviceOs && profile.os_type !== deviceOs) {
+          return res.status(400).json({ success: false, error: 'Security profile OS does not match device' });
+        }
+        profileId = pid;
+      }
+
       let publicKey = reqItem.public_key;
 
       let expireEpoch = null;
@@ -135,8 +125,8 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
       }
 
       await connection.execute(
-        'INSERT INTO devices (device_name, username, interface, allowed_ips, public_key, machine_id, os, expire_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [deviceName, username, selectedInterface, allowedIPs, publicKey, machineId, deviceOs || null, expireEpoch, 1]
+        'INSERT INTO devices (device_name, username, interface, allowed_ips, public_key, machine_id, os, expire_date, status, security_profile_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [deviceName, username, selectedInterface, allowedIPs, publicKey, machineId, deviceOs || null, expireEpoch, 1, profileId]
       );
 
       try {
@@ -381,17 +371,21 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
 
     let connection;
     try {
-      const settings = loadSecuritySettings();
-      const issues = collectSecurityPolicyIssues(securityInfo, settings);
-
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        'SELECT machine_id FROM devices WHERE username = ? AND machine_id = ? ORDER BY id DESC LIMIT 1',
+        'SELECT machine_id, os, security_profile_id FROM devices WHERE username = ? AND machine_id = ? ORDER BY id DESC LIMIT 1',
         [username, mid]
       );
       if (rows.length === 0) {
-        issues.push('Device not found');
+        return res.status(403).json({
+          success: false,
+          error: 'Validation failed: Device not found',
+          issues: ['Device not found']
+        });
       }
+
+      const profile = await resolveDeviceProfile(connection, rows[0], securityInfo && securityInfo.os);
+      const issues = collectSecurityPolicyIssues(securityInfo, profile);
 
       if (issues.length > 0) {
         await disconnectDeviceByMachineId(username, mid);
@@ -512,6 +506,61 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
       if (connection) {
         await connection.end();
       }
+    }
+  });
+
+  router.put('/devices/:id/security-profile', requireAuth, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const { securityProfileId } = req.body || {};
+    if (!id) return res.status(400).json({ success: false, error: 'Invalid device ID' });
+
+    let connection;
+    try {
+      connection = await mysql.createConnection(dbConfig);
+      const [devices] = await connection.execute(
+        'SELECT id, device_name, username, os FROM devices WHERE id = ?',
+        [id]
+      );
+      if (devices.length === 0) {
+        return res.status(404).json({ success: false, error: 'Device not found' });
+      }
+
+      let profileId = null;
+      if (securityProfileId != null && securityProfileId !== '') {
+        profileId = parseInt(securityProfileId, 10);
+        if (!profileId) {
+          return res.status(400).json({ success: false, error: 'Invalid security profile' });
+        }
+        const profile = await getProfileById(connection, profileId);
+        if (!profile) {
+          return res.status(400).json({ success: false, error: 'Security profile not found' });
+        }
+        const deviceOs = normalizeDeviceOs(devices[0].os);
+        if (deviceOs && profile.os_type !== deviceOs) {
+          return res.status(400).json({ success: false, error: 'Security profile OS does not match device' });
+        }
+      }
+
+      await connection.execute(
+        'UPDATE devices SET security_profile_id = ? WHERE id = ?',
+        [profileId, id]
+      );
+
+      try {
+        const admin = req.session && req.session.user ? req.session.user : 'unknown';
+        logAction(admin, 'update_device_security_profile', {
+          device_id: id,
+          device_name: devices[0].device_name,
+          security_profile_id: profileId
+        });
+      } catch (_) {}
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error updating device security profile:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    } finally {
+      if (connection) await connection.end();
     }
   });
 

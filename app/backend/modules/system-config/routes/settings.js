@@ -57,42 +57,7 @@ module.exports = function createSettingsRoutes() {
         physicalInterface,
         centralUrl,
         metricsPushIntervalMs,
-        allowedLanRanges: cidrs.join(', '),
-        enforceKernelCheck: req.body.enforceKernelCheck !== undefined ? req.body.enforceKernelCheck : currentSettings.enforceKernelCheck,
-        minKernelVersionLinux: req.body.minKernelVersionLinux !== undefined
-          ? parseInt(req.body.minKernelVersionLinux, 10) : currentSettings.minKernelVersionLinux,
-        minKernelVersionWindows: req.body.minKernelVersionWindows !== undefined
-          ? parseInt(req.body.minKernelVersionWindows, 10) : currentSettings.minKernelVersionWindows,
-        enforceFirewallLinux: req.body.enforceFirewallLinux !== undefined
-          ? req.body.enforceFirewallLinux : currentSettings.enforceFirewallLinux,
-        enforceFirewallWindows: req.body.enforceFirewallWindows !== undefined
-          ? req.body.enforceFirewallWindows : currentSettings.enforceFirewallWindows,
-        enforcePasswordRequiredLinux: req.body.enforcePasswordRequiredLinux !== undefined
-          ? req.body.enforcePasswordRequiredLinux : currentSettings.enforcePasswordRequiredLinux,
-        enforcePasswordRequiredWindows: req.body.enforcePasswordRequiredWindows !== undefined
-          ? req.body.enforcePasswordRequiredWindows : currentSettings.enforcePasswordRequiredWindows,
-        enforceWifiSecureLinux: req.body.enforceWifiSecureLinux !== undefined
-          ? req.body.enforceWifiSecureLinux : currentSettings.enforceWifiSecureLinux,
-        enforceWifiSecureWindows: req.body.enforceWifiSecureWindows !== undefined
-          ? req.body.enforceWifiSecureWindows : currentSettings.enforceWifiSecureWindows,
-        enforceNoUnallowedSharesLinux: req.body.enforceNoUnallowedSharesLinux !== undefined
-          ? req.body.enforceNoUnallowedSharesLinux : currentSettings.enforceNoUnallowedSharesLinux,
-        enforceNoUnallowedSharesWindows: req.body.enforceNoUnallowedSharesWindows !== undefined
-          ? req.body.enforceNoUnallowedSharesWindows : currentSettings.enforceNoUnallowedSharesWindows,
-        enforceNoMobileHotspotLinux: req.body.enforceNoMobileHotspotLinux !== undefined
-          ? req.body.enforceNoMobileHotspotLinux : currentSettings.enforceNoMobileHotspotLinux,
-        enforceNoMobileHotspotWindows: req.body.enforceNoMobileHotspotWindows !== undefined
-          ? req.body.enforceNoMobileHotspotWindows : currentSettings.enforceNoMobileHotspotWindows,
-        enforceNoUsbStorageLinux: req.body.enforceNoUsbStorageLinux !== undefined
-          ? req.body.enforceNoUsbStorageLinux : currentSettings.enforceNoUsbStorageLinux,
-        enforceNoUsbStorageWindows: req.body.enforceNoUsbStorageWindows !== undefined
-          ? req.body.enforceNoUsbStorageWindows : currentSettings.enforceNoUsbStorageWindows,
-        enforceAntivirusWindows: req.body.enforceAntivirusWindows !== undefined
-          ? req.body.enforceAntivirusWindows : currentSettings.enforceAntivirusWindows,
-        enforceUacWindows: req.body.enforceUacWindows !== undefined
-          ? req.body.enforceUacWindows : currentSettings.enforceUacWindows,
-        enforceBitlockerWindows: req.body.enforceBitlockerWindows !== undefined
-          ? req.body.enforceBitlockerWindows : currentSettings.enforceBitlockerWindows
+        allowedLanRanges: cidrs.join(', ')
       };
 
       fs.writeFileSync(SETTINGS_FILE, JSON.stringify(newSettings, null, 2), 'utf8');

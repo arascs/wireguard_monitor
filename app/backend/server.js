@@ -31,7 +31,7 @@ const {
 const { setupSession } = require('./common/middleware');
 
 const mountSystemConfig = require('./modules/system-config');
-const mountIdentity = require('./modules/identity');
+const mountClientManagement = require('./modules/client-management');
 const registerMonitoring = require('./modules/monitoring');
 const { startCentralSync } = require('./modules/monitoring');
 const mountLogging = require('./modules/logging');
@@ -88,7 +88,7 @@ async function startServer() {
 
   app.use('/api', mountAdminAccounts(moduleDeps));
   app.use('/api', mountSystemConfig(moduleDeps));
-  app.use('/api', mountIdentity(moduleDeps));
+  app.use('/api', mountClientManagement(moduleDeps));
   app.use('/api', mountLogging(moduleDeps));
   app.use('/api', mountBackup(moduleDeps));
 

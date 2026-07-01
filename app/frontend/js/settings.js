@@ -15,28 +15,6 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('metricsPushIntervalMs').value =
           s.metricsPushIntervalMs !== undefined ? s.metricsPushIntervalMs : 30000;
         document.getElementById('allowedLanRanges').value = s.allowedLanRanges || '192.168.220.0/24';
-        document.getElementById('enforceKernelCheck').checked = s.enforceKernelCheck !== false;
-        document.getElementById('minKernelVersionLinux').value =
-          s.minKernelVersionLinux !== undefined ? s.minKernelVersionLinux : 4;
-        document.getElementById('minKernelVersionWindows').value =
-          s.minKernelVersionWindows !== undefined ? s.minKernelVersionWindows : 10;
-        document.getElementById('enforceFirewallLinux').checked = s.enforceFirewallLinux !== false;
-        document.getElementById('enforceFirewallWindows').checked = s.enforceFirewallWindows !== false;
-        document.getElementById('enforcePasswordRequiredLinux').checked =
-          s.enforcePasswordRequiredLinux !== false;
-        document.getElementById('enforcePasswordRequiredWindows').checked =
-          s.enforcePasswordRequiredWindows !== false;
-        document.getElementById('enforceWifiSecureLinux').checked = !!s.enforceWifiSecureLinux;
-        document.getElementById('enforceWifiSecureWindows').checked = !!s.enforceWifiSecureWindows;
-        document.getElementById('enforceNoUnallowedSharesLinux').checked = !!s.enforceNoUnallowedSharesLinux;
-        document.getElementById('enforceNoUnallowedSharesWindows').checked = !!s.enforceNoUnallowedSharesWindows;
-        document.getElementById('enforceNoMobileHotspotLinux').checked = !!s.enforceNoMobileHotspotLinux;
-        document.getElementById('enforceNoMobileHotspotWindows').checked = !!s.enforceNoMobileHotspotWindows;
-        document.getElementById('enforceNoUsbStorageLinux').checked = !!s.enforceNoUsbStorageLinux;
-        document.getElementById('enforceNoUsbStorageWindows').checked = !!s.enforceNoUsbStorageWindows;
-        document.getElementById('enforceAntivirusWindows').checked = !!s.enforceAntivirusWindows;
-        document.getElementById('enforceUacWindows').checked = !!s.enforceUacWindows;
-        document.getElementById('enforceBitlockerWindows').checked = !!s.enforceBitlockerWindows;
       } else {
         alert('Failed to load settings: ' + (data.error || 'Unknown error'));
       }
@@ -54,25 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
       physicalInterface: document.getElementById('physicalInterface').value.trim(),
       centralUrl: document.getElementById('centralUrl').value.trim(),
       metricsPushIntervalMs: document.getElementById('metricsPushIntervalMs').value,
-      allowedLanRanges: document.getElementById('allowedLanRanges').value.trim(),
-      enforceKernelCheck: document.getElementById('enforceKernelCheck').checked,
-      minKernelVersionLinux: document.getElementById('minKernelVersionLinux').value,
-      minKernelVersionWindows: document.getElementById('minKernelVersionWindows').value,
-      enforceFirewallLinux: document.getElementById('enforceFirewallLinux').checked,
-      enforceFirewallWindows: document.getElementById('enforceFirewallWindows').checked,
-      enforcePasswordRequiredLinux: document.getElementById('enforcePasswordRequiredLinux').checked,
-      enforcePasswordRequiredWindows: document.getElementById('enforcePasswordRequiredWindows').checked,
-      enforceWifiSecureLinux: document.getElementById('enforceWifiSecureLinux').checked,
-      enforceWifiSecureWindows: document.getElementById('enforceWifiSecureWindows').checked,
-      enforceNoUnallowedSharesLinux: document.getElementById('enforceNoUnallowedSharesLinux').checked,
-      enforceNoUnallowedSharesWindows: document.getElementById('enforceNoUnallowedSharesWindows').checked,
-      enforceNoMobileHotspotLinux: document.getElementById('enforceNoMobileHotspotLinux').checked,
-      enforceNoMobileHotspotWindows: document.getElementById('enforceNoMobileHotspotWindows').checked,
-      enforceNoUsbStorageLinux: document.getElementById('enforceNoUsbStorageLinux').checked,
-      enforceNoUsbStorageWindows: document.getElementById('enforceNoUsbStorageWindows').checked,
-      enforceAntivirusWindows: document.getElementById('enforceAntivirusWindows').checked,
-      enforceUacWindows: document.getElementById('enforceUacWindows').checked,
-      enforceBitlockerWindows: document.getElementById('enforceBitlockerWindows').checked
+      allowedLanRanges: document.getElementById('allowedLanRanges').value.trim()
     };
 
     fetch('/api/settings', {
