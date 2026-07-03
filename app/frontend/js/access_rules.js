@@ -1,3 +1,5 @@
+let pendingEnableRuleId = null;
+
 async function loadSitesForRules() {
   const select = document.getElementById('rule-site-id');
   if (!select) return;
@@ -54,10 +56,6 @@ async function loadApplicationsForRules() {
   const select = document.getElementById('rule-application-id');
   if (!select) return;
   select.innerHTML = '';
-  const allOpt = document.createElement('option');
-  allOpt.value = 'all';
-  allOpt.textContent = 'All applications';
-  select.appendChild(allOpt);
   try {
     const res = await fetch('/api/applications');
     const data = await res.json();
@@ -69,6 +67,33 @@ async function loadApplicationsForRules() {
       select.appendChild(opt);
     });
   } catch (e) { /* ignore */ }
+}
+
+function openEnableRuleModal(ruleId) {
+  pendingEnableRuleId = ruleId;
+  document.getElementById('enable-rule-modal')?.classList.add('open');
+}
+
+function closeEnableRuleModal() {
+  pendingEnableRuleId = null;
+  document.getElementById('enable-rule-modal')?.classList.remove('open');
+}
+
+async function enableRule(position) {
+  const id = pendingEnableRuleId;
+  if (!id) return;
+  closeEnableRuleModal();
+  const res = await fetch(`/api/access-rules/${id}/enable`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ position })
+  });
+  const data = await res.json();
+  if (data.success) {
+    loadAccessRules();
+  } else {
+    alert(data.error || 'Cannot enable rule');
+  }
 }
 
 async function loadAccessRules() {
@@ -86,11 +111,13 @@ async function loadAccessRules() {
       const tr = document.createElement('tr');
       const statusText = rule.status === 1 ? 'On' : 'Off';
       const btnLabel = rule.status === 1 ? 'Disable' : 'Enable';
+      const expireText = rule.expire_label || 'Never';
       tr.innerHTML = `
         <td>${rule.name}</td>
         <td>${rule.source_label}</td>
         <td>${rule.application_name || ''}</td>
         <td>${rule.action}</td>
+        <td>${expireText}</td>
         <td>${statusText}</td>
         <td><button data-id="${rule.id}" class="toggle-rule-btn">${btnLabel}</button></td>
         <td><button data-id="${rule.id}" class="delete-rule-btn btn btn-danger" title="Delete Rule"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/></svg></button></td>
@@ -102,13 +129,13 @@ async function loadAccessRules() {
         const id = btn.getAttribute('data-id');
         const row = (data.rules || []).find((r) => String(r.id) === String(id));
         if (!row) return;
-        const path = row.status === 1 ? `/api/access-rules/${id}/disable` : `/api/access-rules/${id}/enable`;
-        const res2 = await fetch(path, { method: 'POST' });
-        const d2 = await res2.json();
-        if (d2.success) {
-          loadAccessRules();
+        if (row.status === 1) {
+          const res2 = await fetch(`/api/access-rules/${id}/disable`, { method: 'POST' });
+          const d2 = await res2.json();
+          if (d2.success) loadAccessRules();
+          else alert(d2.error || 'Cannot disable rule');
         } else {
-          alert(d2.error || 'Cannot toggle rule');
+          openEnableRuleModal(id);
         }
       });
     });
@@ -118,11 +145,8 @@ async function loadAccessRules() {
         if (!confirm('Are you sure you want to delete this access rule? This action cannot be undone.')) return;
         const res2 = await fetch(`/api/access-rules/${id}`, { method: 'DELETE' });
         const d2 = await res2.json();
-        if (d2.success) {
-          loadAccessRules();
-        } else {
-          alert(d2.error || 'Cannot delete rule');
-        }
+        if (d2.success) loadAccessRules();
+        else alert(d2.error || 'Cannot delete rule');
       });
     });
   } catch (e) {
@@ -135,20 +159,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const siteGroup = document.getElementById('rule-source-site-group');
   const deviceGroup = document.getElementById('rule-source-device-group');
   const interfaceGroup = document.getElementById('rule-source-interface-group');
-  const ipGroup = document.getElementById('rule-source-ip-group');
   const form = document.getElementById('create-rule-form');
+  const setExpireCb = document.getElementById('rule-set-expire');
+  const expireHoursRow = document.getElementById('rule-expire-hours-row');
 
   function updateSourceGroups(v) {
     const hideAll = v === 'all';
     siteGroup.style.display = v === 'site' ? 'block' : 'none';
     deviceGroup.style.display = v === 'device' ? 'block' : 'none';
     interfaceGroup.style.display = v === 'interface' ? 'block' : 'none';
-    ipGroup.style.display = v === 'ip' ? 'block' : 'none';
     if (hideAll) {
       siteGroup.style.display = 'none';
       deviceGroup.style.display = 'none';
       interfaceGroup.style.display = 'none';
-      ipGroup.style.display = 'none';
     }
   }
 
@@ -156,12 +179,17 @@ document.addEventListener('DOMContentLoaded', () => {
     form?.reset();
     if (sourceTypeSelect) sourceTypeSelect.value = 'all';
     updateSourceGroups('all');
+    expireHoursRow?.classList.remove('open');
     document.getElementById('create-rule-modal')?.classList.add('open');
   }
 
   function closeCreateRuleModal() {
     document.getElementById('create-rule-modal')?.classList.remove('open');
   }
+
+  setExpireCb?.addEventListener('change', () => {
+    expireHoursRow?.classList.toggle('open', setExpireCb.checked);
+  });
 
   if (sourceTypeSelect) {
     sourceTypeSelect.addEventListener('change', () => updateSourceGroups(sourceTypeSelect.value));
@@ -180,6 +208,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.target.id === 'create-rule-modal') closeCreateRuleModal();
   });
 
+  document.getElementById('enable-rule-first')?.addEventListener('click', () => enableRule('first'));
+  document.getElementById('enable-rule-last')?.addEventListener('click', () => enableRule('last'));
+  document.getElementById('enable-rule-cancel')?.addEventListener('click', closeEnableRuleModal);
+  document.getElementById('enable-rule-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'enable-rule-modal') closeEnableRuleModal();
+  });
+
   if (form) {
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -193,9 +228,18 @@ document.addEventListener('DOMContentLoaded', () => {
       const body = {
         name,
         sourceType,
-        applicationId: applicationId === 'all' ? 'all' : parseInt(applicationId, 10),
+        applicationId: parseInt(applicationId, 10),
         action
       };
+
+      if (setExpireCb?.checked) {
+        const hours = parseInt(document.getElementById('rule-expire-hours').value, 10);
+        if (!Number.isFinite(hours) || hours < 1) {
+          alert('Enter valid expiration hours');
+          return;
+        }
+        body.expireHours = hours;
+      }
 
       if (sourceType === 'site') {
         const siteId = document.getElementById('rule-site-id').value;
@@ -209,10 +253,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const iface = document.getElementById('rule-interface-name').value;
         if (!iface) return;
         body.sourceInterface = iface;
-      } else if (sourceType === 'ip') {
-        const ip = document.getElementById('rule-source-ip').value.trim();
-        if (!ip) return;
-        body.sourceIp = ip;
       }
 
       const res = await fetch('/api/access-rules', {

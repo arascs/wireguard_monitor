@@ -1,17 +1,31 @@
 const express = require('express');
-const { spawnSync } = require('child_process');
 const { logAction } = require('../../logging/auditLogger');
+const { tryRun, run } = require('../../../common/utils');
+const {
+  applyRuleIptables,
+  buildDeleteArgLists,
+  runDeleteCommands,
+  deleteCommandsShell
+} = require('../services/accessRuleIptables');
 
-function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
+function createAccessRuleRoutes({ mysql, dbConfig, requireAuth }) {
   const router = express.Router();
 
-  const RULE_SELECT = `SELECT r.id, r.name, r.source_type, r.source_value, r.status, r.application_id,
+  const RULE_SELECT_FULL = `SELECT r.id, r.name, r.source_type, r.source_value, r.status, r.application_id,
+                r.expire_hours, r.enabled_at,
                 s.site_name, d.device_name, a.name AS application_name,
                 a.IP AS app_ip, a.port AS app_port
          FROM access_rules r
          LEFT JOIN sites s ON r.source_type = 'site' AND r.source_value = s.id
          LEFT JOIN devices d ON r.source_type = 'device' AND r.source_value = d.id
          LEFT JOIN applications a ON r.application_id = a.id`;
+
+  const RULES_ORDER_BY = `
+         ORDER BY (r.status % 2) DESC,
+                  CASE WHEN (r.status % 2) = 1 AND r.enable_position = 'last' THEN 1 ELSE 0 END ASC,
+                  CASE WHEN (r.status % 2) = 1 AND r.enable_position = 'last' THEN r.enabled_at END ASC,
+                  CASE WHEN (r.status % 2) = 1 THEN r.enabled_at END DESC,
+                  r.id DESC`;
 
   function ruleAuditDetails(row) {
     const isBlock = row.status >= 2;
@@ -25,8 +39,9 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
       source_type: row.source_type,
       source,
       application_id: row.application_id,
-      application: row.application_id == null ? 'All applications' : (row.application_name || ''),
-      status: row.status
+      application: row.application_name || '',
+      status: row.status,
+      expire_hours: row.expire_hours
     };
   }
 
@@ -36,97 +51,32 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
     } catch (_) { /* ignore */ }
   }
 
-  // Helper: resolve source IPs from rule
-  async function resolveSourceIps(connection, rule) {
-    if (rule.source_type === 'site') {
-      const [rows] = await connection.execute(
-        'SELECT site_allowedIPs FROM sites WHERE id = ?',
-        [rule.source_value]
-      );
-      const ips = [];
-      if (rows.length && rows[0].site_allowedIPs) {
-        // site_allowedIPs may contain multiple CIDRs separated by commas/spaces
-        rows[0].site_allowedIPs.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean).forEach((ip) => ips.push(ip));
-      }
-      return { type: 'ip', sources: ips };
-    } else if (rule.source_type === 'device') {
-      const [devices] = await connection.execute(
-        'SELECT allowed_ips FROM devices WHERE id = ?',
-        [rule.source_value]
-      );
-      const ips = [];
-      if (devices.length && devices[0].allowed_ips) {
-        devices[0].allowed_ips.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean).forEach((ip) => ips.push(ip));
-      }
-      return { type: 'ip', sources: ips };
-    } else if (rule.source_type === 'interface') {
-      return { type: 'interface', iface: rule.source_value };
-    } else if (rule.source_type === 'ip' && rule.source_value) {
-      return { type: 'ip', sources: [rule.source_value.trim()] };
-    } else if (rule.source_type === 'all') {
-      return { type: 'all' };
-    }
-    return { type: 'ip', sources: [] };
+  function cancelScheduledExpiry(ruleId) {
+    const unit = `wg-access-rule-expire-${ruleId}`;
+    tryRun('systemctl', ['stop', `${unit}.timer`]);
+    tryRun('systemctl', ['stop', `${unit}.service`]);
+    tryRun('systemctl', ['reset-failed', `${unit}.service`]);
   }
 
-  async function resolveDestinations(connection, rule) {
-    if (rule.application_id == null) {
-      const [rows] = await connection.execute(
-        'SELECT IP, port FROM applications WHERE IP IS NOT NULL AND IP != "" AND port IS NOT NULL'
-      );
-      return rows
-        .filter((row) => row.IP && row.port)
-        .map((row) => ({ destIp: String(row.IP).trim(), destPort: row.port }));
-    }
-    if (rule.app_ip && rule.app_port) {
-      return [{ destIp: rule.app_ip, destPort: rule.app_port }];
-    }
-    return [];
+  function scheduleExpiry(ruleId, hours, deleteArgLists) {
+    if (!deleteArgLists.length) return;
+    cancelScheduledExpiry(ruleId);
+    run('systemd-run', [
+      `--on-active=${hours}h`,
+      `--unit=wg-access-rule-expire-${ruleId}`,
+      'bash', '-c', deleteCommandsShell(deleteArgLists)
+    ]);
   }
 
-  function resolveChain(destIp) {
-    const r = spawnSync('ip', ['route', 'get', destIp], { encoding: 'utf8' });
-    if (r.status !== 0) return null;
-    return (r.stdout || '').includes('local') ? 'INPUT' : 'FORWARD';
-  }
-
-  function applyIptables(action, chain, source, destIp, destPort, target) {
-    const baseTail = ['-d', destIp, '-p', 'tcp', '--dport', String(destPort), '-j', target];
-    if (source.type === 'all') {
-      run('iptables', [action, chain, ...baseTail]);
-    } else if (source.type === 'ip') {
-      source.sources.forEach((src) => {
-        run('iptables', [action, chain, '-s', src, ...baseTail]);
-      });
-    } else if (source.type === 'interface') {
-      run('iptables', [action, chain, '-i', source.iface, ...baseTail]);
+  async function disableRule(connection, rule, ruleId) {
+    if ((rule.status % 2) === 1) {
+      const deleteArgLists = await buildDeleteArgLists(connection, rule);
+      runDeleteCommands(deleteArgLists);
     }
-  }
-
-  async function applyRuleIptables(action, connection, rule) {
-    const isBlock = rule.status >= 2;
-    const target = isBlock ? 'DROP' : 'ACCEPT';
-    const source = await resolveSourceIps(connection, rule);
-
-    if (source.type === 'ip' && !source.sources.length) {
-      throw new Error('No source IPs resolved for rule');
-    }
-    if (source.type === 'interface' && !source.iface) {
-      throw new Error('No interface specified for rule');
-    }
-
-    const destinations = await resolveDestinations(connection, rule);
-    if (!destinations.length) {
-      throw new Error('No destination applications resolved for rule');
-    }
-
-    for (const dest of destinations) {
-      const chain = resolveChain(dest.destIp);
-      if (!chain) {
-        throw new Error(`Failed to determine route for destination IP ${dest.destIp}`);
-      }
-      applyIptables(action, chain, source, dest.destIp, dest.destPort, target);
-    }
+    cancelScheduledExpiry(ruleId);
+    const newStatus = rule.status >= 2 ? 2 : 0;
+    await connection.execute('UPDATE access_rules SET status = ? WHERE id = ?', [newStatus, ruleId]);
+    return newStatus;
   }
 
   router.get('/access-rules', requireAuth, async (req, res) => {
@@ -135,17 +85,18 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
         `SELECT r.id, r.name, r.source_type, r.source_value, r.application_id, r.status,
+                r.expire_hours, r.enabled_at,
                 s.site_name, d.device_name, a.name AS application_name
          FROM access_rules r
          LEFT JOIN sites s ON r.source_type = 'site' AND r.source_value = s.id
          LEFT JOIN devices d ON r.source_type = 'device' AND r.source_value = d.id
          LEFT JOIN applications a ON r.application_id = a.id
-         ORDER BY (r.status % 2) DESC, r.enabled_at DESC, r.id DESC`
+         ${RULES_ORDER_BY}`
       );
+      const now = Date.now();
       const rules = rows.map((row) => {
         const isBlock = row.status >= 2;
         const isOn = (row.status % 2) === 1;
-        const action = isBlock ? 'block' : 'allow';
         let sourceLabel = '';
         if (row.source_type === 'site') {
           sourceLabel = `Site: ${row.site_name || `#${row.source_value}`}`;
@@ -158,14 +109,27 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
         } else {
           sourceLabel = row.source_value || '';
         }
+
+        let expire_label = 'Never';
+        if (row.expire_hours != null && row.expire_hours > 0) {
+          expire_label = `${row.expire_hours}h`;
+          if (isOn && row.enabled_at) {
+            const expiresAt = new Date(row.enabled_at).getTime() + row.expire_hours * 3600000;
+            if (expiresAt <= now) expire_label = 'Expired';
+            else expire_label = `${row.expire_hours}h (until ${new Date(expiresAt).toLocaleString()})`;
+          }
+        }
+
         return {
           id: row.id,
           name: row.name,
           source_type: row.source_type,
           source_label: sourceLabel,
-          application_name: row.application_id == null ? 'All applications' : (row.application_name || ''),
+          application_name: row.application_name || '',
           status: isOn ? 1 : 0,
-          action
+          action: isBlock ? 'block' : 'allow',
+          expire_hours: row.expire_hours,
+          expire_label
         };
       });
       res.json({ success: true, rules });
@@ -177,7 +141,6 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
     }
   });
 
-  // List sites for rules UI
   router.get('/sites', requireAuth, async (req, res) => {
     let connection;
     try {
@@ -195,9 +158,12 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
   });
 
   router.post('/access-rules', requireAuth, async (req, res) => {
-    const { name, sourceType, sourceSiteId, sourceDeviceId, sourceInterface, sourceIp, applicationId, action } = req.body || {};
-    const validTypes = ['site', 'device', 'interface', 'ip', 'all'];
-    if (!name || !sourceType || applicationId === undefined || applicationId === null || applicationId === '' || !action) {
+    const {
+      name, sourceType, sourceSiteId, sourceDeviceId, sourceInterface,
+      applicationId, action, expireHours
+    } = req.body || {};
+    const validTypes = ['site', 'device', 'interface', 'all'];
+    if (!name || !sourceType || !applicationId || !action) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
     if (!validTypes.includes(sourceType)) {
@@ -212,8 +178,13 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
     if (sourceType === 'interface' && !sourceInterface) {
       return res.status(400).json({ success: false, error: 'Missing interface name' });
     }
-    if (sourceType === 'ip' && !sourceIp) {
-      return res.status(400).json({ success: false, error: 'Missing source IP' });
+
+    let parsedExpireHours = null;
+    if (expireHours != null && expireHours !== '') {
+      parsedExpireHours = parseInt(expireHours, 10);
+      if (!Number.isFinite(parsedExpireHours) || parsedExpireHours < 1) {
+        return res.status(400).json({ success: false, error: 'expireHours must be >= 1' });
+      }
     }
 
     let connection;
@@ -221,27 +192,22 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
       const isBlock = action === 'block';
       const baseStatus = isBlock ? 2 : 0;
       let sourceValue = null;
-      if (sourceType === 'site') {
-        sourceValue = parseInt(sourceSiteId, 10);
-      } else if (sourceType === 'device') {
-        sourceValue = parseInt(sourceDeviceId, 10);
-      } else if (sourceType === 'interface') {
-        sourceValue = sourceInterface;
-      } else if (sourceType === 'ip') {
-        sourceValue = sourceIp;
-      }
+      if (sourceType === 'site') sourceValue = String(parseInt(sourceSiteId, 10));
+      else if (sourceType === 'device') sourceValue = String(parseInt(sourceDeviceId, 10));
+      else if (sourceType === 'interface') sourceValue = sourceInterface;
+      else if (sourceType === 'all') sourceValue = '';
 
-      const appId = applicationId === 'all' ? null : parseInt(applicationId, 10);
-      if (appId !== null && !appId) {
+      const appId = parseInt(applicationId, 10);
+      if (!appId) {
         return res.status(400).json({ success: false, error: 'Invalid application' });
       }
 
       connection = await mysql.createConnection(dbConfig);
       const [result] = await connection.execute(
-        'INSERT INTO access_rules (name, source_type, source_value, application_id, status) VALUES (?, ?, ?, ?, ?)',
-        [name, sourceType, sourceValue, appId, baseStatus]
+        'INSERT INTO access_rules (name, source_type, source_value, application_id, status, expire_hours) VALUES (?, ?, ?, ?, ?, ?)',
+        [name, sourceType, sourceValue, appId, baseStatus, parsedExpireHours]
       );
-      const [created] = await connection.execute(`${RULE_SELECT} WHERE r.id = ?`, [result.insertId]);
+      const [created] = await connection.execute(`${RULE_SELECT_FULL} WHERE r.id = ?`, [result.insertId]);
       if (created.length) {
         audit(req.session && req.session.user, 'create_access_rule', ruleAuditDetails(created[0]));
       }
@@ -256,19 +222,30 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
 
   router.post('/access-rules/:id/enable', requireAuth, async (req, res) => {
     const id = parseInt(req.params.id, 10);
+    const position = String(req.body && req.body.position || 'first').toLowerCase();
+    const insertAction = position === 'last' ? '-A' : '-I';
+    const enablePosition = position === 'last' ? 'last' : 'first';
     if (!id) return res.status(400).json({ success: false, error: 'Invalid rule id' });
 
     let connection;
     try {
       connection = await mysql.createConnection(dbConfig);
-      const [rows] = await connection.execute(`${RULE_SELECT} WHERE r.id = ?`, [id]);
+      const [rows] = await connection.execute(`${RULE_SELECT_FULL} WHERE r.id = ?`, [id]);
       if (!rows.length) return res.status(404).json({ success: false, error: 'Rule not found' });
 
       const rule = rows[0];
-      await applyRuleIptables('-I', connection, rule);
+      const deleteArgLists = await applyRuleIptables(insertAction, connection, rule);
 
       const newStatus = rule.status >= 2 ? 3 : 1;
-      await connection.execute('UPDATE access_rules SET status = ?, enabled_at = NOW() WHERE id = ?', [newStatus, id]);
+      await connection.execute(
+        'UPDATE access_rules SET status = ?, enabled_at = NOW(), enable_position = ? WHERE id = ?',
+        [newStatus, enablePosition, id]
+      );
+
+      if (rule.expire_hours != null && rule.expire_hours > 0) {
+        scheduleExpiry(id, rule.expire_hours, deleteArgLists);
+      }
+
       audit(req.session && req.session.user, 'enable_access_rule', ruleAuditDetails({ ...rule, status: newStatus }));
       res.json({ success: true });
     } catch (error) {
@@ -286,14 +263,11 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
     let connection;
     try {
       connection = await mysql.createConnection(dbConfig);
-      const [rows] = await connection.execute(`${RULE_SELECT} WHERE r.id = ?`, [id]);
+      const [rows] = await connection.execute(`${RULE_SELECT_FULL} WHERE r.id = ?`, [id]);
       if (!rows.length) return res.status(404).json({ success: false, error: 'Rule not found' });
 
       const rule = rows[0];
-      await applyRuleIptables('-D', connection, rule);
-
-      const newStatus = rule.status >= 2 ? 2 : 0;
-      await connection.execute('UPDATE access_rules SET status = ? WHERE id = ?', [newStatus, id]);
+      const newStatus = await disableRule(connection, rule, id);
       audit(req.session && req.session.user, 'disable_access_rule', ruleAuditDetails({ ...rule, status: newStatus }));
       res.json({ success: true });
     } catch (error) {
@@ -311,13 +285,14 @@ function createAccessRuleRoutes({ mysql, dbConfig, run, requireAuth }) {
     let connection;
     try {
       connection = await mysql.createConnection(dbConfig);
-      const [rows] = await connection.execute(`${RULE_SELECT} WHERE r.id = ?`, [id]);
+      const [rows] = await connection.execute(`${RULE_SELECT_FULL} WHERE r.id = ?`, [id]);
       if (!rows.length) return res.status(404).json({ success: false, error: 'Rule not found' });
 
       const rule = rows[0];
+      cancelScheduledExpiry(id);
       if ((rule.status % 2) === 1) {
         try {
-          await applyRuleIptables('-D', connection, rule);
+          runDeleteCommands(await buildDeleteArgLists(connection, rule));
         } catch (e) {
           console.error('Error removing iptables rules before delete:', e.message);
         }

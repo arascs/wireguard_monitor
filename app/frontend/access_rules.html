@@ -125,11 +125,17 @@
             margin-top: 16px;
         }
 
-        .toolbar {
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-            margin-bottom: 8px;
+        .expire-hours-row {
+            display: none;
+            margin-top: 8px;
+        }
+
+        .expire-hours-row.open {
+            display: block;
+        }
+
+        .expire-hours-row input {
+            width: 120px;
         }
     </style>
 </head>
@@ -149,6 +155,7 @@
                     <th>Source</th>
                     <th>Destination</th>
                     <th>Action</th>
+                    <th>Expires</th>
                     <th>Status</th>
                     <th>Toggle</th>
                     <th>Actions</th>
@@ -173,7 +180,6 @@
                         <option value="site">Site</option>
                         <option value="device">Device</option>
                         <option value="interface">Interface</option>
-                        <option value="ip">IP</option>
                     </select>
                 </div>
                 <div class="form-group" id="rule-source-site-group">
@@ -188,10 +194,6 @@
                     <label for="rule-interface-name">Interface</label>
                     <select id="rule-interface-name"></select>
                 </div>
-                <div class="form-group" id="rule-source-ip-group" style="display:none;">
-                    <label for="rule-source-ip">Source IP</label>
-                    <input type="text" id="rule-source-ip">
-                </div>
                 <div class="form-group">
                     <label for="rule-application-id">Destination application</label>
                     <select id="rule-application-id" required></select>
@@ -203,11 +205,33 @@
                         <option value="block">block</option>
                     </select>
                 </div>
+                <div class="form-group">
+                    <label>Expiration</label>
+                    <label style="font-weight:normal;display:flex;align-items:center;gap:8px;">
+                        <input type="checkbox" id="rule-set-expire">
+                        Set expiration (hours after enable)
+                    </label>
+                    <div class="expire-hours-row" id="rule-expire-hours-row">
+                        <input type="number" id="rule-expire-hours" min="1" max="8760" placeholder="Hours">
+                    </div>
+                </div>
                 <div class="modal-actions">
                     <button type="button" id="create-rule-cancel">Cancel</button>
                     <button type="submit">Create</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <div id="enable-rule-modal" class="modal">
+        <div class="modal-box">
+            <h3>Enable rule</h3>
+            <p style="margin:0 0 16px;font-size:0.9rem;color:#555;">Choose where to insert iptables rules:</p>
+            <div class="modal-actions" style="justify-content:stretch;">
+                <button type="button" id="enable-rule-first" style="flex:1;">First (-I)</button>
+                <button type="button" id="enable-rule-last" style="flex:1;">Last (-A)</button>
+                <button type="button" id="enable-rule-cancel">Cancel</button>
+            </div>
         </div>
     </div>
 

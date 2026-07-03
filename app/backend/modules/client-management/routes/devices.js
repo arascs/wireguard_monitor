@@ -570,14 +570,21 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
     if (!id || isNaN(id)) {
       return res.status(400).json({ success: false, error: 'Invalid device ID' });
     }
-    if (!expireDate || isNaN(expireDate)) {
-      return res.status(400).json({ success: false, error: 'Invalid expire date' });
-    }
-    const expireEpoch = parseInt(expireDate, 10);
 
     let connection;
     try {
       connection = await mysql.createConnection(dbConfig);
+      if (expireDate == null || expireDate === '') {
+        await connection.execute(
+          'UPDATE devices SET expire_date = NULL WHERE id = ?',
+          [id]
+        );
+        return res.json({ success: true, expire_date: null });
+      }
+      if (isNaN(expireDate)) {
+        return res.status(400).json({ success: false, error: 'Invalid expire date' });
+      }
+      const expireEpoch = parseInt(expireDate, 10);
       await connection.execute(
         'UPDATE devices SET expire_date = ? WHERE id = ?',
         [expireEpoch, id]

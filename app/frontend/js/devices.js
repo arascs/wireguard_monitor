@@ -1,6 +1,7 @@
 let allApprovedDevices = [];
 let securityProfiles = [];
 let profileMeta = { labels: {}, checksByOs: { linux: [], windows: [] } };
+let pendingEditDeviceId = null;
 
 const PROFILE_ICON_EDIT = '<svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>';
 const PROFILE_ICON_DELETE = '<svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/></svg>';
@@ -19,15 +20,6 @@ async function loadSecurityProfiles() {
     const data = await res.json();
     if (data.success) securityProfiles = data.profiles || [];
   } catch (_) {}
-}
-
-function summarizeChecks(checks) {
-  const keys = Object.keys(checks || {});
-  if (!keys.length) return 'None';
-  return keys.map((k) => {
-    if (k === 'kernel') return `kernel > ${checks.kernel}`;
-    return profileMeta.labels[k] || k;
-  }).join(', ');
 }
 
 function renderChecksForm(os, checks) {
@@ -78,7 +70,6 @@ function renderProfilesTable() {
     tr.innerHTML = `
       <td>${p.name}</td>
       <td>${p.os_type}</td>
-      <td class="checks-summary">${summarizeChecks(p.checks)}</td>
       <td>
         <button class="btn-icon" title="Edit" data-action="edit" data-id="${p.id}">${PROFILE_ICON_EDIT}</button>
         <button class="btn-icon" title="Delete" data-action="delete" data-id="${p.id}">${PROFILE_ICON_DELETE}</button>
@@ -237,8 +228,7 @@ function renderApprovedTable() {
     } else {
       actions += `<button class="btn-enable btn-icon" title="Enable" onclick="enableDevice(${device.id})"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M10.97 4.97a.235.235 0 0 0-.02.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-1.071-1.05z"/></svg></button>`;
     }
-    actions += `<button class="btn-edit-profile btn-icon" title="Security profile" onclick="promptEditProfile(${device.id}, '${device.os || ''}', ${device.security_profile_id || 'null'})"><svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/></svg></button>`;
-    actions += `<button class="btn-edit-expire btn-icon" title="Edit Expire" onclick="promptEditExpire(${device.id}, ${device.expire_date || 'null'})"><svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg></button>`;
+    actions += `<button class="btn-edit-device btn-icon" title="Edit" data-id="${device.id}">${PROFILE_ICON_EDIT}</button>`;
     actions += `<button class="btn-delete btn-icon" title="Delete" onclick="deleteDevice(${device.id})"><svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/></svg></button>`;
 
     const profileLabel = device.security_profile_name || 'Basic';
@@ -255,6 +245,7 @@ function renderApprovedTable() {
       <td>${actions}</td>
     `;
     tr.querySelector('.btn-view-details').addEventListener('click', () => openDeviceDetail(device.id));
+    tr.querySelector('.btn-edit-device')?.addEventListener('click', () => openDeviceEditModal(device.id));
     tbody.appendChild(tr);
   });
 }
@@ -474,67 +465,61 @@ async function disableDevice(id) {
   }
 }
 
-function promptEditExpire(id, currentEpoch) {
-  const currentDate = currentEpoch ? new Date(currentEpoch * 1000).toISOString().split('T')[0] : '';
-  const newDate = prompt('Enter new expiration date (YYYY-MM-DD):', currentDate);
-  if (!newDate) return;
-  const epoch = Math.floor(new Date(newDate).getTime() / 1000);
-  if (isNaN(epoch)) {
-    alert('Invalid date');
-    return;
-  }
-  editExpire(id, epoch);
+function openDeviceEditModal(deviceId) {
+  const device = allApprovedDevices.find((d) => d.id === deviceId);
+  if (!device) return;
+  pendingEditDeviceId = deviceId;
+  document.getElementById('device-edit-title').textContent =
+    `Edit — ${device.username} / ${device.device_name}`;
+  const profileSelect = document.getElementById('device-edit-profile');
+  profileSelect.innerHTML = profileOptionsHtml(device.os || 'linux', device.security_profile_id);
+  const expireInput = document.getElementById('device-edit-expire');
+  expireInput.value = device.expire_date
+    ? new Date(device.expire_date * 1000).toISOString().split('T')[0]
+    : '';
+  document.getElementById('device-edit-modal').classList.add('open');
 }
 
-async function editExpire(id, epoch) {
+function closeDeviceEditModal() {
+  pendingEditDeviceId = null;
+  document.getElementById('device-edit-modal')?.classList.remove('open');
+}
+
+async function saveDeviceEdit(securityProfileId, expireDateStr) {
+  const id = pendingEditDeviceId;
+  if (!id) return;
+
   try {
-    const res = await fetch(`/api/devices/${id}/expire-date`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ expireDate: epoch })
-    });
-    const data = await res.json();
-    if (data.success) {
-      alert('Expiration updated');
-      loadApprovedDevices();
-    } else {
-      alert(data.error || 'Failed to update expiration');
-    }
-  } catch (e) {
-    alert(e.message || 'Error updating expiration');
-  }
-}
-
-function promptEditProfile(id, os, currentProfileId) {
-  const list = profilesForOs(os);
-  if (!list.length) {
-    alert('No security profiles for this OS. Create one in the Security Profiles tab.');
-    return;
-  }
-  const options = ['0: Basic (default)'].concat(list.map((p) => `${p.id}: ${p.name}`));
-  const msg = `Select security profile:\n${options.join('\n')}\n\nEnter profile ID (0 for Basic):`;
-  const input = prompt(msg, currentProfileId || '0');
-  if (input === null) return;
-  const profileId = input.trim() === '' || input.trim() === '0' ? '' : input.trim();
-  updateDeviceProfile(id, profileId);
-}
-
-async function updateDeviceProfile(id, securityProfileId) {
-  try {
-    const res = await fetch(`/api/devices/${id}/security-profile`, {
+    const profileRes = await fetch(`/api/devices/${id}/security-profile`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ securityProfileId: securityProfileId || null })
     });
-    const data = await res.json();
-    if (data.success) {
-      alert('Security profile updated');
-      loadApprovedDevices();
-    } else {
-      alert(data.error || 'Failed to update profile');
+    const profileData = await profileRes.json();
+    if (!profileData.success) {
+      alert(profileData.error || 'Failed to update security profile');
+      return;
     }
+
+    const expireBody = expireDateStr
+      ? { expireDate: Math.floor(new Date(expireDateStr).getTime() / 1000) }
+      : { expireDate: null };
+
+    const expireRes = await fetch(`/api/devices/${id}/expire-date`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(expireBody)
+    });
+    const expireData = await expireRes.json();
+    if (!expireData.success) {
+      alert(expireData.error || 'Failed to update expiration');
+      return;
+    }
+
+    closeDeviceEditModal();
+    loadApprovedDevices();
   } catch (e) {
-    alert(e.message || 'Error updating profile');
+    alert(e.message || 'Error saving device');
   }
 }
 
@@ -615,6 +600,17 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('device-detail-modal-close')?.addEventListener('click', closeDeviceDetailModal);
   document.getElementById('device-detail-modal')?.addEventListener('click', (e) => {
     if (e.target.id === 'device-detail-modal') closeDeviceDetailModal();
+  });
+
+  document.getElementById('device-edit-cancel')?.addEventListener('click', closeDeviceEditModal);
+  document.getElementById('device-edit-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'device-edit-modal') closeDeviceEditModal();
+  });
+  document.getElementById('device-edit-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const securityProfileId = document.getElementById('device-edit-profile')?.value || '';
+    const expireDateStr = document.getElementById('device-edit-expire')?.value || '';
+    saveDeviceEdit(securityProfileId, expireDateStr);
   });
 
   const tabApproved = document.getElementById('tab-approved');

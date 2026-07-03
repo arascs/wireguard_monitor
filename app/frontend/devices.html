@@ -367,11 +367,6 @@
             border-radius: 4px;
         }
 
-        .checks-summary {
-            font-size: 0.85rem;
-            color: #555;
-        }
-
         .profile-modal-box {
             width: min(520px, 94vw);
             padding: 28px 32px;
@@ -499,7 +494,6 @@
                     <tr>
                         <th>Name</th>
                         <th>OS</th>
-                        <th>Checks</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -536,6 +530,26 @@
                 <div class="profile-modal-actions">
                     <button type="button" id="profile-cancel">Cancel</button>
                     <button type="submit" id="profile-save">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="device-edit-modal" class="modal">
+        <div class="profile-modal-box">
+            <h3 id="device-edit-title">Edit device</h3>
+            <form id="device-edit-form">
+                <div class="profile-form-group">
+                    <label for="device-edit-profile">Security profile</label>
+                    <select id="device-edit-profile"></select>
+                </div>
+                <div class="profile-form-group">
+                    <label for="device-edit-expire">Expire date</label>
+                    <input type="date" id="device-edit-expire">
+                </div>
+                <div class="profile-modal-actions">
+                    <button type="button" id="device-edit-cancel">Cancel</button>
+                    <button type="submit">Save</button>
                 </div>
             </form>
         </div>
