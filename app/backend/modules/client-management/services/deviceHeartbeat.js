@@ -7,7 +7,16 @@ let sub = null;
 let started = false;
 let onExpiredDeviceKey = null;
 
-const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+function getRedisUrl() {
+  const raw = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+  const password = process.env.REDIS_PASSWORD;
+  if (!password) return raw;
+  const u = new URL(raw);
+  if (!u.password) u.password = password;
+  return u.toString();
+}
+
+const redisUrl = getRedisUrl();
 
 function createDeviceKey(username, machineId) {
   return `${username}:${String(machineId || '').trim()}`;

@@ -7,7 +7,8 @@ const defaultSettings = {
   physicalInterface: '',
   centralUrl: '',
   metricsPushIntervalMs: 30000,
-  allowedLanRanges: '192.168.220.0/24'
+  allowedLanRanges: '192.168.220.0/24',
+  backupIntervalDays: 7
 };
 
 function loadGlobalSettings() {

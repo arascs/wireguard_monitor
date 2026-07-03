@@ -49,7 +49,9 @@ const { checkAndDisconnectIfExpired } = require('./modules/system-config/service
 ensureSecrets();
 
 if (!fs.existsSync(BACKUP_DIR)) {
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  fs.mkdirSync(BACKUP_DIR, { recursive: true, mode: 0o700 });
+} else {
+  fs.chmodSync(BACKUP_DIR, 0o700);
 }
 
 async function startServer() {

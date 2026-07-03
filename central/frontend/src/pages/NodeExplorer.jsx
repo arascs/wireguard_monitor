@@ -22,7 +22,8 @@ const SERVICE_KEYS = [
   'wg_handshake_monitor',
   'services_monitor',
   'mysql',
-  'vector'
+  'vector',
+  'redis'
 ];
 
 function wgPairLabel(online, total) {

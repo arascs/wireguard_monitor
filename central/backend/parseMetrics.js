@@ -100,7 +100,8 @@ function parseMetrics(text) {
     'wg_handshake_monitor',
     'services_monitor',
     'mysql',
-    'vector'
+    'vector',
+    'redis'
   ]) {
     const v = getLabeled(lines, 'wireguard_monitor_service_active', { service: svc });
     if (v !== undefined) services[svc] = v >= 1 ? 1 : 0;

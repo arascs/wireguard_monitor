@@ -8,6 +8,7 @@ const {
 } = require('../../../common/settings');
 const { SETTINGS_FILE } = require('../../../common/paths');
 const { scheduleCentralSync } = require('../../monitoring');
+const { scheduleBackup } = require('../../backup');
 const { normalizeBaseUrl } = require('../../monitoring/sync/centralSync');
 
 module.exports = function createSettingsRoutes() {
@@ -50,6 +51,13 @@ module.exports = function createSettingsRoutes() {
         return res.status(400).json({ success: false, error: 'Invalid Allowed LAN range' });
       }
 
+      const backupIntervalDays = req.body.backupIntervalDays !== undefined
+        ? parseInt(req.body.backupIntervalDays, 10)
+        : currentSettings.backupIntervalDays;
+      if (!Number.isFinite(backupIntervalDays) || backupIntervalDays < 1) {
+        return res.status(400).json({ success: false, error: 'backupIntervalDays must be >= 1' });
+      }
+
       const newSettings = {
         peerDisableHours: req.body.peerDisableHours ? parseInt(req.body.peerDisableHours, 10) : currentSettings.peerDisableHours,
         keyRotationTimeoutSeconds: req.body.keyRotationTimeoutSeconds !== undefined
@@ -57,11 +65,13 @@ module.exports = function createSettingsRoutes() {
         physicalInterface,
         centralUrl,
         metricsPushIntervalMs,
-        allowedLanRanges: cidrs.join(', ')
+        allowedLanRanges: cidrs.join(', '),
+        backupIntervalDays
       };
 
       fs.writeFileSync(SETTINGS_FILE, JSON.stringify(newSettings, null, 2), 'utf8');
       scheduleCentralSync();
+      scheduleBackup();
 
       try {
         const admin = req.session && req.session.user ? req.session.user : 'unknown';

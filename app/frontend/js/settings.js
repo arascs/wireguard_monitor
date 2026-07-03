@@ -15,6 +15,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('metricsPushIntervalMs').value =
           s.metricsPushIntervalMs !== undefined ? s.metricsPushIntervalMs : 30000;
         document.getElementById('allowedLanRanges').value = s.allowedLanRanges || '192.168.220.0/24';
+        document.getElementById('backupIntervalDays').value =
+          s.backupIntervalDays !== undefined ? s.backupIntervalDays : 7;
       } else {
         alert('Failed to load settings: ' + (data.error || 'Unknown error'));
       }
@@ -32,7 +34,8 @@ document.addEventListener('DOMContentLoaded', () => {
       physicalInterface: document.getElementById('physicalInterface').value.trim(),
       centralUrl: document.getElementById('centralUrl').value.trim(),
       metricsPushIntervalMs: document.getElementById('metricsPushIntervalMs').value,
-      allowedLanRanges: document.getElementById('allowedLanRanges').value.trim()
+      allowedLanRanges: document.getElementById('allowedLanRanges').value.trim(),
+      backupIntervalDays: document.getElementById('backupIntervalDays').value
     };
 
     fetch('/api/settings', {

@@ -111,9 +111,13 @@ for endpoint in "${!SITE_ONLINE_ENDPOINTS[@]}"; do
   echo "wireguard_site_endpoint_info{interface=\"$iface\",endpoint=\"$endpoint\",online=\"1\"} 1"
 done
 
-# --- 6. Trạng thái systemd (monitor services + mysql) ---
-for svc in endpoint_monitor wg_handshake_monitor services_monitor mysql vector; do
-  av="$(systemctl is-active "$svc" 2>/dev/null || echo inactive)"
+# --- 6. Trạng thái systemd (monitor services + mysql + redis) ---
+for svc in endpoint_monitor wg_handshake_monitor services_monitor mysql vector redis; do
+  if [ "$svc" = "redis" ]; then
+    av="$(systemctl is-active redis-server 2>/dev/null || systemctl is-active redis 2>/dev/null || echo inactive)"
+  else
+    av="$(systemctl is-active "$svc" 2>/dev/null || echo inactive)"
+  fi
   v=0
   [ "$av" = "active" ] && v=1
   echo "wireguard_monitor_service_active{service=\"$svc\"} $v"
