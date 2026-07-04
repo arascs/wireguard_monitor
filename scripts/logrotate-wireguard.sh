@@ -37,7 +37,6 @@ mapfile -t FILES < <(find "$LOG_DIR" -type f)
     size 10M
     rotate 10
     compress
-    delaycompress
     missingok
     notifempty
     copytruncate

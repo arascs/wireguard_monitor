@@ -133,6 +133,11 @@ module.exports = function createInterfaceRoutes() {
         return res.status(404).json({ success: false, error: 'Interface config file not found' });
       }
 
+      const config = loadInterfaceConfig(interfaceName, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
+      if (config.peers.length > 0) {
+        return res.status(409).json({ success: false, error: 'Delete peers first' });
+      }
+
       const ifaceSummary = parseInterfaceSummary(configFile);
 
       try {

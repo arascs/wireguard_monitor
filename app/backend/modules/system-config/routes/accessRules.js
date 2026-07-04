@@ -1,12 +1,13 @@
 const express = require('express');
 const { logAction } = require('../../logging/auditLogger');
-const { tryRun, run } = require('../../../common/utils');
 const {
   applyRuleIptables,
   buildDeleteArgLists,
   runDeleteCommands,
-  deleteCommandsShell
-} = require('../services/accessRuleIptables');
+  cancelScheduledExpiry,
+  scheduleExpiry,
+  deleteAccessRule
+} = require('../services/accessRuleService');
 
 function createAccessRuleRoutes({ mysql, dbConfig, requireAuth }) {
   const router = express.Router();
@@ -49,23 +50,6 @@ function createAccessRuleRoutes({ mysql, dbConfig, requireAuth }) {
     try {
       logAction(admin || 'unknown', action, details);
     } catch (_) { /* ignore */ }
-  }
-
-  function cancelScheduledExpiry(ruleId) {
-    const unit = `wg-access-rule-expire-${ruleId}`;
-    tryRun('systemctl', ['stop', `${unit}.timer`]);
-    tryRun('systemctl', ['stop', `${unit}.service`]);
-    tryRun('systemctl', ['reset-failed', `${unit}.service`]);
-  }
-
-  function scheduleExpiry(ruleId, hours, deleteArgLists) {
-    if (!deleteArgLists.length) return;
-    cancelScheduledExpiry(ruleId);
-    run('systemd-run', [
-      `--on-active=${hours}h`,
-      `--unit=wg-access-rule-expire-${ruleId}`,
-      'bash', '-c', deleteCommandsShell(deleteArgLists)
-    ]);
   }
 
   async function disableRule(connection, rule, ruleId) {
@@ -289,16 +273,7 @@ function createAccessRuleRoutes({ mysql, dbConfig, requireAuth }) {
       if (!rows.length) return res.status(404).json({ success: false, error: 'Rule not found' });
 
       const rule = rows[0];
-      cancelScheduledExpiry(id);
-      if ((rule.status % 2) === 1) {
-        try {
-          runDeleteCommands(await buildDeleteArgLists(connection, rule));
-        } catch (e) {
-          console.error('Error removing iptables rules before delete:', e.message);
-        }
-      }
-
-      await connection.execute('DELETE FROM access_rules WHERE id = ?', [id]);
+      await deleteAccessRule(connection, rule);
       audit(req.session && req.session.user, 'delete_access_rule', ruleAuditDetails(rule));
       res.json({ success: true });
     } catch (error) {

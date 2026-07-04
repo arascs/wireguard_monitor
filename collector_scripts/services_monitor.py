@@ -10,6 +10,8 @@ from datetime import datetime
 import pymysql
 import ipaddress
 
+os.umask(0o077)
+
 INTERVAL = 5
 LOG_FILE = "/etc/wireguard/logs/vpn_monitor.log"
 STATUS_FILE = "/dev/shm/vpn_live_status.json"
@@ -40,7 +42,7 @@ class VPNMonitor:
         self.last_load_time = 0
 
         if not os.path.exists(HISTORY_DIR):
-            os.makedirs(HISTORY_DIR, exist_ok=True)
+            os.makedirs(HISTORY_DIR, exist_ok=True, mode=0o700)
 
     def load_config(self):
         try:

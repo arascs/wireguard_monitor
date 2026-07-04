@@ -59,7 +59,7 @@ func loadSitesFromDB(db *sql.DB) ([]Peer, error) {
 }
 
 func writeLog(event Event) {
-	f, err := os.OpenFile("/etc/wireguard/logs/endpoint_events.json", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile("/etc/wireguard/logs/endpoint_events.json", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		log.Println(err)
 		return

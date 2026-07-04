@@ -22,6 +22,7 @@ const {
 } = require('../../../common/wireguardConfig');
 const { touch: redisHeartbeatTouch } = require('../services/deviceHeartbeat');
 const { hydrateRotationKeysFromDb } = require('../../system-config/services/rotationKeys');
+const { deleteAccessRulesForDeviceId } = require('../../system-config/services/accessRuleService');
 
 const HANDSHAKE_ACTIVE_SEC = 180;
 
@@ -48,16 +49,12 @@ module.exports = function createConnectVpnRoutes({ authenticateToken }) {
       const now = Math.floor(Date.now() / 1000);
 
       const [userRows] = await connection.execute(
-        'SELECT expire_day, status FROM users WHERE username = ?',
+        'SELECT expire_day FROM users WHERE username = ?',
         [username]
       );
       if (userRows.length === 0) {
         await connection.end();
         return res.status(403).json({ success: false, error: 'User not found' });
-      }
-      if (parseInt(userRows[0].status, 10) === 0) {
-        await connection.end();
-        return res.status(403).json({ success: false, error: 'User account disabled' });
       }
       if (isUserExpired(userRows[0].expire_day)) {
         await connection.end();
@@ -65,7 +62,7 @@ module.exports = function createConnectVpnRoutes({ authenticateToken }) {
       }
 
       const [devices] = await connection.execute(
-        'SELECT device_name, allowed_ips, public_key, status, expire_date, `interface`, machine_id, os, security_profile_id FROM devices WHERE username = ? AND machine_id = ?',
+        'SELECT id, device_name, allowed_ips, public_key, status, expire_date, `interface`, machine_id, os, security_profile_id FROM devices WHERE username = ? AND machine_id = ?',
         [username, machineId]
       );
 
@@ -103,6 +100,7 @@ module.exports = function createConnectVpnRoutes({ authenticateToken }) {
           'UPDATE devices SET status = 0 WHERE username = ? AND machine_id = ?',
           [username, machineId]
         );
+        await deleteAccessRulesForDeviceId(c2, device.id);
         await c2.end();
         return res.status(403).json({ success: false, error: 'Device expired' });
       }

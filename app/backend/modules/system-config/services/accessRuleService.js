@@ -4,6 +4,11 @@ const { run, tryRun } = require('../../../common/utils');
 const IPTABLES_COMMENT = 'VPN access rules';
 const LOG_PREFIX = 'Blocked by VPN management: ';
 
+const RULE_SELECT_FOR_DELETE = `SELECT r.id, r.status, r.source_type, r.source_value, r.application_id,
+                a.IP AS app_ip, a.port AS app_port
+         FROM access_rules r
+         LEFT JOIN applications a ON r.application_id = a.id`;
+
 function shellQuote(arg) {
   const s = String(arg);
   if (/^[a-zA-Z0-9._/:+-]+$/.test(s)) return s;
@@ -152,9 +157,51 @@ function deleteCommandsShell(deleteArgLists) {
     .join('; ');
 }
 
+function cancelScheduledExpiry(ruleId) {
+  const unit = `wg-access-rule-expire-${ruleId}`;
+  tryRun('systemctl', ['stop', `${unit}.timer`]);
+  tryRun('systemctl', ['stop', `${unit}.service`]);
+  tryRun('systemctl', ['reset-failed', `${unit}.service`]);
+}
+
+function scheduleExpiry(ruleId, hours, deleteArgLists) {
+  if (!deleteArgLists.length) return;
+  cancelScheduledExpiry(ruleId);
+  run('systemd-run', [
+    `--on-active=${hours}h`,
+    `--unit=wg-access-rule-expire-${ruleId}`,
+    'bash', '-c', deleteCommandsShell(deleteArgLists)
+  ]);
+}
+
+async function deleteAccessRule(connection, rule) {
+  cancelScheduledExpiry(rule.id);
+  if ((rule.status % 2) === 1) {
+    try {
+      runDeleteCommands(await buildDeleteArgLists(connection, rule));
+    } catch (e) {
+      console.error('Error removing iptables rules before delete:', e.message);
+    }
+  }
+  await connection.execute('DELETE FROM access_rules WHERE id = ?', [rule.id]);
+}
+
+async function deleteAccessRulesForDeviceId(connection, deviceId) {
+  const [rows] = await connection.execute(
+    `${RULE_SELECT_FOR_DELETE} WHERE r.source_type = 'device' AND r.source_value = ?`,
+    [String(deviceId)]
+  );
+  for (const rule of rows) {
+    await deleteAccessRule(connection, rule);
+  }
+}
+
 module.exports = {
   applyRuleIptables,
   buildDeleteArgLists,
   runDeleteCommands,
-  deleteCommandsShell
+  cancelScheduledExpiry,
+  scheduleExpiry,
+  deleteAccessRule,
+  deleteAccessRulesForDeviceId
 };

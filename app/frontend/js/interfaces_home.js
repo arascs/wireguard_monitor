@@ -36,7 +36,7 @@ function renderInterfaces(items) {
             window.location.href = `/dashboard/${encodeURIComponent(iface.name)}`;
         });
         card.querySelector('.delete-btn').addEventListener('click', async () => {
-            if (confirm(`Bạn có chắc muốn xóa interface ${iface.name}?`)) {
+            if (confirm(`Are you sure you want to delete interface ${iface.name}?`)) {
                 try {
                     const response = await fetch(`/api/delete-interface/${encodeURIComponent(iface.name)}`, {
                         method: 'DELETE'
@@ -45,10 +45,10 @@ function renderInterfaces(items) {
                     if (data.success) {
                         loadInterfaces();
                     } else {
-                        alert('Lỗi: ' + (data.error || 'Không thể xóa interface'));
+                        alert('Error: ' + (data.error || 'Cannot delete interface'));
                     }
                 } catch (error) {
-                    alert('Lỗi: ' + error.message);
+                    alert('Error: ' + error.message);
                 }
             }
         });

@@ -17,15 +17,11 @@ function createAuthRoutes({ jwt, JWT_SECRET, mysql, dbConfig }) {
     try {
       connection = await mysql.createConnection(dbConfig);
       const [users] = await connection.execute(
-        'SELECT id, username, password, expire_day, status FROM users WHERE username = ?',
+        'SELECT id, username, password, expire_day FROM users WHERE username = ?',
         [username]
       );
       if (users.length === 0) {
         return res.status(401).json({ success: false, error: 'Invalid credentials' });
-      }
-
-      if (parseInt(users[0].status, 10) === 0) {
-        return res.status(403).json({ success: false, error: 'User account disabled' });
       }
 
       const match = await bcrypt.compare(password, users[0].password);

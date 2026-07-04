@@ -8,6 +8,8 @@ from datetime import datetime, timezone, timedelta
 
 import pymysql
 
+os.umask(0o077)
+
 EVENT_FILE = "/etc/wireguard/logs/endpoint_events.json"
 WIREGUARD_CONFIG_GLOB = "/etc/wireguard/*.conf"
 SETTINGS_FILE = "/opt/wireguard_monitor/app/backend/settings.json"
@@ -38,7 +40,7 @@ def get_db_conn():
 def get_file_handle(path):
     if path not in _FILE_HANDLES:
         # Đảm bảo thư mục tồn tại trước khi mở file
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.makedirs(os.path.dirname(path), exist_ok=True, mode=0o700)
         _FILE_HANDLES[path] = open(path, "a", encoding="utf-8")
     return _FILE_HANDLES[path]
 # -----------------------------------------------------------

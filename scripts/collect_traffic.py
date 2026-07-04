@@ -5,6 +5,7 @@ import os
 import sys
 from datetime import datetime, timezone
 
+os.umask(0o077)
 
 WG_DIR       = "/etc/wireguard"
 SYS_NET_DIR  = "/sys/class/net"
@@ -38,7 +39,7 @@ def load_history() -> list:
 
 
 def save_history(records: list) -> None:
-    os.makedirs(os.path.dirname(os.path.abspath(TRAFFIC_FILE)), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(TRAFFIC_FILE)), exist_ok=True, mode=0o700)
     with open(TRAFFIC_FILE, "w") as f:
         json.dump(records, f, indent=2)
 

@@ -4,6 +4,8 @@ import os
 import json
 import time
 
+os.umask(0o077)
+
 BASE_DIR = "/etc/wireguard/logs"
 MAX_LINES = 60
 
@@ -13,7 +15,7 @@ def public_key_to_log_id(pubkey):
 
 
 def ensure_dir(path):
-    os.makedirs(path, exist_ok=True)
+    os.makedirs(path, exist_ok=True, mode=0o700)
 
 
 def append_jsonl(file_path, data):

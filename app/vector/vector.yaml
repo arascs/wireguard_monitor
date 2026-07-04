@@ -78,6 +78,11 @@ sinks:
       max_events: 20
       timeout_secs: 2
 
+    buffer:
+      type: disk
+      max_size: 268435456
+      when_full: block
+
     tls:
       verify_certificate: false
       verify_hostname: false
@@ -102,6 +107,11 @@ sinks:
     batch:
       max_events: 10
       timeout_secs: 1
+
+    buffer:
+      type: disk
+      max_size: 268435456
+      when_full: block
 
     tls:
       verify_hostname: false

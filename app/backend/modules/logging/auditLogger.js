@@ -7,7 +7,8 @@ const SECURITY_FILE = path.join(LOG_DIR, 'endpoint_events.json');
 
 function ensureLogDir() {
   try {
-    fs.mkdirSync(LOG_DIR, { recursive: true });
+    fs.mkdirSync(LOG_DIR, { recursive: true, mode: 0o700 });
+    fs.chmodSync(LOG_DIR, 0o700);
   } catch (e) {
     /* ignore */
   }
@@ -22,7 +23,7 @@ function logAction(admin, action, details) {
   };
   try {
     ensureLogDir();
-    fs.appendFileSync(LOG_FILE, `${JSON.stringify(entry)}\n`);
+    fs.appendFileSync(LOG_FILE, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
   } catch (e) {
     console.error('[AUDIT] failed to write log file', e.message);
   }
@@ -41,7 +42,7 @@ function logSecurityEvent(fields) {
   };
   try {
     ensureLogDir();
-    fs.appendFileSync(SECURITY_FILE, `${JSON.stringify(entry)}\n`);
+    fs.appendFileSync(SECURITY_FILE, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
   } catch (e) {
     console.error('[SECURITY] failed to write event', e.message);
   }

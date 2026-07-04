@@ -400,7 +400,7 @@ func doConnect(s Server) {
 	k := skey(s.IP, s.Port)
 	st.mu.RLock()
 	token := st.tokens[k]
-	username := st.usernames[k]
+	//username := st.usernames[k]
 	st.mu.RUnlock()
 
 	if token == "" {
@@ -423,7 +423,7 @@ func doConnect(s Server) {
 		enrolled, err := apiCheckEnroll(s.IP, s.Port, token, st.machineID)
 		if err != nil || !enrolled {
 			prog.Hide()
-			showError(fmt.Errorf("device not enrolled or check failed"))
+			showError(fmt.Errorf("device not enrolled or something went wrong"))
 			return
 		}
 

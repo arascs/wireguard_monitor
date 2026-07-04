@@ -10,7 +10,7 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, requireAuth }) {
     try {
       connection = await mysql.createConnection(dbConfig);
       const [rows] = await connection.execute(
-        'SELECT id, username, expire_day, create_day, status FROM users ORDER BY id DESC'
+        'SELECT id, username, expire_day, create_day FROM users ORDER BY id DESC'
       );
       res.json({ success: true, users: rows });
     } catch (error) {
@@ -107,98 +107,6 @@ function createUserRoutes({ mysql, dbConfig, bcrypt, requireAuth }) {
       res.json({ success: true });
     } catch (error) {
       console.error('Error updating user:', error);
-      res.status(500).json({ success: false, error: 'Internal server error' });
-    } finally {
-      if (connection) await connection.end();
-    }
-  });
-
-  router.post('/users/:username/enable', requireAuth, async (req, res) => {
-    const { username } = req.params;
-    if (!username) {
-      return res.status(400).json({ success: false, error: 'Missing username' });
-    }
-
-    let connection;
-    try {
-      connection = await mysql.createConnection(dbConfig);
-      const [result] = await connection.execute(
-        'UPDATE users SET status = 1 WHERE username = ?',
-        [username]
-      );
-      if (!result.affectedRows) {
-        return res.status(404).json({ success: false, error: 'User not found' });
-      }
-
-      const nowEpoch = Math.floor(Date.now() / 1000);
-      const defaultExpire = nowEpoch + 90 * 24 * 60 * 60;
-      const [devices] = await connection.execute(
-        'SELECT id, expire_date FROM devices WHERE username = ?',
-        [username]
-      );
-      for (const device of devices) {
-        const cur = device.expire_date ? parseInt(device.expire_date, 10) : null;
-        const expireEpoch = (!cur || cur < nowEpoch) ? defaultExpire : cur;
-        await connection.execute(
-          'UPDATE devices SET status = 1, expire_date = ? WHERE id = ?',
-          [expireEpoch, device.id]
-        );
-      }
-
-      try {
-        const admin = req.session && req.session.user ? req.session.user : 'unknown';
-        logAction(admin, 'enable_user', { username });
-      } catch (e) { }
-
-      res.json({ success: true });
-    } catch (error) {
-      console.error('Error enabling user:', error);
-      res.status(500).json({ success: false, error: 'Internal server error' });
-    } finally {
-      if (connection) await connection.end();
-    }
-  });
-
-  router.post('/users/:username/disable', requireAuth, async (req, res) => {
-    const { username } = req.params;
-    if (!username) {
-      return res.status(400).json({ success: false, error: 'Missing username' });
-    }
-
-    let connection;
-    try {
-      connection = await mysql.createConnection(dbConfig);
-      const [result] = await connection.execute(
-        'UPDATE users SET status = 0 WHERE username = ?',
-        [username]
-      );
-      if (!result.affectedRows) {
-        return res.status(404).json({ success: false, error: 'User not found' });
-      }
-
-      const [devices] = await connection.execute(
-        'SELECT public_key, interface FROM devices WHERE username = ?',
-        [username]
-      );
-      for (const device of devices) {
-        if (device.public_key && device.interface) {
-          deletePeerFromConf(device.interface, device.public_key);
-        }
-      }
-
-      await connection.execute(
-        'UPDATE devices SET status = 0 WHERE username = ?',
-        [username]
-      );
-
-      try {
-        const admin = req.session && req.session.user ? req.session.user : 'unknown';
-        logAction(admin, 'disable_user', { username });
-      } catch (e) { }
-
-      res.json({ success: true });
-    } catch (error) {
-      console.error('Error disabling user:', error);
       res.status(500).json({ success: false, error: 'Internal server error' });
     } finally {
       if (connection) await connection.end();
