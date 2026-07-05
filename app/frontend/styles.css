@@ -249,6 +249,10 @@ p {
     border-color: rgba(134, 22, 24, 0.55);
 }
 
+input.secret-field::-ms-reveal {
+    display: none;
+}
+
 .change-pw-actions {
     display: flex;
     gap: 10px;

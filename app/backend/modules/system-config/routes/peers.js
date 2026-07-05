@@ -21,6 +21,13 @@ const {
 const { listInterfaces } = require('../services/interfaceList');
 const { hydrateRotationKeysFromDb } = require('../services/rotationKeys');
 const { loadGlobalSettings } = require('../../../common/settings');
+const { deleteAccessRulesForSiteId } = require('../services/accessRuleService');
+
+function peerForAudit(peer) {
+  if (!peer || typeof peer !== 'object') return peer;
+  const { rotationKey, ...rest } = peer;
+  return rest;
+}
 
 module.exports = function createPeerRoutes() {
   const router = express.Router();
@@ -278,7 +285,7 @@ module.exports = function createPeerRoutes() {
       wgSyncconfIfRunning(iface);
       try {
         const admin = req.session && req.session.user ? req.session.user : 'unknown';
-        logAction(admin, 'create_peer', { peer });
+        logAction(admin, 'create_peer', { peer: peerForAudit(peer) });
       } catch (e) { /* ignore */ }
       res.json({ success: true, peer });
     } catch (error) {
@@ -342,7 +349,7 @@ module.exports = function createPeerRoutes() {
 
       try {
         const admin = req.session && req.session.user ? req.session.user : 'unknown';
-        logAction(admin, 'edit_peer', { oldConfig: oldPeer, newConfig: peer });
+        logAction(admin, 'edit_peer', { oldConfig: peerForAudit(oldPeer), newConfig: peerForAudit(peer) });
       } catch (e) {
         console.error('Audit log error:', e.message);
       }
@@ -377,6 +384,10 @@ module.exports = function createPeerRoutes() {
 
       try {
         const conn = await mysql.createConnection(dbConfig);
+        const [siteRows] = await conn.execute('SELECT id FROM sites WHERE site_pubkey = ?', [publicKey]);
+        for (const site of siteRows) {
+          await deleteAccessRulesForSiteId(conn, site.id);
+        }
         await conn.execute('DELETE FROM sites WHERE site_pubkey = ?', [publicKey]);
         await conn.end();
       } catch (dbErr) {
@@ -386,7 +397,7 @@ module.exports = function createPeerRoutes() {
       wgSyncconfIfRunning(iface);
       try {
         const admin = req.session && req.session.user ? req.session.user : 'unknown';
-        logAction(admin, 'delete_peer', { peer });
+        logAction(admin, 'delete_peer', { peer: peerForAudit(peer) });
       } catch (e) { /* ignore */ }
       res.json({ success: true });
     } catch (error) {
@@ -426,7 +437,7 @@ module.exports = function createPeerRoutes() {
       wgSyncconfIfRunning(iface);
       try {
         const admin = req.session && req.session.user ? req.session.user : 'unknown';
-        logAction(admin, 'enable_peer', { peer: config.peers[idx] });
+        logAction(admin, 'enable_peer', { peer: peerForAudit(config.peers[idx]) });
       } catch (e) { /* ignore */ }
       res.json({ success: true, peer: config.peers[idx] });
     } catch (error) {
@@ -458,7 +469,7 @@ module.exports = function createPeerRoutes() {
       wgSyncconfIfRunning(iface);
       try {
         const admin = req.session && req.session.user ? req.session.user : 'unknown';
-        logAction(admin, 'disable_peer', { peer: config.peers[idx] });
+        logAction(admin, 'disable_peer', { peer: peerForAudit(config.peers[idx]) });
       } catch (e) { /* ignore */ }
       res.json({ success: true, peer: config.peers[idx] });
     } catch (error) {

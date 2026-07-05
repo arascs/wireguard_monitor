@@ -452,7 +452,7 @@ function setupEditPeerModal() {
             document.getElementById('edit-peer-endpoint').value = peerData.endpoint || '';
             document.getElementById('edit-peer-allowedIPs').value = peerData.allowedIPs || '';
             document.getElementById('edit-peer-keepalive').value = peerData.persistentKeepalive || '';
-            document.getElementById('edit-peer-rotationKey').value = peerData.rotationKey || '';
+            document.getElementById('edit-peer-rotationKey').value = '';
             modal.style.display = 'block';
         } catch (e) {
             console.error(e);
@@ -473,9 +473,10 @@ function setupEditPeerModal() {
             publicKey: document.getElementById('edit-peer-publicKey').value,
             endpoint: document.getElementById('edit-peer-endpoint').value,
             allowedIPs: document.getElementById('edit-peer-allowedIPs').value,
-            persistentKeepalive: document.getElementById('edit-peer-keepalive').value,
-            rotationKey: document.getElementById('edit-peer-rotationKey').value
+            persistentKeepalive: document.getElementById('edit-peer-keepalive').value
         };
+        const rotationKey = document.getElementById('edit-peer-rotationKey').value.trim();
+        if (rotationKey) payload.rotationKey = rotationKey;
         try {
             const path = `/api/interfaces/${encodeURIComponent(ids.interfaceId)}/peers/${encodeURIComponent(ids.publicKey)}`;
             const res = await fetch(path, {

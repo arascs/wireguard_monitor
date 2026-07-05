@@ -9,6 +9,7 @@ const {
   formatIssues
 } = require('../services/securityChecks');
 const { getProfileById, resolveDeviceProfile } = require('../services/securityProfiles');
+const { deleteAccessRulesForDeviceId } = require('../../system-config/services/accessRuleService');
 
 function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateToken }) {
   const router = express.Router();
@@ -209,6 +210,7 @@ function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateTok
         }
       }
 
+      await deleteAccessRulesForDeviceId(connection, id);
       await connection.execute(
         'DELETE FROM devices WHERE id = ?',
         [id]

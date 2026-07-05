@@ -1,6 +1,6 @@
 const { createClient } = require('redis');
 
-const HEARTBEAT_TTL_SECONDS = parseInt(process.env.DEVICE_HEARTBEAT_TTL_SECONDS || '70', 10);
+const HEARTBEAT_TTL_SECONDS = parseInt(process.env.DEVICE_HEARTBEAT_TTL_SECONDS || '120', 10);
 
 let pub = null;
 let sub = null;

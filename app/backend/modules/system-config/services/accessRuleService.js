@@ -186,14 +186,26 @@ async function deleteAccessRule(connection, rule) {
   await connection.execute('DELETE FROM access_rules WHERE id = ?', [rule.id]);
 }
 
-async function deleteAccessRulesForDeviceId(connection, deviceId) {
+async function deleteAccessRulesForSource(connection, sourceType, sourceValue) {
   const [rows] = await connection.execute(
-    `${RULE_SELECT_FOR_DELETE} WHERE r.source_type = 'device' AND r.source_value = ?`,
-    [String(deviceId)]
+    `${RULE_SELECT_FOR_DELETE} WHERE r.source_type = ? AND r.source_value = ?`,
+    [sourceType, String(sourceValue)]
   );
   for (const rule of rows) {
     await deleteAccessRule(connection, rule);
   }
+}
+
+async function deleteAccessRulesForDeviceId(connection, deviceId) {
+  return deleteAccessRulesForSource(connection, 'device', deviceId);
+}
+
+async function deleteAccessRulesForSiteId(connection, siteId) {
+  return deleteAccessRulesForSource(connection, 'site', siteId);
+}
+
+async function deleteAccessRulesForInterface(connection, interfaceName) {
+  return deleteAccessRulesForSource(connection, 'interface', interfaceName);
 }
 
 module.exports = {
@@ -203,5 +215,7 @@ module.exports = {
   cancelScheduledExpiry,
   scheduleExpiry,
   deleteAccessRule,
-  deleteAccessRulesForDeviceId
+  deleteAccessRulesForDeviceId,
+  deleteAccessRulesForSiteId,
+  deleteAccessRulesForInterface
 };

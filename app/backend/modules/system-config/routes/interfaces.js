@@ -1,7 +1,9 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const mysql = require('mysql2/promise');
 const { run } = require('../../../common/utils');
+const { dbConfig } = require('../../../common/db');
 const { logAction } = require('../../logging/auditLogger');
 const { DEFAULT_KEY_EXPIRY_DAYS } = require('../../../common/paths');
 const {
@@ -14,6 +16,7 @@ const {
 } = require('../../../common/wireguardConfig');
 const { listInterfaces, parseInterfaceSummary } = require('../services/interfaceList');
 const { hydrateRotationKeysFromDb, getRemainingDays } = require('../services/rotationKeys');
+const { deleteAccessRulesForInterface } = require('../services/accessRuleService');
 
 module.exports = function createInterfaceRoutes() {
   const router = express.Router();
@@ -124,7 +127,8 @@ module.exports = function createInterfaceRoutes() {
     }
   });
 
-  router.delete('/delete-interface/:name', (req, res) => {
+  router.delete('/delete-interface/:name', async (req, res) => {
+    let connection;
     try {
       const interfaceName = decodeURIComponent(req.params.name);
       const configFile = path.join(CONFIG_DIR, `${interfaceName}.conf`);
@@ -139,6 +143,13 @@ module.exports = function createInterfaceRoutes() {
       }
 
       const ifaceSummary = parseInterfaceSummary(configFile);
+
+      try {
+        connection = await mysql.createConnection(dbConfig);
+        await deleteAccessRulesForInterface(connection, interfaceName);
+      } catch (dbErr) {
+        console.error('Error deleting access rules for interface:', dbErr.message);
+      }
 
       try {
         const status = run('wg', ['show', 'interfaces']);
@@ -163,6 +174,8 @@ module.exports = function createInterfaceRoutes() {
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
+    } finally {
+      if (connection) await connection.end();
     }
   });
 

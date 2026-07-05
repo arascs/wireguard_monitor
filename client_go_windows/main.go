@@ -376,7 +376,7 @@ func doConnect(s Server) {
 	k := skey(s.IP, s.Port)
 	st.mu.RLock()
 	token := st.tokens[k]
-	username := st.usernames[k]
+	//username := st.usernames[k]
 	st.mu.RUnlock()
 
 	if token == "" {

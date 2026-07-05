@@ -28,6 +28,8 @@ echo "net.netfilter.nf_conntrack_acct=1" >> /etc/sysctl.d/99-wireguard-monitor.c
 echo "options nf_conntrack acct=1" > /etc/modprobe.d/nf_conntrack.conf
 modprobe -r nf_conntrack 2>/dev/null || true
 modprobe nf_conntrack
+modprobe wireguard
+echo module wireguard +p > /sys/kernel/debug/dynamic_debug/control
 
 mkdir -p "$WG_DIR" "$LOG_DIR" "$LOG_DIR/vpn_history" "$BACKUP_DIR" "$APP_DIR"
 cp -r "$ROOT_DIR/app" "$APP_DIR/"
