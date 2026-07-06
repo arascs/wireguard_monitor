@@ -2,7 +2,7 @@ const express = require('express');
 const { loginLimiter } = require('../../../common/security');
 const { isUserExpired } = require('../../../common/utils');
 
-module.exports = function createAdminAuthRoutes({ mysql, dbConfig, bcrypt }) {
+module.exports = function createAdminAuthRoutes({ mysql, dbConfig, bcrypt, requireAuth }) {
   const router = express.Router();
 
   router.post('/admin-login', loginLimiter('local-admin'), async (req, res) => {
@@ -51,10 +51,7 @@ module.exports = function createAdminAuthRoutes({ mysql, dbConfig, bcrypt }) {
     });
   });
 
-  router.get('/me', async (req, res) => {
-    if (!req.session || !req.session.adminId) {
-      return res.status(401).json({ success: false, error: 'Authentication required' });
-    }
+  router.get('/me', requireAuth, async (req, res) => {
     return res.json({
       success: true,
       admin: {
@@ -64,11 +61,7 @@ module.exports = function createAdminAuthRoutes({ mysql, dbConfig, bcrypt }) {
     });
   });
 
-  router.post('/change-password', async (req, res) => {
-    if (!req.session || !req.session.adminId) {
-      return res.status(401).json({ success: false, error: 'Authentication required' });
-    }
-
+  router.post('/change-password', requireAuth, async (req, res) => {
     const { currentPassword, newPassword } = req.body || {};
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });

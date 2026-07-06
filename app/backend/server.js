@@ -40,7 +40,6 @@ const {
   initAdminAccounts,
   createValidateAdminSession,
   createRequireAuth,
-  createAdminApiGuard,
   requireSuperAdminPage,
   mountAdminAccounts
 } = require('./modules/admin-accounts');
@@ -59,7 +58,6 @@ async function startServer() {
 
   const validateAdminSession = createValidateAdminSession({ mysql, dbConfig });
   const requireAuth = createRequireAuth(validateAdminSession);
-  const adminApiGuard = createAdminApiGuard(validateAdminSession);
 
   const app = express();
   app.set('trust proxy', true);
@@ -84,7 +82,6 @@ async function startServer() {
   app.use(express.json());
   setupSession(app);
   app.use(adminIpGuard);
-  app.use(adminApiGuard);
 
   registerMonitoring(app, moduleDeps);
 
@@ -194,7 +191,7 @@ async function startServer() {
     [publicTls, hPub],
   ];
 
-  const onBoot = startCentralSync(PORT);
+  const onBoot = startCentralSync();
 
   for (const [opts, host] of listeners) {
     https.createServer(opts, app).listen(PORT, host, () => {

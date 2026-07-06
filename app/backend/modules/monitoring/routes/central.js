@@ -5,48 +5,10 @@ const { EXPORTER_SCRIPT } = require('../../../common/paths');
 const {
   getApiKey,
   authHeaders,
-  getNodeProductUuid,
   httpsAgent: centralAgent,
   getCentralBase,
   pushDevicesToCentral
 } = require('../sync/centralSync');
-
-function registerWithCentral(port) {
-  const base = getCentralBase();
-  const apiKey = getApiKey();
-  if (!base || !apiKey) {
-    return Promise.reject(new Error('Central URL or NODE_API_KEY not set'));
-  }
-  const machineId = getNodeProductUuid();
-  if (!machineId) {
-    return Promise.reject(new Error('node product UUID unavailable'));
-  }
-  const pollBase =
-    process.env.CENTRAL_POLL_BASE_URL ||
-    process.env.PUBLIC_BASE_URL ||
-    `https://127.0.0.1:${port}`;
-  const body = {
-    machineId,
-    baseUrl: pollBase.replace(/\/+$/, ''),
-    publicIp: process.env.CENTRAL_PUBLIC_IP || ''
-  };
-  return fetch(`${base}/api/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify(body),
-    agent: base.startsWith('https') ? centralAgent : undefined
-  }).then(async (r) => {
-    let payload = null;
-    try { payload = await r.json(); } catch { /* ignore */ }
-    if (!r.ok) {
-      const msg = (payload && (payload.error || payload.message)) || `central returned ${r.status}`;
-      const err = new Error(msg);
-      err.status = r.status;
-      throw err;
-    }
-    return payload;
-  });
-}
 
 async function pushMetricsToCentral() {
   const base = getCentralBase();
@@ -73,23 +35,11 @@ async function pushMetricsToCentral() {
   }
 }
 
-module.exports = function createCentralRoutes({ port }) {
+module.exports = function createCentralRoutes({ requireAuth }) {
   const router = express.Router();
-
-  router.post('/central-register', (req, res) => {
-    registerWithCentral(port)
-      .then((payload) => res.json({ success: true, central: payload }))
-      .catch((e) => {
-        const code = e.status >= 400 && e.status < 500 ? e.status : 502;
-        res.status(code).json({ success: false, error: e.message });
-      });
-  });
-
-  router.get('/hostname', (req, res) => res.json({ success: true, hostname: HOSTNAME }));
-
+  router.get('/hostname', requireAuth, (req, res) => res.json({ success: true, hostname: HOSTNAME }));
   return router;
 };
 
-module.exports.registerWithCentral = registerWithCentral;
 module.exports.pushMetricsToCentral = pushMetricsToCentral;
 module.exports.pushDevicesToCentral = pushDevicesToCentral;

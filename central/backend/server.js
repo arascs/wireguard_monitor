@@ -11,7 +11,6 @@ const { generateApiKey } = require('./state');
 const {
   fetchAllNodes,
   insertNode,
-  updateNodeRegister,
   deleteNodeByMachineId,
   hashApiKey,
   verifyApiKey,
@@ -98,7 +97,6 @@ function checkOfflineNodes() {
   const now = Math.floor(Date.now() / 1000);
   const cooldownMs = 5 * 60 * 1000;
   for (const n of nodes) {
-    if (!n.registeredAt) continue;
     const last = lastPushAtByNode.get(n.machineId);
     if (last == null || now - last > OFFLINE_AFTER_SEC) {
       if (last != null && canNotify(`offline:${n.machineId}`, cooldownMs)) {
@@ -170,7 +168,7 @@ function publicNode(row) {
     machineId: row.machineId || '',
     baseUrl: row.baseUrl || '',
     createdAt: row.createdAt || null,
-    registered: !!row.registeredAt
+    registered: true
   };
 }
 
@@ -458,30 +456,8 @@ app.post('/api/logout', (req, res) => {
 
 // ── node-facing endpoints (single API key) ───────────────────────────
 
-app.post('/api/register', apiKeyAuth, async (req, res) => {
-  try {
-    const node = req.nodeKey;
-    const baseUrl = normalizeBaseUrl(String(req.body.baseUrl || '').trim());
-    if (!baseUrl) return res.status(400).json({ ok: false, error: 'baseUrl required' });
-
-    const bodyIp = req.body.publicIp != null ? String(req.body.publicIp).trim() : '';
-    const publicIp = bodyIp || node.publicIp || null;
-
-    const updated = await updateNodeRegister(node.machineId, { baseUrl, publicIp });
-    node.baseUrl = updated.baseUrl;
-    node.publicIp = updated.publicIp;
-    node.registeredAt = updated.registeredAt;
-
-    res.json({ ok: true, machineId: node.machineId });
-  } catch (e) {
-    res.status(503).json({ ok: false, error: e.message || 'Database unavailable' });
-  }
-});
-
 app.post('/api/metrics/push', apiKeyAuth, (req, res) => {
   const node = req.nodeKey;
-  if (!node.registeredAt) return res.status(409).json({ ok: false, error: 'node not registered yet' });
-
   let m;
   if (typeof req.body === 'string') {
     m = parseMetrics(req.body);
@@ -505,7 +481,6 @@ app.post('/api/notifications/ingest', apiKeyAuth, (req, res) => {
 
 app.post('/api/logs/push', apiKeyAuth, async (req, res) => {
   const node = req.nodeKey;
-  if (!node.registeredAt) return res.status(409).json({ ok: false, error: 'node not registered yet' });
   const incoming = Array.isArray(req.body) ? req.body : [req.body];
   const cleaned = incoming
     .map((raw) => {
@@ -556,13 +531,13 @@ function enrichNodeRow(n) {
   const bps = snap && snap.bandwidthDelta != null ? snap.bandwidthDelta / dt : 0;
   const { memUsedPct, diskUsedPct } = usageFromMetrics(m);
   const lastSeen = lastPushAtByNode.get(n.machineId);
-  const online = n.registeredAt && isNodeOnline(n.machineId);
+  const online = isNodeOnline(n.machineId);
   return {
     machineId: n.machineId,
     name: n.name,
     baseUrl: n.baseUrl,
     publicIp: n.publicIp,
-    registered: !!n.registeredAt,
+    registered: true,
     online,
     cpuPct: snap && snap.cpuPct != null ? snap.cpuPct : null,
     memUsedPct,
@@ -629,7 +604,7 @@ app.delete('/api/nodes/:machineId', admin, async (req, res) => {
 });
 
 app.get('/api/dashboard', admin, async (req, res) => {
-  const list = nodes.filter((n) => n.registeredAt).map(enrichNodeRow);
+  const list = nodes.map(enrichNodeRow);
   let online = 0;
   for (const n of list) {
     if (n.online) online += 1;
@@ -674,9 +649,6 @@ app.get('/api/audit-logs', admin, (req, res) => {
 
 app.post('/api/devices/sync-batch', apiKeyAuth, async (req, res) => {
   const node = req.nodeKey;
-  if (!node.registeredAt) {
-    return res.status(409).json({ ok: false, error: 'node not registered' });
-  }
 
   const b = req.body || {};
   const node_id = String(b.node_id || b.machine_id || '').trim().toLowerCase();

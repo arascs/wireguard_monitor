@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"os/exec"
 	"regexp"
 	"sort"
@@ -88,20 +89,36 @@ func isFirewallDropOnAllChains(policies map[string]string) bool {
 }
 
 func getPasswordlessShellUsers() []string {
-	awkScript := `FNR==NR { shadow[$1]=$2; next } $7 !~ /(nologin|false)$/ { if (shadow[$1] == "") print $1 }`
-	out, err := exec.Command("sudo", "awk", "-F:", awkScript, "/etc/shadow", "/etc/passwd").Output()
+	username := strings.TrimSpace(os.Getenv("SUDO_USER"))
+	if username == "" {
+		username = strings.TrimSpace(os.Getenv("LOGNAME"))
+	}
+	if username == "" || username == "root" {
+		return nil
+	}
+
+	out, err := exec.Command("getent", "passwd", username).Output()
 	if err != nil {
 		return nil
 	}
-	var users []string
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			users = append(users, line)
-		}
+	fields := strings.Split(strings.TrimSpace(string(out)), ":")
+	if len(fields) < 7 {
+		return nil
 	}
-	sort.Strings(users)
-	return users
+	shell := fields[6]
+	if strings.Contains(shell, "nologin") || strings.Contains(shell, "false") {
+		return nil
+	}
+
+	out, err = exec.Command("getent", "shadow", username).Output()
+	if err != nil {
+		return nil
+	}
+	shadowFields := strings.Split(strings.TrimSpace(string(out)), ":")
+	if len(shadowFields) >= 2 && shadowFields[1] == "" {
+		return []string{username}
+	}
+	return nil
 }
 
 func isAllowedWifiSecurity(sec string) bool {

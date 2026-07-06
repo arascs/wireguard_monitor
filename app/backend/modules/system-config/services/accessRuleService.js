@@ -91,8 +91,8 @@ function deleteArgs(chain, matchPrefix, isBlock) {
 function applyMatch(insertAction, chain, matchPrefix, isBlock) {
   const comment = commentArgs();
   if (isBlock) {
-    run('iptables', [insertAction, chain, ...matchPrefix, ...comment, '-j', 'LOG', '--log-prefix', LOG_PREFIX]);
     run('iptables', [insertAction, chain, ...matchPrefix, ...comment, '-j', 'DROP']);
+    run('iptables', [insertAction, chain, ...matchPrefix, ...comment, '-j', 'LOG', '--log-prefix', LOG_PREFIX]);
   } else {
     run('iptables', [insertAction, chain, ...matchPrefix, ...comment, '-j', 'ACCEPT']);
   }

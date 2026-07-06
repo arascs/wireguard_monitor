@@ -76,19 +76,6 @@ async function insertNode({ name, machineId, apiKeyHash }) {
   return findNodeByMachineId(mid);
 }
 
-async function updateNodeRegister(machineId, { baseUrl, publicIp }) {
-  const db = getPool();
-  if (!db) throw disabledError();
-  const mid = String(machineId).trim().toLowerCase();
-  await db.execute(
-    `UPDATE ${NODES_TABLE}
-     SET base_url = ?, public_ip = ?, registered_at = COALESCE(registered_at, CURRENT_TIMESTAMP(3))
-     WHERE machine_id = ?`,
-    [baseUrl, publicIp || null, mid]
-  );
-  return findNodeByMachineId(mid);
-}
-
 async function deleteNodeByMachineId(machineId) {
   const db = getPool();
   if (!db) throw disabledError();
@@ -150,7 +137,6 @@ module.exports = {
   fetchAllNodes,
   findNodeByMachineId,
   insertNode,
-  updateNodeRegister,
   deleteNodeByMachineId,
   hashApiKey,
   verifyApiKey,

@@ -11,10 +11,10 @@ const { scheduleCentralSync } = require('../../monitoring');
 const { scheduleBackup } = require('../../backup');
 const { normalizeBaseUrl } = require('../../monitoring/sync/centralSync');
 
-module.exports = function createSettingsRoutes() {
+module.exports = function createSettingsRoutes({ requireAuth }) {
   const router = express.Router();
 
-  router.get('/settings', (req, res) => {
+  router.get('/settings', requireAuth, (req, res) => {
     try {
       const settings = loadGlobalSettings();
       settings.apiKey = process.env.NODE_API_KEY || '';
@@ -24,7 +24,7 @@ module.exports = function createSettingsRoutes() {
     }
   });
 
-  router.post('/settings', (req, res) => {
+  router.post('/settings', requireAuth, (req, res) => {
     try {
       const currentSettings = loadGlobalSettings();
       const physicalInterface = req.body.physicalInterface !== undefined

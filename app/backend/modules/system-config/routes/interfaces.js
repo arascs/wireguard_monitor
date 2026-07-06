@@ -18,10 +18,10 @@ const { listInterfaces, parseInterfaceSummary } = require('../services/interface
 const { hydrateRotationKeysFromDb, getRemainingDays } = require('../services/rotationKeys');
 const { deleteAccessRulesForInterface } = require('../services/accessRuleService');
 
-module.exports = function createInterfaceRoutes() {
+module.exports = function createInterfaceRoutes({ requireAuth }) {
   const router = express.Router();
 
-  router.get('/interface-log/:interfaceName', (req, res) => {
+  router.get('/interface-log/:interfaceName', requireAuth, (req, res) => {
     try {
       const interfaceName = req.params.interfaceName.replace(/[^a-zA-Z0-9_\-]/g, '');
       if (!interfaceName) {
@@ -42,7 +42,7 @@ module.exports = function createInterfaceRoutes() {
     }
   });
 
-  router.get('/interfaces/:interface/key-status', (req, res) => {
+  router.get('/interfaces/:interface/key-status', requireAuth, (req, res) => {
     const iface = sanitizeInterfaceName(req.params.interface);
     if (!iface) {
       return res.status(400).json({ success: false, error: 'Invalid interface name' });
@@ -57,7 +57,7 @@ module.exports = function createInterfaceRoutes() {
     });
   });
 
-  router.get('/interfaces', (req, res) => {
+  router.get('/interfaces', requireAuth, (req, res) => {
     try {
       const interfaces = listInterfaces();
       res.json({ success: true, interfaces });
@@ -66,7 +66,7 @@ module.exports = function createInterfaceRoutes() {
     }
   });
 
-  router.get('/interfaces/client', (req, res) => {
+  router.get('/interfaces/client', requireAuth, (req, res) => {
     try {
       const interfaces = listInterfaces().filter((i) => i.type === 'Client');
       res.json({ success: true, interfaces });
@@ -75,7 +75,7 @@ module.exports = function createInterfaceRoutes() {
     }
   });
 
-  router.post('/add-interface', async (req, res) => {
+  router.post('/add-interface', requireAuth, async (req, res) => {
     try {
       const { name, type, address, listenPort, dns, mtu, preUp, postUp, preDown, postDown, keyExpiryDays } = req.body;
       if (!String(name || '').trim()) {
@@ -127,7 +127,7 @@ module.exports = function createInterfaceRoutes() {
     }
   });
 
-  router.delete('/delete-interface/:name', async (req, res) => {
+  router.delete('/delete-interface/:name', requireAuth, async (req, res) => {
     let connection;
     try {
       const interfaceName = decodeURIComponent(req.params.name);
@@ -179,7 +179,7 @@ module.exports = function createInterfaceRoutes() {
     }
   });
 
-  router.get('/interfaces/:interface/config', async (req, res) => {
+  router.get('/interfaces/:interface/config', requireAuth, async (req, res) => {
     const iface = sanitizeInterfaceName(req.params.interface);
     if (!iface) {
       return res.status(400).json({ success: false, error: 'Invalid interface name' });
@@ -193,7 +193,7 @@ module.exports = function createInterfaceRoutes() {
     }
   });
 
-  router.get('/interfaces/:interface/reload', async (req, res) => {
+  router.get('/interfaces/:interface/reload', requireAuth, async (req, res) => {
     const iface = sanitizeInterfaceName(req.params.interface);
     if (!iface) {
       return res.status(400).json({ success: false, error: 'Invalid interface name' });
@@ -208,7 +208,7 @@ module.exports = function createInterfaceRoutes() {
     }
   });
 
-  router.post('/interfaces/:interface/save', (req, res) => {
+  router.post('/interfaces/:interface/save', requireAuth, (req, res) => {
     const iface = sanitizeInterfaceName(req.params.interface);
     if (!iface) {
       return res.status(400).json({ success: false, error: 'Invalid interface name' });
@@ -230,7 +230,7 @@ module.exports = function createInterfaceRoutes() {
     }
   });
 
-  router.post('/interfaces/:interface/connect', (req, res) => {
+  router.post('/interfaces/:interface/connect', requireAuth, (req, res) => {
     const iface = sanitizeInterfaceName(req.params.interface);
     if (!iface) {
       return res.status(400).json({ success: false, error: 'Invalid interface name' });
@@ -263,7 +263,7 @@ module.exports = function createInterfaceRoutes() {
     }
   });
 
-  router.post('/interfaces/:interface/disconnect', (req, res) => {
+  router.post('/interfaces/:interface/disconnect', requireAuth, (req, res) => {
     const iface = sanitizeInterfaceName(req.params.interface);
     if (!iface) {
       return res.status(400).json({ success: false, error: 'Invalid interface name' });
@@ -280,7 +280,7 @@ module.exports = function createInterfaceRoutes() {
     }
   });
 
-  router.get('/interfaces/:interface/vpn-status', (req, res) => {
+  router.get('/interfaces/:interface/vpn-status', requireAuth, (req, res) => {
     const iface = sanitizeInterfaceName(req.params.interface);
     if (!iface) {
       return res.status(400).json({ success: false, error: 'Invalid interface name' });

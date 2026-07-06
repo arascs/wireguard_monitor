@@ -48,16 +48,22 @@ func getSecurityInfo() SecurityInfo {
 }
 
 func windowsOSVersion() (raw string, major int) {
-	out, err := exec.Command("wmic", "os", "get", "Version", "/value").Output()
+	out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command",
+		"Get-CimInstance Win32_OperatingSystem | Select-Object Version | Format-List",
+	).Output()
 	if err != nil {
 		return "", 0
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(strings.ToLower(line), "version=") {
+		idx := strings.Index(line, ":")
+		if idx < 0 {
 			continue
 		}
-		raw = strings.TrimSpace(strings.TrimPrefix(line, "Version="))
+		if !strings.EqualFold(strings.TrimSpace(line[:idx]), "Version") {
+			continue
+		}
+		raw = strings.TrimSpace(line[idx+1:])
 		if parts := strings.Split(raw, "."); len(parts) > 0 {
 			major, _ = strconv.Atoi(parts[0])
 		}

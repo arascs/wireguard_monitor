@@ -11,7 +11,7 @@ const {
 
 const TRAFFIC_FILE = '/etc/wireguard/logs/traffic_history.json';
 
-function createMainDashboardRoutes({ mysql, dbConfig }) {
+function createMainDashboardRoutes({ mysql, dbConfig, requireAuth }) {
   const router = express.Router();
 
   async function getDeviceCount() {
@@ -128,7 +128,7 @@ function createMainDashboardRoutes({ mysql, dbConfig }) {
     return { active, total };
   }
 
-  router.get('/traffic', (req, res) => {
+  router.get('/traffic', requireAuth, (req, res) => {
     try {
       let records = [];
       if (fs.existsSync(TRAFFIC_FILE)) {
@@ -140,7 +140,7 @@ function createMainDashboardRoutes({ mysql, dbConfig }) {
     }
   });
 
-  router.get('/active-devices', async (req, res) => {
+  router.get('/active-devices', requireAuth, async (req, res) => {
     try {
       const { active } = buildActivePeers('Client');
       const totalDevices = await getDeviceCount();
@@ -150,7 +150,7 @@ function createMainDashboardRoutes({ mysql, dbConfig }) {
     }
   });
 
-  router.get('/active-sites', async (req, res) => {
+  router.get('/active-sites', requireAuth, async (req, res) => {
     try {
       const { active } = buildActivePeers('Site');
       const totalSites = await getSiteCount();
@@ -160,7 +160,7 @@ function createMainDashboardRoutes({ mysql, dbConfig }) {
     }
   });
 
-  router.post('/disable-peer', (req, res) => {
+  router.post('/disable-peer', requireAuth, (req, res) => {
     try {
       const { interfaceName, publicKey } = req.body;
       if (!interfaceName || !publicKey) {

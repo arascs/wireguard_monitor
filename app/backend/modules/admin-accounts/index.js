@@ -2,7 +2,6 @@ const express = require('express');
 const { initAdminAccounts, createValidateAdminSession } = require('./db');
 const {
   createRequireAuth,
-  createAdminApiGuard,
   requireSuperAdmin,
   requireSuperAdminPage
 } = require('./middleware');
@@ -20,7 +19,6 @@ module.exports = {
   initAdminAccounts,
   createValidateAdminSession,
   createRequireAuth,
-  createAdminApiGuard,
   requireSuperAdmin,
   requireSuperAdminPage,
   mountAdminAccounts

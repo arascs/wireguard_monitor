@@ -7,9 +7,9 @@ const createAccessRuleRoutes = require('./routes/accessRules');
 
 module.exports = function mountSystemConfig(deps) {
   const router = express.Router();
-  router.use(createInterfaceRoutes());
-  router.use(createPeerRoutes());
-  router.use(createSettingsRoutes());
+  router.use(createInterfaceRoutes(deps));
+  router.use(createPeerRoutes(deps));
+  router.use(createSettingsRoutes(deps));
   router.use(createApplicationRoutes(deps));
   router.use(createAccessRuleRoutes(deps));
   return router;

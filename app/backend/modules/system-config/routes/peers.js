@@ -29,10 +29,76 @@ function peerForAudit(peer) {
   return rest;
 }
 
-module.exports = function createPeerRoutes() {
+module.exports = function createPeerRoutes({ requireAuth }) {
   const router = express.Router();
 
-  router.post('/interfaces/:interface/generate-keys', async (req, res) => {
+  router.post('/update-key', async (req, res) => {
+    try {
+      const { oldPublicKey, newPublicKey, rotationKey } = req.body || {};
+      if (!oldPublicKey || !newPublicKey || !rotationKey) {
+        return res.status(400).json({ success: false, error: 'Invalid request' });
+      }
+
+      const conn = await mysql.createConnection(dbConfig);
+      let foundInterface = '';
+      let expectedRotation = '';
+      try {
+        const [rows] = await conn.execute(
+          'SELECT `interface`, site_rotation_key FROM sites WHERE site_pubkey = ? LIMIT 1',
+          [oldPublicKey]
+        );
+        if (!rows.length) {
+          return res.status(404).json({ success: false, error: 'Site not found' });
+        }
+        foundInterface = rows[0].interface;
+        if (rows[0].site_rotation_key != null) {
+          expectedRotation = String(rows[0].site_rotation_key);
+        }
+      } finally {
+        await conn.end();
+      }
+
+      if (!secretStringsMatch(expectedRotation, rotationKey)) {
+        return res.status(403).json({ success: false, error: 'Invalid rotation key' });
+      }
+
+      const config = loadInterfaceConfig(foundInterface, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
+      const idx = findPeerIndex(config, oldPublicKey);
+      if (idx < 0) {
+        return res.status(404).json({ success: false, error: 'Peer not found in config' });
+      }
+
+      config.peers[idx].publicKey = newPublicKey;
+      saveInterfaceConfig(foundInterface, config);
+      wgSyncconfIfRunning(foundInterface);
+
+      try {
+        const conn2 = await mysql.createConnection(dbConfig);
+        await conn2.execute(
+          'UPDATE sites SET site_pubkey = ? WHERE site_pubkey = ? AND `interface` = ?',
+          [newPublicKey, oldPublicKey, foundInterface]
+        );
+        await conn2.end();
+      } catch (dbErr) {
+        console.error('Error updating site pubkey in DB:', dbErr.message);
+      }
+
+      try {
+        const admin = req.session && req.session.user ? req.session.user : 'system';
+        logAction(admin, 'update_key_from_peer', {
+          interface: foundInterface,
+          old_public_key: oldPublicKey,
+          new_public_key: newPublicKey
+        });
+      } catch (e) { /* ignore */ }
+
+      res.json({ success: true, interface: foundInterface });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  router.post('/interfaces/:interface/generate-keys', requireAuth, async (req, res) => {
     const iface = sanitizeInterfaceName(req.params.interface);
     if (!iface) {
       return res.status(400).json({ success: false, error: 'Invalid interface name' });
@@ -143,7 +209,7 @@ module.exports = function createPeerRoutes() {
     }
   });
 
-  router.post('/interfaces/:interface/configure', (req, res) => {
+  router.post('/interfaces/:interface/configure', requireAuth, (req, res) => {
     const iface = sanitizeInterfaceName(req.params.interface);
     if (!iface) {
       return res.status(400).json({ success: false, error: 'Invalid interface name' });
@@ -204,7 +270,7 @@ module.exports = function createPeerRoutes() {
     }
   });
 
-  router.post('/interfaces/:interface/peers', async (req, res) => {
+  router.post('/interfaces/:interface/peers', requireAuth, async (req, res) => {
     const iface = sanitizeInterfaceName(req.params.interface);
     if (!iface) {
       return res.status(400).json({ success: false, error: 'Invalid interface name' });
@@ -293,7 +359,7 @@ module.exports = function createPeerRoutes() {
     }
   });
 
-  router.put('/interfaces/:interface/peers/:publicKey', async (req, res) => {
+  router.put('/interfaces/:interface/peers/:publicKey', requireAuth, async (req, res) => {
     const iface = sanitizeInterfaceName(req.params.interface);
     const paramKey = decodeURIComponent(req.params.publicKey || '');
     if (!iface || !paramKey) {
@@ -360,7 +426,7 @@ module.exports = function createPeerRoutes() {
     }
   });
 
-  router.delete('/interfaces/:interface/peers/:publicKey', async (req, res) => {
+  router.delete('/interfaces/:interface/peers/:publicKey', requireAuth, async (req, res) => {
     const iface = sanitizeInterfaceName(req.params.interface);
     const publicKey = decodeURIComponent(req.params.publicKey || '');
     if (!iface || !publicKey) {
@@ -405,7 +471,7 @@ module.exports = function createPeerRoutes() {
     }
   });
 
-  router.post('/interfaces/:interface/peers/:publicKey/enable', async (req, res) => {
+  router.post('/interfaces/:interface/peers/:publicKey/enable', requireAuth, async (req, res) => {
     const iface = sanitizeInterfaceName(req.params.interface);
     const publicKey = decodeURIComponent(req.params.publicKey || '');
     if (!iface || !publicKey) {
@@ -449,7 +515,7 @@ module.exports = function createPeerRoutes() {
     }
   });
 
-  router.post('/interfaces/:interface/peers/:publicKey/disable', (req, res) => {
+  router.post('/interfaces/:interface/peers/:publicKey/disable', requireAuth, (req, res) => {
     const iface = sanitizeInterfaceName(req.params.interface);
     const publicKey = decodeURIComponent(req.params.publicKey || '');
     if (!iface || !publicKey) {
@@ -472,72 +538,6 @@ module.exports = function createPeerRoutes() {
         logAction(admin, 'disable_peer', { peer: peerForAudit(config.peers[idx]) });
       } catch (e) { /* ignore */ }
       res.json({ success: true, peer: config.peers[idx] });
-    } catch (error) {
-      res.status(500).json({ success: false, error: error.message });
-    }
-  });
-
-  router.post('/update-key', async (req, res) => {
-    try {
-      const { oldPublicKey, newPublicKey, rotationKey } = req.body || {};
-      if (!oldPublicKey || !newPublicKey || !rotationKey) {
-        return res.status(400).json({ success: false, error: 'Invalid request' });
-      }
-
-      const conn = await mysql.createConnection(dbConfig);
-      let foundInterface = '';
-      let expectedRotation = '';
-      try {
-        const [rows] = await conn.execute(
-          'SELECT `interface`, site_rotation_key FROM sites WHERE site_pubkey = ? LIMIT 1',
-          [oldPublicKey]
-        );
-        if (!rows.length) {
-          return res.status(404).json({ success: false, error: 'Site not found' });
-        }
-        foundInterface = rows[0].interface;
-        if (rows[0].site_rotation_key != null) {
-          expectedRotation = String(rows[0].site_rotation_key);
-        }
-      } finally {
-        await conn.end();
-      }
-
-      if (!secretStringsMatch(expectedRotation, rotationKey)) {
-        return res.status(403).json({ success: false, error: 'Invalid rotation key' });
-      }
-
-      const config = loadInterfaceConfig(foundInterface, { defaultKeyExpiryDays: DEFAULT_KEY_EXPIRY_DAYS });
-      const idx = findPeerIndex(config, oldPublicKey);
-      if (idx < 0) {
-        return res.status(404).json({ success: false, error: 'Peer not found in config' });
-      }
-
-      config.peers[idx].publicKey = newPublicKey;
-      saveInterfaceConfig(foundInterface, config);
-      wgSyncconfIfRunning(foundInterface);
-
-      try {
-        const conn2 = await mysql.createConnection(dbConfig);
-        await conn2.execute(
-          'UPDATE sites SET site_pubkey = ? WHERE site_pubkey = ? AND `interface` = ?',
-          [newPublicKey, oldPublicKey, foundInterface]
-        );
-        await conn2.end();
-      } catch (dbErr) {
-        console.error('Error updating site pubkey in DB:', dbErr.message);
-      }
-
-      try {
-        const admin = req.session && req.session.user ? req.session.user : 'system';
-        logAction(admin, 'update_key_from_peer', {
-          interface: foundInterface,
-          old_public_key: oldPublicKey,
-          new_public_key: newPublicKey
-        });
-      } catch (e) { /* ignore */ }
-
-      res.json({ success: true, interface: foundInterface });
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
     }

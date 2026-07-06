@@ -8,20 +8,8 @@ const PUBLIC_API_PATHS = new Set([
   '/api/device-heartbeat',
   '/api/check-device-enroll',
   '/api/enroll-device',
-  '/api/update-key',
-  '/api/notifications/ingest',
-  '/api/hostname'
+  '/api/update-key'
 ]);
-
-const ADMIN_BYPASS_PATHS = new Set([
-  '/api/admin-login',
-  '/api/logout',
-  ...PUBLIC_API_PATHS
-]);
-
-function pathAllowsBypass(p) {
-  return ADMIN_BYPASS_PATHS.has(p);
-}
 
 function pathIsPublicApi(p) {
   return PUBLIC_API_PATHS.has(p);
@@ -42,9 +30,7 @@ function setupSession(app) {
 }
 
 module.exports = {
-  ADMIN_BYPASS_PATHS,
   PUBLIC_API_PATHS,
-  pathAllowsBypass,
   pathIsPublicApi,
   setupSession
 };

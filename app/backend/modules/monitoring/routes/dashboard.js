@@ -1,6 +1,5 @@
 require('dotenv').config();
 const express = require('express');
-const router = express.Router();
 const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
@@ -80,7 +79,10 @@ function resolveIface(req, res) {
   return iface;
 }
 
-router.get('/peers', async (req, res) => {
+module.exports = function createDashboardRoutes({ requireAuth }) {
+  const router = express.Router();
+
+  router.get('/peers', requireAuth, async (req, res) => {
   const ifaceName = resolveIface(req, res);
   if (!ifaceName) return;
 
@@ -117,7 +119,7 @@ router.get('/peers', async (req, res) => {
   }
 });
 
-router.get('/:interface/peers/:publicKey', async (req, res) => {
+router.get('/:interface/peers/:publicKey', requireAuth, async (req, res) => {
   const ifaceName = sanitizeInterfaceName(req.params.interface);
   const publicKey = decodeURIComponent(req.params.publicKey || '');
   if (!ifaceName || !publicKey) {
@@ -168,7 +170,7 @@ router.get('/:interface/peers/:publicKey', async (req, res) => {
   }
 });
 
-router.get('/:id/stats', (req, res) => {
+router.get('/:id/stats', requireAuth, (req, res) => {
   const iface = sanitizeInterfaceName(req.params.id);
   if (!iface) {
     return res.status(400).json({ error: 'Invalid interface' });
@@ -216,7 +218,7 @@ router.get('/:id/stats', (req, res) => {
   }
 });
 
-router.get('/:interface/peers/:publicKey/stats', (req, res) => {
+router.get('/:interface/peers/:publicKey/stats', requireAuth, (req, res) => {
   const ifaceName = sanitizeInterfaceName(req.params.interface);
   const publicKey = decodeURIComponent(req.params.publicKey || '');
   if (!ifaceName || !publicKey) {
@@ -262,7 +264,7 @@ router.get('/:interface/peers/:publicKey/stats', (req, res) => {
   }
 });
 
-router.get('/:interface/peer/:peerName/connections', (req, res) => {
+router.get('/:interface/peer/:peerName/connections', requireAuth, (req, res) => {
   const interfaceName = sanitizeInterfaceName(req.params.interface);
   const peerName = req.params.peerName;
   const STATUS_FILE = '/dev/shm/vpn_live_status.json';
@@ -295,4 +297,5 @@ router.get('/:interface/peer/:peerName/connections', (req, res) => {
   }
 });
 
-module.exports = router;
+  return router;
+};
