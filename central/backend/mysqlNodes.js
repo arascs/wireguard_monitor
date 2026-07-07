@@ -76,6 +76,26 @@ async function insertNode({ name, machineId, apiKeyHash }) {
   return findNodeByMachineId(mid);
 }
 
+async function updateNodeMetadata(machineId, { baseUrl, publicIp }) {
+  const db = getPool();
+  if (!db) throw disabledError();
+  const mid = String(machineId).trim().toLowerCase();
+  const sets = [];
+  const vals = [];
+  if (baseUrl != null && String(baseUrl).trim()) {
+    sets.push('base_url = ?');
+    vals.push(String(baseUrl).trim());
+  }
+  if (publicIp != null && String(publicIp).trim()) {
+    sets.push('public_ip = ?');
+    vals.push(String(publicIp).trim());
+  }
+  if (!sets.length) return findNodeByMachineId(mid);
+  vals.push(mid);
+  await db.execute(`UPDATE ${NODES_TABLE} SET ${sets.join(', ')} WHERE machine_id = ?`, vals);
+  return findNodeByMachineId(mid);
+}
+
 async function deleteNodeByMachineId(machineId) {
   const db = getPool();
   if (!db) throw disabledError();
@@ -137,6 +157,7 @@ module.exports = {
   fetchAllNodes,
   findNodeByMachineId,
   insertNode,
+  updateNodeMetadata,
   deleteNodeByMachineId,
   hashApiKey,
   verifyApiKey,

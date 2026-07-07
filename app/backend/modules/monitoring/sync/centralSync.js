@@ -45,6 +45,10 @@ function authHeaders() {
   if (key) headers.Authorization = `Bearer ${key}`;
   const uuid = getNodeProductUuid();
   if (uuid) headers['X-Node-UUID'] = uuid;
+  const pubIp = String(process.env.TLS_PUBLIC_BIND || '').trim();
+  if (pubIp) headers['X-Node-Public-Ip'] = pubIp;
+  const { baseUrl } = getNodeContext();
+  if (baseUrl) headers['X-Node-Base-Url'] = baseUrl;
   return headers;
 }
 
@@ -79,10 +83,12 @@ async function pushDevicesToCentral() {
       }))
       .filter((d) => d.machine_id);
 
+    const pubIp = String(process.env.TLS_PUBLIC_BIND || '').trim();
     const r = await postJson(`${base}/api/devices/sync-batch`, {
       node_id: ctx.machineId,
       node_name: ctx.nodeName,
       base_url: ctx.baseUrl,
+      ...(pubIp ? { public_ip: pubIp } : {}),
       devices
     });
     if (!r.ok) {

@@ -11,6 +11,7 @@ const { generateApiKey } = require('./state');
 const {
   fetchAllNodes,
   insertNode,
+  updateNodeMetadata,
   deleteNodeByMachineId,
   hashApiKey,
   verifyApiKey,
@@ -167,8 +168,7 @@ function publicNode(row) {
     name: row.name || '',
     machineId: row.machineId || '',
     baseUrl: row.baseUrl || '',
-    createdAt: row.createdAt || null,
-    registered: true
+    createdAt: row.createdAt || null
   };
 }
 
@@ -199,6 +199,40 @@ async function apiKeyAuth(req, res, next) {
 
   req.nodeKey = row;
   next();
+}
+
+async function applyNodeMetadataFromRequest(req) {
+  const node = req.nodeKey;
+  if (!node) return;
+
+  const publicIp = String(
+    req.header('x-node-public-ip') ||
+    req.body?.publicIp ||
+    req.body?.public_ip ||
+    ''
+  ).trim();
+  const baseUrlRaw = String(
+    req.header('x-node-base-url') ||
+    req.body?.baseUrl ||
+    req.body?.base_url ||
+    ''
+  ).trim();
+  const baseUrl = baseUrlRaw ? normalizeBaseUrl(baseUrlRaw) : '';
+
+  if (!publicIp && !baseUrl) return;
+
+  try {
+    const updated = await updateNodeMetadata(node.machineId, {
+      ...(publicIp ? { publicIp } : {}),
+      ...(baseUrl ? { baseUrl } : {})
+    });
+    if (updated) {
+      node.publicIp = updated.publicIp;
+      node.baseUrl = updated.baseUrl;
+    }
+  } catch (e) {
+    console.error('[node metadata]', e.message);
+  }
 }
 
 function usageFromMetrics(m) {
@@ -456,8 +490,9 @@ app.post('/api/logout', (req, res) => {
 
 // ── node-facing endpoints (single API key) ───────────────────────────
 
-app.post('/api/metrics/push', apiKeyAuth, (req, res) => {
+app.post('/api/metrics/push', apiKeyAuth, async (req, res) => {
   const node = req.nodeKey;
+  await applyNodeMetadataFromRequest(req);
   let m;
   if (typeof req.body === 'string') {
     m = parseMetrics(req.body);
@@ -481,6 +516,7 @@ app.post('/api/notifications/ingest', apiKeyAuth, (req, res) => {
 
 app.post('/api/logs/push', apiKeyAuth, async (req, res) => {
   const node = req.nodeKey;
+  await applyNodeMetadataFromRequest(req);
   const incoming = Array.isArray(req.body) ? req.body : [req.body];
   const cleaned = incoming
     .map((raw) => {
@@ -537,7 +573,6 @@ function enrichNodeRow(n) {
     name: n.name,
     baseUrl: n.baseUrl,
     publicIp: n.publicIp,
-    registered: true,
     online,
     cpuPct: snap && snap.cpuPct != null ? snap.cpuPct : null,
     memUsedPct,
@@ -649,6 +684,7 @@ app.get('/api/audit-logs', admin, (req, res) => {
 
 app.post('/api/devices/sync-batch', apiKeyAuth, async (req, res) => {
   const node = req.nodeKey;
+  await applyNodeMetadataFromRequest(req);
 
   const b = req.body || {};
   const node_id = String(b.node_id || b.machine_id || '').trim().toLowerCase();

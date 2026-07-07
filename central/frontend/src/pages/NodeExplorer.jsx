@@ -333,7 +333,6 @@ export default function NodeExplorer() {
           <thead>
             <tr className="bg-primary text-white text-left">
               <th className="px-3 py-2 font-medium">Node</th>
-              <th className="px-3 py-2 font-medium">Register</th>
               <th className="px-3 py-2 font-medium">Public IP</th>
               <th className="px-3 py-2 font-medium">CPU</th>
               <th className="px-3 py-2 font-medium">RAM used</th>
@@ -351,15 +350,6 @@ export default function NodeExplorer() {
                 <td className="px-3 py-2 font-medium text-zinc-900">
                   <div>{n.name}</div>
                   <div className="text-xs font-mono text-zinc-500 mt-0.5">{n.machineId}</div>
-                </td>
-                <td className="px-3 py-2">
-                  <span className="inline-flex items-center gap-1.5 text-xs">
-                    <span
-                      className={`inline-block w-2.5 h-2.5 rounded-full ${n.registered ? 'bg-emerald-500' : 'bg-red-500'}`}
-                      aria-hidden
-                    />
-                    {n.registered ? 'OK' : 'No'}
-                  </span>
                 </td>
                 <td className="px-3 py-2 text-zinc-700 font-mono text-xs">{n.publicIp || '—'}</td>
                 <td className="px-3 py-2 text-zinc-700">
