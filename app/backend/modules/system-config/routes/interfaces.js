@@ -16,7 +16,7 @@ const {
 } = require('../../../common/wireguardConfig');
 const { listInterfaces, parseInterfaceSummary } = require('../services/interfaceList');
 const { hydrateRotationKeysFromDb, getRemainingDays } = require('../services/rotationKeys');
-const { deleteAccessRulesForInterface } = require('../services/accessRuleService');
+const { deleteAccessRulesForInterface } = require('../../access-control/services/accessRuleService');
 
 module.exports = function createInterfaceRoutes({ requireAuth }) {
   const router = express.Router();

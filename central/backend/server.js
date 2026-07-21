@@ -15,7 +15,6 @@ const {
   deleteNodeByMachineId,
   hashApiKey,
   verifyApiKey,
-  migrateFromJsonIfNeeded
 } = require('./mysqlNodes');
 const {
   fetchLogs,
@@ -751,7 +750,6 @@ const httpsOptions = {
 };
 
 setupAdminAccounts()
-  .then(() => migrateFromJsonIfNeeded())
   .then(() => fetchAllNodes())
   .then((rows) => {
     nodes = rows;

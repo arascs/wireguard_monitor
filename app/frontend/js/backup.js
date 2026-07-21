@@ -15,14 +15,16 @@ async function loadBackups() {
       const dateStr = new Date(b.mtime).toLocaleString();
       const sizeKb = (b.size / 1024).toFixed(1) + ' KB';
       const tr = document.createElement('tr');
-      const previewBtn = b.hasSnapshot
+      const canPreview = b.hasSnapshot || b.encrypted;
+      const previewBtn = canPreview
         ? `<button data-idx="${idx}" class="btn-preview" title="Preview Snapshot">👁</button>`
         : `<button data-idx="${idx}" class="btn-preview" style="opacity:0.35;cursor:not-allowed;" title="No snapshot data in this backup" disabled>👁</button>`;
+      const typeLabel = b.encrypted ? `${b.type || 'encrypted'} 🔒` : (b.type || '');
       tr.innerHTML = `
         <td>${b.name}</td>
         <td>${sizeKb}</td>
         <td>${dateStr}</td>
-        <td>${b.type || ''}</td>
+        <td>${typeLabel}</td>
         <td>
           <div class="btn-actions">
             <button data-idx="${idx}" class="btn-restore">Restore</button>
@@ -39,7 +41,7 @@ async function loadBackups() {
         const entry = data.backups[idx];
         if (entry) {
           if (confirm('Restore from ' + entry.name + '? This will overwrite existing data.')) {
-            restoreBackup(entry.name);
+            restoreBackup(entry.name, entry.encrypted);
           }
         }
       });
@@ -60,11 +62,13 @@ async function loadBackups() {
 // ─── Create backup ───────────────────────────────────────────────────────────
 
 async function createBackup(type) {
+  const password = prompt('Backup password:');
+  if (!password) return;
   try {
     const res = await fetch('/api/backups/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type })
+      body: JSON.stringify({ type, password })
     });
     const data = await res.json();
     if (data.success) {
@@ -78,14 +82,17 @@ async function createBackup(type) {
   }
 }
 
-// ─── Restore backup ──────────────────────────────────────────────────────────
-
-async function restoreBackup(name) {
+async function restoreBackup(name, encrypted) {
+  let password;
+  if (encrypted) {
+    password = prompt('Backup password:');
+    if (!password) return;
+  }
   try {
     const res = await fetch('/api/backups/restore', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
+      body: JSON.stringify({ name, password })
     });
     const data = await res.json();
     if (data.success) {
@@ -227,17 +234,27 @@ function renderSnapshotContent(snapshot) {
 }
 
 async function previewSnapshot(name, entry) {
+  let password;
+  if (entry && entry.encrypted) {
+    password = prompt('Backup password:');
+    if (!password) return;
+  }
+
   const modal = document.getElementById('snapshot-modal');
   const body = document.getElementById('snapshot-body');
   const metaEl = document.getElementById('snapshot-meta-info');
 
-  // Show modal with loading state
   body.innerHTML = '<div class="sn-loading">Loading snapshot…</div>';
   metaEl.textContent = name;
   modal.classList.add('open');
 
   try {
-    const res = await fetch(`/api/backups/snapshot/${encodeURIComponent(name)}`, { credentials: 'same-origin' });
+    const res = await fetch('/api/backups/snapshot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ name, password })
+    });
     const data = await res.json();
     if (!data.success) {
       body.innerHTML = `<div class="sn-empty-msg" style="color:#c00;">${data.error || 'Failed to load snapshot.'}</div>`;

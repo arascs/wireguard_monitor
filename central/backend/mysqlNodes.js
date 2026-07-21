@@ -113,46 +113,6 @@ async function verifyApiKey(plain, hash) {
   return bcrypt.compare(String(plain), String(hash));
 }
 
-async function migrateFromJsonIfNeeded() {
-  const db = getPool();
-  if (!db) return;
-  const [countRows] = await db.execute(`SELECT COUNT(*) AS c FROM ${NODES_TABLE}`);
-  if (Number(countRows[0].c) > 0) return;
-  if (!fs.existsSync(NODES_FILE)) return;
-
-  let legacy = [];
-  try {
-    const j = JSON.parse(fs.readFileSync(NODES_FILE, 'utf8'));
-    legacy = Array.isArray(j) ? j : [];
-  } catch {
-    return;
-  }
-  if (!legacy.length) return;
-
-  for (const n of legacy) {
-    const machineId = String(n.machineId || '').trim().toLowerCase();
-    if (!machineId) continue;
-    const name = String(n.name || machineId).trim();
-    const plainKey = String(n.apiKey || '').trim();
-    if (!plainKey) continue;
-    const apiKeyHash = await hashApiKey(plainKey);
-    const baseUrl = String(n.baseUrl || '').trim();
-    const publicIp = n.publicIp != null ? String(n.publicIp).trim() : null;
-    const registeredAt = baseUrl || n.id ? new Date() : null;
-    await db.execute(
-      `INSERT INTO ${NODES_TABLE} (machine_id, name, api_key_hash, base_url, public_ip, registered_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [machineId, name, apiKeyHash, baseUrl, publicIp, registeredAt]
-    );
-  }
-  const bak = `${NODES_FILE}.migrated`;
-  try {
-    fs.renameSync(NODES_FILE, bak);
-  } catch {
-    /* ignore */
-  }
-}
-
 module.exports = {
   fetchAllNodes,
   findNodeByMachineId,
@@ -160,6 +120,5 @@ module.exports = {
   updateNodeMetadata,
   deleteNodeByMachineId,
   hashApiKey,
-  verifyApiKey,
-  migrateFromJsonIfNeeded
+  verifyApiKey
 };

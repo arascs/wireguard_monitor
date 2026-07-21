@@ -113,10 +113,43 @@
             background: #fff;
             border-radius: 8px;
             padding: 24px;
-            width: min(420px, calc(100vw - 32px));
+            width: min(520px, calc(100vw - 32px));
             max-height: calc(100vh - 32px);
             overflow-y: auto;
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+        }
+
+        .policy-block {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #eee;
+        }
+
+        .policy-block h4 {
+            margin: 0 0 8px;
+            font-size: 0.95rem;
+            color: rgba(134, 22, 24, 1);
+        }
+
+        .policy-block label.check {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-size: 0.9rem;
+        }
+
+        .method-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+            margin-top: 6px;
+        }
+
+        .hint {
+            font-size: 0.8rem;
+            color: #666;
+            margin: 4px 0 8px;
         }
 
         .modal-box h3 {
@@ -155,6 +188,7 @@
                     <th>Type</th>
                     <th>IP</th>
                     <th>Port</th>
+                    <th>Policy</th>
                     <th>Status</th>
                     <th>Actions</th>
                 </tr>
@@ -180,8 +214,33 @@
                     <input type="text" id="app-ip" required>
                 </div>
                 <div class="form-group">
-                    <label for="app-port">Port</label>
+                    <label for="app-port">Client port (URL users open)</label>
                     <input type="number" id="app-port" required>
+                </div>
+                <div class="policy-block">
+                    <label class="check"><input type="checkbox" id="create-policy-enabled"> Enable HTTP policy proxy</label>
+                    <p class="hint">Web server listens on backend port; clients still use IP:client port above.</p>
+                    <div class="form-group">
+                        <label for="create-backend-host">Backend host</label>
+                        <input type="text" id="create-backend-host" value="127.0.0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="create-backend-port">Backend port</label>
+                        <input type="number" id="create-backend-port" placeholder="e.g. 18080">
+                    </div>
+                    <h4>Browser restrictions</h4>
+                    <label class="check"><input type="checkbox" id="create-disable-print" checked> Disable print</label>
+                    <label class="check"><input type="checkbox" id="create-disable-clipboard" checked> Disable clipboard</label>
+                    <label class="check"><input type="checkbox" id="create-disable-download" checked> Disable download</label>
+                    <h4>Allowed HTTP methods</h4>
+                    <div class="method-grid">
+                        <label class="check"><input type="checkbox" id="create-method-GET" checked> GET</label>
+                        <label class="check"><input type="checkbox" id="create-method-HEAD" checked> HEAD</label>
+                        <label class="check"><input type="checkbox" id="create-method-POST" checked> POST</label>
+                        <label class="check"><input type="checkbox" id="create-method-PUT"> PUT</label>
+                        <label class="check"><input type="checkbox" id="create-method-PATCH"> PATCH</label>
+                        <label class="check"><input type="checkbox" id="create-method-DELETE"> DELETE</label>
+                    </div>
                 </div>
                 <div class="modal-actions">
                     <button type="button" id="create-app-cancel">Cancel</button>
@@ -209,8 +268,33 @@
                     <input type="text" id="edit-app-ip" required>
                 </div>
                 <div class="form-group">
-                    <label for="edit-app-port">Port</label>
+                    <label for="edit-app-port">Client port (URL users open)</label>
                     <input type="number" id="edit-app-port" required>
+                </div>
+                <div class="policy-block">
+                    <label class="check"><input type="checkbox" id="edit-policy-enabled"> Enable HTTP policy proxy</label>
+                    <p class="hint">Web server listens on backend port; clients still use IP:client port above.</p>
+                    <div class="form-group">
+                        <label for="edit-backend-host">Backend host</label>
+                        <input type="text" id="edit-backend-host" value="127.0.0.1">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-backend-port">Backend port</label>
+                        <input type="number" id="edit-backend-port" placeholder="e.g. 18080">
+                    </div>
+                    <h4>Browser restrictions</h4>
+                    <label class="check"><input type="checkbox" id="edit-disable-print" checked> Disable print</label>
+                    <label class="check"><input type="checkbox" id="edit-disable-clipboard" checked> Disable clipboard</label>
+                    <label class="check"><input type="checkbox" id="edit-disable-download" checked> Disable download</label>
+                    <h4>Allowed HTTP methods</h4>
+                    <div class="method-grid">
+                        <label class="check"><input type="checkbox" id="edit-method-GET" checked> GET</label>
+                        <label class="check"><input type="checkbox" id="edit-method-HEAD" checked> HEAD</label>
+                        <label class="check"><input type="checkbox" id="edit-method-POST" checked> POST</label>
+                        <label class="check"><input type="checkbox" id="edit-method-PUT"> PUT</label>
+                        <label class="check"><input type="checkbox" id="edit-method-PATCH"> PATCH</label>
+                        <label class="check"><input type="checkbox" id="edit-method-DELETE"> DELETE</label>
+                    </div>
                 </div>
                 <div class="modal-actions">
                     <button type="button" id="edit-app-cancel">Cancel</button>

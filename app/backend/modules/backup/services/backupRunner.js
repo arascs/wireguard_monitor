@@ -48,13 +48,34 @@ function createBackupService({ BACKUP_DIR, CONFIG_DIR, dbConfig }) {
     }
   }
 
-  function tarCreate(archive, fromDir) {
-    exec('tar', ['-czf', archive, '-C', fromDir, '.']);
+  function shQuote(s) {
+    return `'${String(s).replace(/'/g, `'\\''`)}'`;
+  }
+
+  function withBackupPass(password, opts = {}) {
+    return { ...opts, env: { ...process.env, ...(opts.env || {}), BACKUP_PASS: password } };
+  }
+
+  function tarCreate(archive, fromDir, password) {
+    if (password) {
+      exec('bash', ['-c',
+        `tar -czf - -C ${shQuote(fromDir)} . | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:BACKUP_PASS -out ${shQuote(archive)}`
+      ], withBackupPass(password));
+    } else {
+      exec('tar', ['-czf', archive, '-C', fromDir, '.']);
+    }
     fs.chmodSync(archive, 0o600);
   }
 
-  function tarExtract(archive, intoDir) {
-    exec('tar', ['-xzf', archive, '-C', intoDir]);
+  function tarExtract(archive, intoDir, password) {
+    if (password || archive.endsWith('.enc')) {
+      if (!password) throw new Error('password required for encrypted backup');
+      exec('bash', ['-c',
+        `openssl enc -d -aes-256-cbc -pbkdf2 -pass env:BACKUP_PASS -in ${shQuote(archive)} | tar -xzf - -C ${shQuote(intoDir)}`
+      ], withBackupPass(password));
+    } else {
+      exec('tar', ['-xzf', archive, '-C', intoDir]);
+    }
   }
 
   function parseConfFile(filePath, interfaceName) {
@@ -202,8 +223,9 @@ function createBackupService({ BACKUP_DIR, CONFIG_DIR, dbConfig }) {
   async function createBackup(type, options = {}) {
     const prefix = options.prefix || 'wg_monitor_backup';
     const snapshot = options.snapshot !== false;
+    const password = options.password || process.env.BACKUP_PASSWORD || '';
     const ts = Date.now();
-    const fname = `${prefix}_${ts}.tar.gz`;
+    const fname = password ? `${prefix}_${ts}.tar.gz.enc` : `${prefix}_${ts}.tar.gz`;
     const filePath = path.join(BACKUP_DIR, fname);
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bk-'));
     try {
@@ -217,7 +239,7 @@ function createBackupService({ BACKUP_DIR, CONFIG_DIR, dbConfig }) {
       if (snapshot) {
         await writeSnapshot(tmp, type);
       }
-      tarCreate(filePath, tmp);
+      tarCreate(filePath, tmp, password || null);
       return { filename: fname, filePath };
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });

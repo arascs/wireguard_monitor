@@ -12,7 +12,7 @@ A web-based monitoring and management system for **WireGuard VPN**, designed for
 - Create, edit, and delete **WireGuard interfaces**
 - Manage peers for each interface
 - Manage client-to-site connections using user identity and device enrollment
-- Apply access rules to internal applications
+- Apply access rules and HTTP policies to internal applications
 - Automated WireGuard key rotation and distribution
 - Automate disconnecting client after a period (default 12h)
 - Decide mandatory security settings (firewall, ssh, kernel version,...) 

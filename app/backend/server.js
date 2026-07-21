@@ -31,6 +31,8 @@ const {
 const { setupSession } = require('./common/middleware');
 
 const mountSystemConfig = require('./modules/system-config');
+const mountAccessControl = require('./modules/access-control');
+const { ensureAppProxySchema, syncAppProxies } = require('./modules/access-control');
 const mountClientManagement = require('./modules/client-management');
 const registerMonitoring = require('./modules/monitoring');
 const { startCentralSync } = require('./modules/monitoring');
@@ -55,6 +57,7 @@ if (!fs.existsSync(BACKUP_DIR)) {
 
 async function startServer() {
   await initAdminAccounts({ mysql, dbConfig, bcrypt });
+  await ensureAppProxySchema(mysql, dbConfig);
 
   const validateAdminSession = createValidateAdminSession({ mysql, dbConfig });
   const requireAuth = createRequireAuth(validateAdminSession);
@@ -87,6 +90,7 @@ async function startServer() {
 
   app.use('/api', mountAdminAccounts(moduleDeps));
   app.use('/api', mountSystemConfig(moduleDeps));
+  app.use('/api', mountAccessControl(moduleDeps));
   app.use('/api', mountClientManagement(moduleDeps));
   app.use('/api', mountLogging(moduleDeps));
   app.use('/api', mountBackup(moduleDeps));
@@ -199,6 +203,10 @@ async function startServer() {
       onBoot();
     });
   }
+
+  syncAppProxies(mysql, dbConfig).catch((e) => {
+    console.error('[app-proxy] startup sync failed:', e.message);
+  });
 }
 
 startServer().catch((error) => {

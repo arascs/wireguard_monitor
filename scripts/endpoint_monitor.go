@@ -40,7 +40,7 @@ type EventDetail struct {
 }
 
 func loadSitesFromDB(db *sql.DB) ([]Peer, error) {
-	rows, err := db.Query("SELECT site_name, site_pubkey, site_endpoint FROM sites")
+	rows, err := db.Query("SELECT site_name, site_pubkey, site_endpoint, interface FROM sites")
 	if err != nil {
 		return nil, err
 	}
@@ -49,10 +49,9 @@ func loadSitesFromDB(db *sql.DB) ([]Peer, error) {
 	var peers []Peer
 	for rows.Next() {
 		var p Peer
-		if err := rows.Scan(&p.Name, &p.PublicKey, &p.Endpoint); err != nil {
+		if err := rows.Scan(&p.Name, &p.PublicKey, &p.Endpoint, &p.Interface); err != nil {
 			continue
 		}
-		p.Interface = "wgA"
 		peers = append(peers, p)
 	}
 	return peers, nil

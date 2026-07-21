@@ -9,7 +9,7 @@ const {
   formatIssues
 } = require('../services/securityChecks');
 const { getProfileById, resolveDeviceProfile } = require('../services/securityProfiles');
-const { deleteAccessRulesForDeviceId } = require('../../system-config/services/accessRuleService');
+const { deleteAccessRulesForDeviceId } = require('../../access-control/services/accessRuleService');
 
 function createDeviceRoutes({ mysql, dbConfig, run, requireAuth, authenticateToken }) {
   const router = express.Router();

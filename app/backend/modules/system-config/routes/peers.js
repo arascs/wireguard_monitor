@@ -21,7 +21,7 @@ const {
 const { listInterfaces } = require('../services/interfaceList');
 const { hydrateRotationKeysFromDb } = require('../services/rotationKeys');
 const { loadGlobalSettings } = require('../../../common/settings');
-const { deleteAccessRulesForSiteId } = require('../services/accessRuleService');
+const { deleteAccessRulesForSiteId } = require('../../access-control/services/accessRuleService');
 
 function peerForAudit(peer) {
   if (!peer || typeof peer !== 'object') return peer;

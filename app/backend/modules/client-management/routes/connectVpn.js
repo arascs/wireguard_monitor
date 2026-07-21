@@ -22,7 +22,7 @@ const {
 } = require('../../../common/wireguardConfig');
 const { touch: redisHeartbeatTouch } = require('../services/deviceHeartbeat');
 const { hydrateRotationKeysFromDb } = require('../../system-config/services/rotationKeys');
-const { deleteAccessRulesForDeviceId } = require('../../system-config/services/accessRuleService');
+const { deleteAccessRulesForDeviceId } = require('../../access-control/services/accessRuleService');
 
 const HANDSHAKE_ACTIVE_SEC = 180;
 
